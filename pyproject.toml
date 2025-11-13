@@ -29,6 +29,7 @@ dependencies = [
     "pandas>=2.1.0",
     "netcdf4>=1.6.0",
     "dask>=2023.12.0",
+    "matplotlib>=3.8.0",
 ]
 
 [project.optional-dependencies]
@@ -165,6 +166,7 @@ known-first-party = ["seapopym_message"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py
 "tests/**/*.py" = ["ARG"]  # Allow unused arguments in tests
+"examples/**/*.py" = ["ARG", "ANN"]  # Allow unused arguments and missing annotations in examples
 
 # ══════════════════════════════════════════════════════════════
 # MYPY Configuration
@@ -184,6 +186,7 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+exclude = ["examples/"]
 
 # Ignore missing imports for third-party libraries without stubs
 [[tool.mypy.overrides]]
@@ -195,8 +198,14 @@ module = [
     "zarr.*",
     "netCDF4.*",
     "cartopy.*",
+    "matplotlib.*",
 ]
 ignore_missing_imports = true
+
+# Skip type checking for examples
+[[tool.mypy.overrides]]
+module = "examples.*"
+ignore_errors = true
 
 # ══════════════════════════════════════════════════════════════
 # PYTEST Configuration
