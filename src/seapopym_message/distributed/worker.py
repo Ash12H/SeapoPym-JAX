@@ -246,11 +246,11 @@ class CellWorker2D:
         """
         halo_data = {}
 
-        # Build halo data dictionary by getting each future
+        # Build halo data dictionary by awaiting each future
         for direction in ["north", "south", "east", "west"]:
             future = halo_futures[direction]
             if future is not None:
-                halo_data[f"halo_{direction}"] = ray.get(future)
+                halo_data[f"halo_{direction}"] = await future
             else:
                 halo_data[f"halo_{direction}"] = None
 
