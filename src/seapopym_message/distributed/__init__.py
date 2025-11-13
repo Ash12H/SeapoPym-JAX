@@ -1,3 +1,7 @@
 """Distributed computing components: Workers, Scheduler, Message passing."""
 
-__all__: list[str] = []
+from seapopym_message.distributed.worker import CellWorker2D
+
+__all__ = [
+    "CellWorker2D",
+]
