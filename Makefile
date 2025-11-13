@@ -23,13 +23,13 @@ install: ## Install package with core dependencies
 install-dev: ## Install package with development dependencies
 	@echo "$(BLUE)Installing seapopym-message with dev dependencies...$(NC)"
 	uv pip install -e ".[dev]"
-	pre-commit install
+	.venv/bin/pre-commit install
 	@echo "$(GREEN)✓ Development environment ready!$(NC)"
 
 install-all: ## Install package with all optional dependencies
 	@echo "$(BLUE)Installing seapopym-message with all dependencies...$(NC)"
 	uv pip install -e ".[all]"
-	pre-commit install
+	.venv/bin/pre-commit install
 	@echo "$(GREEN)✓ Full environment ready!$(NC)"
 
 test: ## Run all tests
@@ -93,7 +93,7 @@ docs-serve: ## Serve documentation locally
 
 pre-commit: ## Run pre-commit hooks on all files
 	@echo "$(BLUE)Running pre-commit hooks...$(NC)"
-	pre-commit run --all-files
+	.venv/bin/pre-commit run --all-files
 	@echo "$(GREEN)✓ Pre-commit checks passed$(NC)"
 
 init-ray: ## Initialize Ray for distributed computing
