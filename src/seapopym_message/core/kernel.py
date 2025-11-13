@@ -59,7 +59,7 @@ class Kernel:
         return self._global_units_sorted
 
     def execute_local_phase(
-        self, state: dict[str, Any], dt: float, params: dict[str, Any]
+        self, state: dict[str, Any], dt: float, params: dict[str, Any], **kwargs: Any
     ) -> dict[str, Any]:
         """Execute all local-scope Units in topological order.
 
@@ -80,7 +80,7 @@ class Kernel:
             >>> state = kernel.execute_local_phase(state, dt=0.1, params=params)
         """
         for unit in self._local_units_sorted:
-            result = unit.execute(state, dt=dt, params=params)
+            result = unit.execute(state, dt=dt, params=params, **kwargs)
             state.update(result)
         return state
 
