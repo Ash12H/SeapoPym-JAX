@@ -29,12 +29,14 @@ class Unit:
         scope: Execution scope - 'local' for independent computation,
                'global' for operations requiring neighbor communication.
         compiled: If True, wraps func with jax.jit for compilation.
+        forcings: List of forcing variable names required by this unit.
 
     Example:
         >>> @unit(name='growth', inputs=['biomass'], outputs=['biomass'],
-        ...       scope='local', compiled=True)
-        ... def compute_growth(biomass: jnp.ndarray, dt: float, params: dict) -> jnp.ndarray:
-        ...     return biomass + params['growth_rate'] * dt
+        ...       scope='local', compiled=True, forcings=['recruitment'])
+        ... def compute_growth(biomass: jnp.ndarray, dt: float, params: dict,
+        ...                    forcings: dict) -> jnp.ndarray:
+        ...     return biomass + forcings['recruitment'] * dt
     """
 
     name: str
@@ -43,6 +45,7 @@ class Unit:
     outputs: list[str]
     scope: Literal["local", "global"] = "local"
     compiled: bool = False
+    forcings: list[str] = field(default_factory=list)
     _compiled_func: Callable | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -78,13 +81,14 @@ class Unit:
 
         Args:
             state: Current simulation state (dict of arrays).
-            **kwargs: Additional arguments (dt, params, halo data, etc.).
+            **kwargs: Additional arguments (dt, params, halo data, forcings, etc.).
 
         Returns:
             Dictionary with output variable names and their computed values.
 
         Raises:
             ValueError: If required inputs are missing from state.
+            ValueError: If required forcings are missing.
         """
         # Check inputs availability
         available = set(state.keys())
@@ -96,6 +100,29 @@ class Unit:
 
         # Extract inputs from state
         inputs_dict = {key: state[key] for key in self.inputs}
+
+        # Handle forcings if requested
+        if self.forcings:
+            # Check if forcings dict is provided in kwargs
+            if "forcings" not in kwargs:
+                raise ValueError(
+                    f"Unit '{self.name}' requires forcings {self.forcings} "
+                    "but no 'forcings' dict was provided"
+                )
+
+            all_forcings = kwargs["forcings"]
+            missing_forcings = set(self.forcings) - set(all_forcings.keys())
+            if missing_forcings:
+                raise ValueError(
+                    f"Unit '{self.name}' missing required forcings: {missing_forcings}. "
+                    f"Available: {set(all_forcings.keys())}"
+                )
+
+            # Filter only the forcings this unit needs
+            filtered_forcings = {key: all_forcings[key] for key in self.forcings}
+
+            # Replace full forcings dict with filtered version
+            kwargs = {**kwargs, "forcings": filtered_forcings}
 
         # Merge with additional kwargs
         all_args = {**inputs_dict, **kwargs}
@@ -145,6 +172,7 @@ def unit(
     outputs: list[str],
     scope: Literal["local", "global"] = "local",
     compiled: bool = False,
+    forcings: list[str] | None = None,
 ) -> Callable[[Callable], Unit]:
     """Decorator to create a Unit from a function.
 
@@ -154,6 +182,7 @@ def unit(
         outputs: List of output variable names.
         scope: 'local' or 'global'.
         compiled: Whether to JIT compile with JAX.
+        forcings: List of forcing variable names required by this unit.
 
     Returns:
         Decorator that wraps a function into a Unit.
@@ -163,11 +192,25 @@ def unit(
         ...       scope='local', compiled=True)
         ... def compute_mortality(biomass: jnp.ndarray, params: dict) -> jnp.ndarray:
         ...     return params['lambda'] * biomass
+        >>>
+        >>> @unit(name='growth', inputs=['biomass'], outputs=['biomass'],
+        ...       scope='local', compiled=True, forcings=['recruitment'])
+        ... def compute_growth(biomass: jnp.ndarray, dt: float, params: dict,
+        ...                    forcings: dict) -> jnp.ndarray:
+        ...     return biomass + forcings['recruitment'] * dt
     """
+    if forcings is None:
+        forcings = []
 
     def decorator(func: Callable) -> Unit:
         return Unit(
-            name=name, func=func, inputs=inputs, outputs=outputs, scope=scope, compiled=compiled
+            name=name,
+            func=func,
+            inputs=inputs,
+            outputs=outputs,
+            scope=scope,
+            compiled=compiled,
+            forcings=forcings,
         )
 
     return decorator

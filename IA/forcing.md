@@ -749,3 +749,63 @@ Phase "Forcing System" (~8h)
 
     - Test avec temperature + derived recruitment
     - Exemple montrant extensibilité
+
+---
+
+# Suite : Questions
+
+Questions de clarification
+
+Q1 : Dépendances externes
+
+-   Faut-il ajouter xarray et zarr dans les dépendances du projet ? Ou sont-ils déjà installés ?
+-   Version préférée de xarray (>= 2023.x pour meilleures perfs) ?
+
+Oui on peut commencer avec xarray et zarr pour les forçages. Corriges moi si je me trompe mais l'idée est d'utiliser numpy/jax ? Donc nativement pris en charge par xarray.
+
+Q2 : Format config
+
+-   Pour commencer : dict Python uniquement, ou supporter YAML dès le début ?
+-   Je suggère dict Python pour Phase 1, YAML optionnel après. OK ?
+
+Est-ce qu'utiliser une bibliothèque comme dataclass/attrs/pydantic etc... te parrait intéressant pour pouvoir vérifier l'intégrité des paramètres ? Si c'est trop complexe pour commencer on peut faire plus simple.
+
+Q3 : Validation des forçages
+
+-   Doit-on valider que les dimensions des forçages matchent la grille (lat/lon) ?
+-   Ou on fait confiance à l'utilisateur pour Phase 1 ?
+
+La validation se fera en amont de la simulation. Je souhaite conserver uniquement ce qui est important dans le modèle. Pour tous ce qui est vérification j'imagine avoir un autre module en amont qui permet ensuite de générer ma simulation.
+
+Q4 : Interpolation temporelle
+
+-   Linéaire suffit pour commencer ?
+-   Ou besoin de "nearest", "cubic" dès Phase 1 ?
+
+Linéaire suffit mais de toute manière il me semble que xarray gère ça nativement. Qu'en penses tu, on se base sur cette dépendance ? Est-ce que ça change les plans ?
+
+Q5 : Gestion erreurs
+
+-   Si un forçage n'a pas de données pour un timestep (t en dehors de la plage) :
+    -   Erreur stricte ?
+    -   Extrapolation (dernier/premier timestep disponible) ?
+    -   Warning + valeur par défaut ?
+
+On fait uniquement de l'interpolation. Pour l'extrapolation c'est une erreur et c'est à l'utilisateur de gérer lui même. L'interpolation nous permet de réduire le pas de temps si besoin ce qui est essentiel pour nos calculs de transport.
+
+Q6 : Structure fichiers
+
+-   Je crée src/seapopym_message/forcing/ avec :
+    -   manager.py (ForcingManager)
+    -   derived.py (décorateur @derived_forcing)
+    -   **init**.py
+-   OK pour vous ?
+
+Oui
+
+Q7 : Pour les tests
+
+-   Voulez-vous que je crée de faux fichiers Zarr en mémoire (pour tests unitaires) ?
+-   Ou utiliser des fixtures avec des arrays NumPy directement ?
+
+On peut commencer directement avec les dataset/dataarray de xarray comme ça on laisse la dépendance aux fichier à cette dépendance.

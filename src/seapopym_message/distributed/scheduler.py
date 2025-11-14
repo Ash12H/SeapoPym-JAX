@@ -23,6 +23,8 @@ class EventScheduler:
         workers: List of CellWorker2D Ray actor references.
         dt: Timestep size (constant for now).
         t_max: Maximum simulation time.
+        forcing_manager: Optional ForcingManager for environmental forcings.
+        forcing_params: Optional parameters for derived forcings.
 
     Example:
         >>> import ray
@@ -39,12 +41,16 @@ class EventScheduler:
         workers: list[ray.actor.ActorHandle],
         dt: float,
         t_max: float,
+        forcing_manager: Any = None,
+        forcing_params: dict[str, Any] | None = None,
     ) -> None:
         """Initialize scheduler with workers and time parameters."""
         self.workers = workers
         self.dt = dt
         self.t_max = t_max
         self.t_current = 0.0
+        self.forcing_manager = forcing_manager
+        self.forcing_params = forcing_params if forcing_params is not None else {}
 
         # Priority queue: stores (time, event_type, data)
         self.event_queue: list[tuple[float, str, dict[str, Any]]] = []
@@ -76,9 +82,10 @@ class EventScheduler:
         """Execute one synchronized timestep across all workers.
 
         Workflow:
-        1. Launch step() on all workers in parallel (non-blocking)
-        2. Wait for all workers to complete
-        3. Collect and aggregate diagnostics
+        1. Prepare forcings for current timestep (if forcing_manager provided)
+        2. Launch step() on all workers in parallel (non-blocking)
+        3. Wait for all workers to complete
+        4. Collect and aggregate diagnostics
 
         Returns:
             Dictionary with aggregated diagnostics:
@@ -87,8 +94,15 @@ class EventScheduler:
             - 'diagnostics': List of per-worker diagnostics
             - Aggregated statistics (mean, min, max) for state variables
         """
+        # Prepare forcings for this timestep
+        forcings_ref = None
+        if self.forcing_manager is not None:
+            forcings_ref = self.forcing_manager.prepare_timestep_distributed(
+                time=self.t_current, params=self.forcing_params
+            )
+
         # Launch all workers in parallel
-        futures = [worker.step.remote(self.dt) for worker in self.workers]
+        futures = [worker.step.remote(self.dt, forcings_ref) for worker in self.workers]
 
         # Wait for all to complete
         worker_diagnostics = ray.get(futures)

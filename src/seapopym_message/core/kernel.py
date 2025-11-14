@@ -70,6 +70,7 @@ class Kernel:
             state: Current simulation state (dict of arrays).
             dt: Time step size.
             params: Model parameters.
+            **kwargs: Additional arguments (forcings, etc.).
 
         Returns:
             Updated state after executing all local Units.
@@ -77,7 +78,9 @@ class Kernel:
         Example:
             >>> state = {'biomass': jnp.array([10., 20., 30.])}
             >>> params = {'R': 5.0, 'lambda': 0.1}
-            >>> state = kernel.execute_local_phase(state, dt=0.1, params=params)
+            >>> forcings = {'recruitment': jnp.array([...])}
+            >>> state = kernel.execute_local_phase(state, dt=0.1, params=params,
+            ...                                     forcings=forcings)
         """
         for unit in self._local_units_sorted:
             result = unit.execute(state, dt=dt, params=params, **kwargs)
@@ -90,6 +93,7 @@ class Kernel:
         dt: float,
         params: dict[str, Any],
         neighbor_data: dict[str, Any] | None = None,
+        forcings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute all global-scope Units in topological order.
 
@@ -102,6 +106,7 @@ class Kernel:
             params: Model parameters.
             neighbor_data: Optional dictionary with halo data from neighbors.
                           Keys: 'halo_north', 'halo_south', 'halo_east', 'halo_west'
+            forcings: Optional dictionary with forcing data.
 
         Returns:
             Updated state after executing all global Units.
@@ -113,12 +118,16 @@ class Kernel:
             ...     'halo_east': {'biomass': jnp.array([...])},
             ...     'halo_west': {'biomass': jnp.array([...])}
             ... }
+            >>> forcings = {'recruitment': jnp.array([...])}
             >>> state = kernel.execute_global_phase(state, dt=0.1, params=params,
-            ...                                     neighbor_data=neighbor_data)
+            ...                                     neighbor_data=neighbor_data,
+            ...                                     forcings=forcings)
         """
         kwargs = {"dt": dt, "params": params}
         if neighbor_data:
             kwargs.update(neighbor_data)
+        if forcings:
+            kwargs["forcings"] = forcings
 
         for unit in self._global_units_sorted:
             result = unit.execute(state, **kwargs)

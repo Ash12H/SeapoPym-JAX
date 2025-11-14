@@ -4,13 +4,13 @@
 
 ### Changements Principaux par Rapport à 1D
 
-| Aspect | 1D | 2D |
-|--------|----|----|
-| **État** | `biomass: (N,)` | `biomass: (nlat, nlon)` |
-| **Voisins** | 2 (left, right) | 4 ou 8 (N, S, E, W + diagonales) |
-| **Halo** | 2 valeurs scalaires | 4 arrays 1D (ou 8 si diagonales) |
-| **Transport** | `∂²/∂x²` | `∂²/∂x² + ∂²/∂y²` |
-| **Découpage** | Linéaire | Rectangulaire (patches) |
+| Aspect        | 1D                  | 2D                               |
+| ------------- | ------------------- | -------------------------------- |
+| **État**      | `biomass: (N,)`     | `biomass: (nlat, nlon)`          |
+| **Voisins**   | 2 (left, right)     | 4 ou 8 (N, S, E, W + diagonales) |
+| **Halo**      | 2 valeurs scalaires | 4 arrays 1D (ou 8 si diagonales) |
+| **Transport** | `∂²/∂x²`            | `∂²/∂x² + ∂²/∂y²`                |
+| **Découpage** | Linéaire            | Rectangulaire (patches)          |
 
 ---
 
@@ -853,16 +853,16 @@ def split_domain_2d_periodic_lon(nlat: int, nlon: int,
 
 ### Changements par Rapport à 1D
 
-| Composant | Adaptation pour 2D |
-|-----------|-------------------|
-| **État** | `(N,)` → `(nlat, nlon)` |
-| **GridInfo** | Ajout lat/lon, dlat/dlon, métriques sphériques |
-| **Découpage** | `split_domain()` → `split_domain_2d()` |
-| **Voisins** | 2 (L/R) → 4 (N/S/E/W) |
-| **Halo** | 2 scalaires → 4 arrays 1D |
-| **Transport** | Laplacien 1D → Laplacien 2D |
-| **JAX-CFD** | `Grid(shape=(N,))` → `Grid(shape=(nlat, nlon))` |
-| **Visualisation** | Plot 1D → Cartopy maps |
+| Composant         | Adaptation pour 2D                              |
+| ----------------- | ----------------------------------------------- |
+| **État**          | `(N,)` → `(nlat, nlon)`                         |
+| **GridInfo**      | Ajout lat/lon, dlat/dlon, métriques sphériques  |
+| **Découpage**     | `split_domain()` → `split_domain_2d()`          |
+| **Voisins**       | 2 (L/R) → 4 (N/S/E/W)                           |
+| **Halo**          | 2 scalaires → 4 arrays 1D                       |
+| **Transport**     | Laplacien 1D → Laplacien 2D                     |
+| **JAX-CFD**       | `Grid(shape=(N,))` → `Grid(shape=(nlat, nlon))` |
+| **Visualisation** | Plot 1D → Cartopy maps                          |
 
 ### Architecture Globale Inchangée
 

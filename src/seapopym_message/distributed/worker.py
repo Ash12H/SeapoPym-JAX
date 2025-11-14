@@ -160,27 +160,40 @@ class CellWorker2D:
         """
         return {key: val[:, 0] for key, val in self.state.items()}
 
-    async def step(self, dt: float) -> dict[str, Any]:
+    async def step(
+        self, dt: float, forcings_global: dict[str, jnp.ndarray] | None = None
+    ) -> dict[str, Any]:
         """Execute one timestep.
 
         Workflow:
-        1. Execute local phase (embarrassingly parallel)
-        2. If kernel has global units:
+        1. Extract forcings for local patch (if provided)
+        2. Execute local phase (embarrassingly parallel)
+        3. If kernel has global units:
            a. Request halo data from neighbors
            b. Wait for all halos to arrive
            c. Execute global phase with halo data
-        3. Update time
-        4. Return diagnostics
+        4. Update time
+        5. Return diagnostics
 
         Args:
             dt: Time step size.
+            forcings_global: Optional global forcings dict (Ray auto-dereferences ObjectRef).
 
         Returns:
             Dictionary with diagnostics (time, mean values, etc.).
         """
+        # Extract forcings for local patch
+        forcings_local = None
+        if forcings_global is not None:
+            forcings_local = self._extract_local_forcings(forcings_global)
+
         # Phase 1: Local computation
         self.state = self.kernel.execute_local_phase(
-            self.state, dt=dt, params=self.params, grid_shape=(self.nlat, self.nlon)
+            self.state,
+            dt=dt,
+            params=self.params,
+            grid_shape=(self.nlat, self.nlon),
+            forcings=forcings_local,
         )
 
         # Phase 2: Global computation (if needed)
@@ -193,7 +206,11 @@ class CellWorker2D:
 
             # Execute global phase
             self.state = self.kernel.execute_global_phase(
-                self.state, dt=dt, params=self.params, neighbor_data=halo_data
+                self.state,
+                dt=dt,
+                params=self.params,
+                neighbor_data=halo_data,
+                forcings=forcings_local,
             )
 
         # Update time
@@ -201,6 +218,48 @@ class CellWorker2D:
 
         # Return diagnostics
         return self._compute_diagnostics()
+
+    def _extract_local_forcings(
+        self, forcings_global: dict[str, jnp.ndarray]
+    ) -> dict[str, jnp.ndarray]:
+        """Extract local patch from global forcing fields.
+
+        Args:
+            forcings_global: Dictionary of global forcing arrays.
+
+        Returns:
+            Dictionary with forcing arrays sliced to local patch.
+
+        Note:
+            Assumes forcing dimensions include lat and lon as the last two dimensions.
+            Handles 2D (lat, lon), 3D (depth, lat, lon), etc.
+        """
+        forcings_local = {}
+
+        for name, field in forcings_global.items():
+            # Determine number of dimensions
+            ndim = field.ndim
+
+            if ndim == 2:
+                # (lat, lon)
+                forcings_local[name] = field[
+                    self.lat_start : self.lat_end, self.lon_start : self.lon_end
+                ]
+            elif ndim == 3:
+                # (depth, lat, lon) or similar
+                forcings_local[name] = field[
+                    :, self.lat_start : self.lat_end, self.lon_start : self.lon_end
+                ]
+            elif ndim == 4:
+                # (time, depth, lat, lon) - unlikely at this stage but handle
+                forcings_local[name] = field[
+                    :, :, self.lat_start : self.lat_end, self.lon_start : self.lon_end
+                ]
+            else:
+                # Unknown dimensionality - pass through unchanged
+                forcings_local[name] = field
+
+        return forcings_local
 
     def _request_halos(self) -> dict[str, ray.ObjectRef | None]:
         """Request boundary data from neighbors.
