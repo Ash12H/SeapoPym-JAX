@@ -55,7 +55,7 @@ def main():
     """Run diffusion simulation."""
     # Initialize Ray
     if not ray.is_initialized():
-        ray.init(num_cpus=4)
+        ray.init(num_cpus=4, runtime_env=None)
 
     print("=== Diffusion Simulation with Halo Exchange ===\n")
 

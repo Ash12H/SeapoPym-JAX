@@ -26,7 +26,7 @@ def main():
     """Run simulation with visualization."""
     # Initialize Ray
     if not ray.is_initialized():
-        ray.init(num_cpus=4)
+        ray.init(num_cpus=4, runtime_env=None)
 
     print("=== Simulation with Visualization ===\n")
 

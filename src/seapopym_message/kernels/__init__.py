@@ -6,7 +6,13 @@ from seapopym_message.kernels.biology import (
     compute_recruitment,
     compute_recruitment_2d,
 )
-from seapopym_message.kernels.transport import compute_diffusion_2d, compute_diffusion_simple
+from seapopym_message.kernels.transport import (
+    check_cfl_condition,
+    compute_advection_2d,
+    compute_advection_simple,
+    compute_diffusion_2d,
+    compute_diffusion_simple,
+)
 
 __all__ = [
     # Biology
@@ -17,4 +23,7 @@ __all__ = [
     # Transport
     "compute_diffusion_2d",
     "compute_diffusion_simple",
+    "compute_advection_2d",
+    "compute_advection_simple",
+    "check_cfl_condition",
 ]

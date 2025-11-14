@@ -23,7 +23,7 @@ def main():
     """Run diffusion simulation and visualize spreading blob."""
     # Initialize Ray
     if not ray.is_initialized():
-        ray.init(num_cpus=4)
+        ray.init(num_cpus=4, runtime_env=None)
 
     print("=== Diffusion Blob Simulation ===\n")
 
