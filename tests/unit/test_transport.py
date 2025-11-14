@@ -624,3 +624,138 @@ class TestAdvectionIntegration:
         # Downstream and perpendicular positions should increase
         assert state["biomass"][3, 3] > 0.0  # Advection
         assert state["biomass"][2, 2] > 0.0  # Diffusion
+
+
+@pytest.mark.unit
+class TestFluxBlocking:
+    """Test flux blocking at land/ocean interfaces."""
+
+    def test_advection_no_flux_through_island(self) -> None:
+        """Verify that no flux crosses an island even with non-zero velocity."""
+        # Configuration: vertical island in center, blob to the left, eastward flow
+        # Use larger domain to minimize boundary effects
+        biomass = jnp.zeros((5, 9))
+        biomass = biomass.at[2, 2].set(100.0)  # Blob well away from edges
+
+        # Island in center (column j=5)
+        mask = jnp.ones((5, 9), dtype=bool)
+        mask = mask.at[:, 5].set(False)
+
+        # Uniform eastward flow (toward island)
+        u = jnp.ones((5, 9)) * 0.5
+        v = jnp.zeros((5, 9))
+
+        params = {"dx": 1000.0, "dy": 1000.0, "mask": mask}
+        forcings = {"u": u, "v": v}
+        dt = 100.0  # CFL = 0.5 * 100 / 1000 = 0.05
+
+        state = {"biomass": biomass}
+
+        # Execute multiple steps - blob should move toward island but not cross
+        for _ in range(20):
+            state = compute_advection_simple.execute(state, dt=dt, params=params, forcings=forcings)
+
+        # Critical test: NO biomass should cross to the right of the island
+        assert jnp.all(state["biomass"][:, 6:] == 0.0)
+        # Island itself remains at 0
+        assert jnp.all(state["biomass"][:, 5] == 0.0)
+        # Some biomass should remain on left side of island
+        assert jnp.sum(state["biomass"][:, :5]) > 10.0
+
+    def test_diffusion_no_flux_through_island(self) -> None:
+        """Verify that diffusion does not cross an island."""
+        # Blob on left, island in center
+        biomass = jnp.array(
+            [[0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 100.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0]]
+        )
+
+        # Island at center
+        mask = jnp.ones((3, 5), dtype=bool)
+        mask = mask.at[:, 2].set(False)
+
+        params = {"D": 1000.0, "dx": 1000.0, "dy": 1000.0, "mask": mask}
+        dt = 10.0
+
+        state = {"biomass": biomass}
+
+        # Diffuse
+        for _ in range(100):
+            state = compute_diffusion_simple.execute(state, dt=dt, params=params)
+
+        # No biomass to the right of island
+        assert jnp.all(state["biomass"][:, 3:] < 1e-10)
+        # Biomass diffused to the left
+        assert state["biomass"][1, 0] > 10.0
+        # Island remains at 0
+        assert state["biomass"][1, 2] == 0.0
+
+    def test_complex_island_pattern(self) -> None:
+        """Test with complex archipelago pattern."""
+        # 7x7 grid with multiple islands
+        biomass = jnp.zeros((7, 7))
+        biomass = biomass.at[3, 1].set(100.0)  # Blob in a "channel"
+
+        # Create archipelago: islands in a pattern
+        mask = jnp.ones((7, 7), dtype=bool)
+        mask = mask.at[2, 3].set(False)
+        mask = mask.at[3, 3].set(False)
+        mask = mask.at[4, 3].set(False)  # Vertical island in center
+        mask = mask.at[1, 1].set(False)
+        mask = mask.at[5, 5].set(False)
+
+        # Eastward flow
+        u = jnp.ones((7, 7)) * 0.5
+        v = jnp.zeros((7, 7))
+
+        params = {"dx": 1000.0, "dy": 1000.0, "D": 100.0, "mask": mask}
+        forcings = {"u": u, "v": v}
+        dt = 100.0
+
+        # Combined kernel
+        kernel = Kernel([compute_advection_simple, compute_diffusion_simple])
+        state = {"biomass": biomass}
+
+        for _ in range(50):
+            state = kernel.execute_local_phase(state, dt=dt, params=params, forcings=forcings)
+
+        # All islands remain at 0
+        assert state["biomass"][2, 3] == 0.0
+        assert state["biomass"][3, 3] == 0.0
+        assert state["biomass"][4, 3] == 0.0
+        assert state["biomass"][1, 1] == 0.0
+        assert state["biomass"][5, 5] == 0.0
+
+        # Biomass has circulated around islands
+        assert jnp.sum(state["biomass"]) > 50.0  # Not too much loss
+
+    def test_mass_conservation_with_islands(self) -> None:
+        """Verify mass conservation in presence of islands."""
+        biomass = jnp.ones((10, 10)) * 50.0
+
+        # Some islands
+        mask = jnp.ones((10, 10), dtype=bool)
+        mask = mask.at[3:6, 3:6].set(False)  # Square island in center
+
+        # Force biomass=0 on islands initially
+        biomass = jnp.where(mask, biomass, 0.0)
+
+        u = jnp.ones((10, 10)) * 0.3
+        v = jnp.ones((10, 10)) * 0.2
+
+        params = {"dx": 1000.0, "dy": 1000.0, "D": 50.0, "mask": mask}
+        forcings = {"u": u, "v": v}
+        dt = 50.0
+
+        initial_mass = jnp.sum(biomass[mask])  # Mass only on ocean
+
+        kernel = Kernel([compute_advection_simple, compute_diffusion_simple])
+        state = {"biomass": biomass}
+
+        for _ in range(100):
+            state = kernel.execute_local_phase(state, dt=dt, params=params, forcings=forcings)
+
+        final_mass = jnp.sum(state["biomass"][mask])
+
+        # Strict conservation (< 1% error)
+        mass_error = abs(final_mass - initial_mass) / initial_mass
+        assert mass_error < 0.01

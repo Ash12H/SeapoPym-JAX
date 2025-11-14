@@ -41,6 +41,7 @@ def compute_diffusion_2d(
     Boundary conditions:
     - With halo data: uses neighbor values
     - Without halo data: Neumann (zero flux) boundary conditions
+    - Land/ocean interfaces: Neumann BC (gradient = 0) prevents diffusion through islands
 
     Args:
         biomass: Current biomass distribution (nlat, nlon).
@@ -49,10 +50,11 @@ def compute_diffusion_2d(
             - 'D': Diffusion coefficient [m²/s]
             - 'dx': Grid spacing in x-direction [m]
             - 'dy': Grid spacing in y-direction [m] (optional, defaults to dx)
-        halo_north: Boundary data from northern neighbor {'biomass': array}
-        halo_south: Boundary data from southern neighbor {'biomass': array}
-        halo_east: Boundary data from eastern neighbor {'biomass': array}
-        halo_west: Boundary data from western neighbor {'biomass': array}
+            - 'mask': Optional boolean array (nlat, nlon) where True = ocean, False = land
+        halo_north: Boundary data from northern neighbor {'biomass': array, 'mask': array}
+        halo_south: Boundary data from southern neighbor {'biomass': array, 'mask': array}
+        halo_east: Boundary data from eastern neighbor {'biomass': array, 'mask': array}
+        halo_west: Boundary data from western neighbor {'biomass': array, 'mask': array}
 
     Returns:
         Updated biomass after diffusion.
@@ -75,6 +77,36 @@ def compute_diffusion_2d(
     # Shape will be (nlat+2, nlon+2) to include ghost cells
     extended = jnp.zeros((nlat + 2, nlon + 2))
     extended = extended.at[1:-1, 1:-1].set(biomass)
+
+    # Build extended mask array (for Neumann BC at land/ocean interfaces)
+    if "mask" in params:
+        mask = params["mask"]
+        mask_ext = jnp.zeros((nlat + 2, nlon + 2), dtype=bool)
+        mask_ext = mask_ext.at[1:-1, 1:-1].set(mask)
+
+        # Fill mask halos (default to False/land at domain boundaries)
+        if halo_north is not None and "mask" in halo_north:
+            mask_ext = mask_ext.at[0, 1:-1].set(halo_north["mask"])
+        else:
+            mask_ext = mask_ext.at[0, 1:-1].set(mask[0, :])
+
+        if halo_south is not None and "mask" in halo_south:
+            mask_ext = mask_ext.at[-1, 1:-1].set(halo_south["mask"])
+        else:
+            mask_ext = mask_ext.at[-1, 1:-1].set(mask[-1, :])
+
+        if halo_west is not None and "mask" in halo_west:
+            mask_ext = mask_ext.at[1:-1, 0].set(halo_west["mask"])
+        else:
+            mask_ext = mask_ext.at[1:-1, 0].set(mask[:, 0])
+
+        if halo_east is not None and "mask" in halo_east:
+            mask_ext = mask_ext.at[1:-1, -1].set(halo_east["mask"])
+        else:
+            mask_ext = mask_ext.at[1:-1, -1].set(mask[:, -1])
+    else:
+        # No mask: all cells are ocean
+        mask_ext = jnp.ones((nlat + 2, nlon + 2), dtype=bool)
 
     # Fill halos (boundary conditions)
     # North boundary (top row, i=0)
@@ -116,12 +148,30 @@ def compute_diffusion_2d(
     west = extended[1:-1, :-2]
     east = extended[1:-1, 2:]
 
+    # Apply Neumann BC at land/ocean interfaces: if neighbor is land, use center value (gradient = 0)
+    mask_center = mask_ext[1:-1, 1:-1]
+    mask_north_cells = mask_ext[:-2, 1:-1]
+    mask_south_cells = mask_ext[2:, 1:-1]
+    mask_west_cells = mask_ext[1:-1, :-2]
+    mask_east_cells = mask_ext[1:-1, 2:]
+
+    north_effective = jnp.where(mask_north_cells, north, center)
+    south_effective = jnp.where(mask_south_cells, south, center)
+    west_effective = jnp.where(mask_west_cells, west, center)
+    east_effective = jnp.where(mask_east_cells, east, center)
+
     laplacian = (
-        (north + south) / dy**2 + (west + east) / dx**2 - center * 2 * (1 / dx**2 + 1 / dy**2)
+        (north_effective + south_effective) / dy**2
+        + (west_effective + east_effective) / dx**2
+        - center * 2 * (1 / dx**2 + 1 / dy**2)
     )
 
     # Forward Euler integration: B_new = B + D * ∇²B * dt
     biomass_new = biomass + D * laplacian * dt
+
+    # Force land cells to zero
+    if "mask" in params:
+        biomass_new = jnp.where(mask_center, biomass_new, 0.0)
 
     # Ensure non-negative (biomass can't be negative)
     biomass_new = jnp.maximum(biomass_new, 0.0)
@@ -194,11 +244,14 @@ def compute_advection_2d(
     The scheme is stable for CFL ≤ 1, where:
         CFL = max(|u|, |v|) * dt / min(dx, dy)
 
-    Islands/land cells can be masked using the 'mask' parameter.
+    Islands/land cells can be masked using the 'mask' parameter. Flux blocking
+    ensures that NO biomass flux can cross land/ocean interfaces, providing
+    physically correct boundary treatment.
 
     Boundary conditions:
     - With halo data: uses neighbor values
     - Without halo data: Neumann (zero flux) boundary conditions
+    - Land/ocean interfaces: Flux is blocked if either cell is land
 
     Args:
         biomass: Current biomass distribution (nlat, nlon).
@@ -251,6 +304,36 @@ def compute_advection_2d(
     u_ext = u_ext.at[1:-1, 1:-1].set(u)
     v_ext = v_ext.at[1:-1, 1:-1].set(v)
 
+    # Build extended mask array (for flux blocking at land/ocean interfaces)
+    if "mask" in params:
+        mask = params["mask"]
+        mask_ext = jnp.zeros((nlat + 2, nlon + 2), dtype=bool)
+        mask_ext = mask_ext.at[1:-1, 1:-1].set(mask)
+
+        # Fill mask halos (default to False/land at domain boundaries)
+        if halo_north is not None and "mask" in halo_north:
+            mask_ext = mask_ext.at[0, 1:-1].set(halo_north["mask"])
+        else:
+            mask_ext = mask_ext.at[0, 1:-1].set(mask[0, :])
+
+        if halo_south is not None and "mask" in halo_south:
+            mask_ext = mask_ext.at[-1, 1:-1].set(halo_south["mask"])
+        else:
+            mask_ext = mask_ext.at[-1, 1:-1].set(mask[-1, :])
+
+        if halo_west is not None and "mask" in halo_west:
+            mask_ext = mask_ext.at[1:-1, 0].set(halo_west["mask"])
+        else:
+            mask_ext = mask_ext.at[1:-1, 0].set(mask[:, 0])
+
+        if halo_east is not None and "mask" in halo_east:
+            mask_ext = mask_ext.at[1:-1, -1].set(halo_east["mask"])
+        else:
+            mask_ext = mask_ext.at[1:-1, -1].set(mask[:, -1])
+    else:
+        # No mask: all cells are ocean
+        mask_ext = jnp.ones((nlat + 2, nlon + 2), dtype=bool)
+
     # Fill halos for biomass
     if halo_north is not None and "biomass" in halo_north:
         biomass_ext = biomass_ext.at[0, 1:-1].set(halo_north["biomass"])
@@ -294,10 +377,17 @@ def compute_advection_2d(
     B_west = biomass_ext[1:-1, :-2]
     B_east = biomass_ext[1:-1, 2:]
 
+    # Extract mask values for flux blocking
+    mask_c = mask_ext[1:-1, 1:-1]
+    mask_north = mask_ext[:-2, 1:-1]
+    mask_south = mask_ext[2:, 1:-1]
+    mask_west = mask_ext[1:-1, :-2]
+    mask_east = mask_ext[1:-1, 2:]
+
     # Upwind scheme for x-direction (longitude)
     # u > 0: flow from west to east, use backward difference
     # u < 0: flow from east to west, use forward difference
-    dB_dx_upwind = jnp.where(
+    dB_dx_upwind_raw = jnp.where(
         u_c >= 0,
         (B_c - B_west) / dx,
         (B_east - B_c) / dx,
@@ -306,11 +396,29 @@ def compute_advection_2d(
     # Upwind scheme for y-direction (latitude)
     # v > 0: flow from north to south, use backward difference
     # v < 0: flow from south to north, use forward difference
-    dB_dy_upwind = jnp.where(
+    dB_dy_upwind_raw = jnp.where(
         v_c >= 0,
         (B_c - B_north) / dy,
         (B_south - B_c) / dy,
     )
+
+    # Flux blocking at land/ocean interfaces
+    # Flux is blocked if either the current cell OR the neighbor is land
+    mask_flux_x = jnp.where(
+        u_c >= 0,
+        mask_c & mask_west,  # Flux from west: both cells must be ocean
+        mask_c & mask_east,  # Flux from east: both cells must be ocean
+    )
+
+    mask_flux_y = jnp.where(
+        v_c >= 0,
+        mask_c & mask_north,  # Flux from north: both cells must be ocean
+        mask_c & mask_south,  # Flux from south: both cells must be ocean
+    )
+
+    # Apply flux blocking masks
+    dB_dx_upwind = jnp.where(mask_flux_x, dB_dx_upwind_raw, 0.0)
+    dB_dy_upwind = jnp.where(mask_flux_y, dB_dy_upwind_raw, 0.0)
 
     # Advection equation: ∂B/∂t = -u*∂B/∂x - v*∂B/∂y
     dB_dt = -u_c * dB_dx_upwind - v_c * dB_dy_upwind
