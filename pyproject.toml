@@ -30,6 +30,7 @@ dependencies = [
     "netcdf4>=1.6.0",
     "dask>=2023.12.0",
     "matplotlib>=3.8.0",
+    "jax-cfd>=0.2.0",
 ]
 
 [project.optional-dependencies]
@@ -54,10 +55,6 @@ gpu = [
     "jax[cuda12]>=0.4.20",
 ]
 
-jax-cfd = [
-    "jax-cfd>=0.2.0",
-]
-
 viz = [
     "matplotlib>=3.8.0",
     "cartopy>=0.22.0",
@@ -65,7 +62,7 @@ viz = [
 ]
 
 all = [
-    "seapopym-message[dev,docs,gpu,jax-cfd,viz]",
+    "seapopym-message[dev,docs,gpu,viz]",
 ]
 
 [project.urls]
