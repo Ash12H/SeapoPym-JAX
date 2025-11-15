@@ -17,10 +17,11 @@ Workflow per timestep:
     3. Transport phase: TransportWorker applies advection + diffusion globally
     4. Redistribute updated biomass to CellWorkers
 
-Current implementation:
-    - PASSTHROUGH mode: Returns biomass unchanged
-    - This validates the infrastructure before implementing actual transport
-    - Transport will be implemented using JAX-Fluids
+Implementation:
+    - Uses flux-based upwind advection (volumes finis)
+    - Uses explicit Euler diffusion on spherical grid
+    - Supports land masking and configurable boundary conditions
+    - References: IA/TRANSPORT_ANALYSIS.md, IA/TRANSPORT_IMPLEMENTATION_PLAN.md
 """
 
 from typing import Any
@@ -28,99 +29,214 @@ from typing import Any
 import jax.numpy as jnp
 import ray
 
+from seapopym_message.transport.advection import (
+    advection_upwind_flux,
+    compute_advection_diagnostics,
+)
+from seapopym_message.transport.boundary import BoundaryConditions, BoundaryType
+from seapopym_message.transport.diffusion import (
+    check_diffusion_stability,
+    diffusion_explicit_spherical,
+)
+from seapopym_message.transport.grid import Grid, PlaneGrid, SphericalGrid
+
 
 @ray.remote
 class TransportWorker:
     """Ray actor for centralized transport computation.
 
-    CURRENT STATUS: PASSTHROUGH MODE
+    This worker implements physics-based advection-diffusion transport using:
+    - Flux-based upwind scheme for advection (volumes finis)
+    - Explicit Euler scheme for diffusion on spherical grid
 
-    This worker is currently in passthrough mode, returning biomass unchanged.
-    This validates the Ray communication infrastructure before implementing
-    the actual transport physics.
-
-    Next step: Implement advection-diffusion using JAX-Fluids.
+    The grid is configured once at initialization and reused for all timesteps.
 
     Args:
-        None (simplified for passthrough mode)
+        grid_type: Type of grid ("spherical" or "plane")
+        lat_min, lat_max: Latitude bounds [degrees] (spherical only)
+        lon_min, lon_max: Longitude bounds [degrees] (spherical only)
+        nlat, nlon: Number of grid cells
+        dx, dy: Grid spacing [m] (plane grid only)
+        R: Earth radius [m] (spherical only, default 6371e3)
+        lat_bc: North/South boundary type ("closed", "periodic", "open")
+        lon_bc: East/West boundary type ("closed", "periodic", "open")
 
     Example:
         >>> import ray
         >>> ray.init()
-        >>> worker = TransportWorker.remote()
+        >>> worker = TransportWorker.remote(
+        ...     grid_type="spherical",
+        ...     lat_min=-60.0, lat_max=60.0,
+        ...     lon_min=0.0, lon_max=360.0,
+        ...     nlat=120, nlon=360,
+        ...     lat_bc="closed", lon_bc="periodic"
+        ... )
         >>> result = ray.get(worker.transport_step.remote(
         ...     biomass=biomass_array,
-        ...     u=u_velocity, v=v_velocity, D=diffusivity,
-        ...     dt=3600.0, dx=20000.0, dy=20000.0,
-        ...     mask=ocean_mask
+        ...     u=u_velocity, v=v_velocity, D=1000.0,
+        ...     dt=3600.0, mask=ocean_mask
         ... ))
-        >>> # result['biomass'] == biomass_array (unchanged in passthrough mode)
     """
 
-    def __init__(self) -> None:
-        """Initialize TransportWorker in passthrough mode.
+    def __init__(
+        self,
+        grid_type: str = "spherical",
+        lat_min: float = -90.0,
+        lat_max: float = 90.0,
+        lon_min: float = 0.0,
+        lon_max: float = 360.0,
+        nlat: int = 180,
+        nlon: int = 360,
+        dx: float | None = None,
+        dy: float | None = None,
+        R: float = 6371e3,
+        lat_bc: str = "closed",
+        lon_bc: str = "periodic",
+    ) -> None:
+        """Initialize TransportWorker with grid and boundary conditions.
 
-        No transport is applied - this validates the infrastructure.
+        The grid geometry is computed once and cached for efficiency.
         """
-        pass  # Passthrough mode - no initialization needed
+        # Create grid based on type
+        self.grid: Grid
+        if grid_type == "spherical":
+            self.grid = SphericalGrid(
+                lat_min=lat_min,
+                lat_max=lat_max,
+                lon_min=lon_min,
+                lon_max=lon_max,
+                nlat=nlat,
+                nlon=nlon,
+                R=R,
+            )
+        elif grid_type == "plane":
+            if dx is None or dy is None:
+                raise ValueError("Plane grid requires dx and dy parameters")
+            self.grid = PlaneGrid(dx=dx, dy=dy, nlat=nlat, nlon=nlon)
+        else:
+            raise ValueError(f"Unknown grid_type: {grid_type}")
+
+        # Parse boundary condition strings
+        lat_bc_enum = BoundaryType(lat_bc)
+        lon_bc_enum = BoundaryType(lon_bc)
+
+        # Create boundary conditions (N, S, E, W)
+        self.boundary = BoundaryConditions(
+            north=lat_bc_enum,
+            south=lat_bc_enum,
+            east=lon_bc_enum,
+            west=lon_bc_enum,
+        )
+
+        self.grid_type = grid_type
 
     def transport_step(
         self,
         biomass: jnp.ndarray,
-        _u: jnp.ndarray,
-        _v: jnp.ndarray,
-        _D: float | jnp.ndarray,
-        _dt: float,
-        _dx: float,
-        _dy: float,
-        _mask: jnp.ndarray | None = None,
+        u: jnp.ndarray,
+        v: jnp.ndarray,
+        D: float | jnp.ndarray,
+        dt: float,
+        _dx: float | None = None,  # Legacy parameter, ignored if grid initialized
+        _dy: float | None = None,  # Legacy parameter, ignored if grid initialized
+        mask: jnp.ndarray | None = None,
     ) -> dict[str, Any]:
-        """Execute one transport step (PASSTHROUGH MODE).
-
-        Currently returns biomass unchanged to validate infrastructure.
+        """Execute one transport step with advection + diffusion.
 
         Args:
-            biomass: Biomass concentration field (nlat, nlon).
-            u: Zonal velocity field (m/s), shape (nlat, nlon).
-            v: Meridional velocity field (m/s), shape (nlat, nlon).
-            D: Diffusivity (m²/s), scalar or array (nlat, nlon).
-            dt: Time step (s).
-            dx: Grid spacing in x-direction (m).
-            dy: Grid spacing in y-direction (m).
-            mask: Ocean mask (True=ocean, False=land), shape (nlat, nlon).
+            biomass: Biomass concentration field [kg/m²], shape (nlat, nlon)
+            u: Zonal velocity field [m/s], shape (nlat, nlon)
+            v: Meridional velocity field [m/s], shape (nlat, nlon)
+            D: Horizontal diffusivity [m²/s], scalar or array (nlat, nlon)
+            dt: Time step [s]
+            _dx: Legacy parameter (ignored, grid spacing from self.grid)
+            _dy: Legacy parameter (ignored, grid spacing from self.grid)
+            mask: Ocean mask (1=ocean, 0=land, NaN=land), shape (nlat, nlon)
 
         Returns:
             Dictionary containing:
-                - 'biomass': Unchanged biomass field (passthrough)
-                - 'diagnostics': Dictionary with perfect conservation metrics
-
-        Note:
-            PASSTHROUGH MODE: No transport applied.
-            This validates the Ray communication infrastructure.
+                - 'biomass': Updated biomass field after transport
+                - 'diagnostics': Conservation and performance metrics
         """
         import time
 
         t_start = time.perf_counter()
 
-        # PASSTHROUGH: Return biomass unchanged
-        biomass_final = biomass
+        # Convert D to scalar if array (take mean for stability check)
+        D_scalar = float(jnp.mean(D)) if isinstance(D, jnp.ndarray) else D
 
-        # Compute diagnostics (perfect conservation in passthrough)
-        mass_before = float(jnp.sum(biomass))
-        mass_after = float(jnp.sum(biomass_final))
+        # Check stability (diffusion is more restrictive)
+        stability = check_diffusion_stability(dt, D_scalar, self.grid)
+        if not stability["is_stable"]:
+            import warnings
+
+            warnings.warn(
+                f"Diffusion timestep may be unstable! "
+                f"dt={dt:.1f}s > dt_max={stability['dt_max']:.1f}s. "
+                f"CFL={stability['cfl_diffusion']:.3f} > 0.25",
+                stacklevel=2,
+            )
+
+        # Step 1: Advection
+        t_adv_start = time.perf_counter()
+        biomass_advected = advection_upwind_flux(
+            biomass=biomass,
+            u=u,
+            v=v,
+            dt=dt,
+            grid=self.grid,
+            boundary=self.boundary,
+            mask=mask,
+        )
+        t_adv_end = time.perf_counter()
+
+        adv_diagnostics = compute_advection_diagnostics(
+            biomass, biomass_advected, u, v, dt, self.grid, mask
+        )
+
+        # Step 2: Diffusion
+        t_diff_start = time.perf_counter()
+        biomass_final = diffusion_explicit_spherical(
+            biomass=biomass_advected,
+            D=D_scalar,
+            dt=dt,
+            grid=self.grid,
+            boundary=self.boundary,
+            mask=mask,
+        )
+        t_diff_end = time.perf_counter()
+
+        # Final diagnostics
+        cell_areas = self.grid.cell_areas()
+        if mask is not None:
+            ocean_mask = jnp.where(jnp.isnan(mask), 0.0, mask)
+        else:
+            ocean_mask = jnp.ones_like(biomass)
+
+        mass_before = float(jnp.sum(biomass * cell_areas * ocean_mask))
+        mass_after = float(jnp.sum(biomass_final * cell_areas * ocean_mask))
+        mass_error = abs(mass_after - mass_before)
+        conservation_fraction = mass_after / (mass_before + 1e-10)
 
         t_end = time.perf_counter()
-        compute_time = t_end - t_start
 
         diagnostics = {
             "mass_before": mass_before,
             "mass_after": mass_after,
-            "mass_error_total": 0.0,  # Perfect conservation
-            "mass_error_advection": 0.0,
-            "mass_error_diffusion": 0.0,
-            "compute_time_s": compute_time,
-            "mode": "passthrough",
-            "message": "Infrastructure validation mode - no transport applied",
+            "mass_error_total": mass_error,
+            "conservation_fraction": conservation_fraction,
+            "mass_error_advection": adv_diagnostics["mass_change"],
+            "conservation_advection": adv_diagnostics["conservation_fraction"],
+            "max_velocity": adv_diagnostics["max_velocity"],
+            "cfl_advection": adv_diagnostics["cfl_number"],
+            "cfl_diffusion": stability["cfl_diffusion"],
+            "stability_ok": stability["is_stable"],
+            "dt_max_diffusion": stability["dt_max"],
+            "compute_time_s": t_end - t_start,
+            "compute_time_advection_s": t_adv_end - t_adv_start,
+            "compute_time_diffusion_s": t_diff_end - t_diff_start,
+            "mode": "physics",
+            "grid_type": self.grid_type,
         }
 
         return {"biomass": biomass_final, "diagnostics": diagnostics}
