@@ -28,11 +28,9 @@ class Kernel:
         >>> kernel = Kernel([
         ...     compute_recruitment,
         ...     compute_mortality,
-        ...     compute_growth,
-        ...     compute_diffusion_2d
+        ...     compute_growth
         ... ])
         >>> state = kernel.execute_local_phase(state, dt=0.1, params={...})
-        >>> state = kernel.execute_global_phase(state, dt=0.1, params={...}, neighbor_data={...})
     """
 
     def __init__(self, units: list[Unit]) -> None:

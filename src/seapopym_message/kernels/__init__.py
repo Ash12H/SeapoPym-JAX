@@ -1,17 +1,14 @@
-"""Pre-defined computational kernels (Units): mortality, growth, transport, etc."""
+"""Pre-defined computational kernels (Units): biology kernels.
+
+Transport is now handled by the centralized TransportWorker.
+See: seapopym_message.transport.TransportWorker
+"""
 
 from seapopym_message.kernels.biology import (
     compute_growth,
     compute_mortality,
     compute_recruitment,
     compute_recruitment_2d,
-)
-from seapopym_message.kernels.transport import (
-    check_cfl_condition,
-    compute_advection_2d,
-    compute_advection_simple,
-    compute_diffusion_2d,
-    compute_diffusion_simple,
 )
 
 __all__ = [
@@ -20,10 +17,4 @@ __all__ = [
     "compute_recruitment_2d",
     "compute_mortality",
     "compute_growth",
-    # Transport
-    "compute_diffusion_2d",
-    "compute_diffusion_simple",
-    "compute_advection_2d",
-    "compute_advection_simple",
-    "check_cfl_condition",
 ]
