@@ -90,6 +90,17 @@ def diffusion_explicit_spherical(
         biomass, boundary
     )
 
+    # Apply zero-flux boundary condition at ocean-land interfaces
+    # If neighbor is land, use current cell value (Neumann BC: dC/dn = 0)
+    # This prevents artificial gradients and mass loss at boundaries
+    if mask is not None:
+        mask_west, mask_east, mask_south, mask_north = get_neighbors_with_bc(ocean_mask, boundary)
+        # Replace land neighbor values with current cell value
+        biomass_east = jnp.where(mask_east == 0, biomass, biomass_east)
+        biomass_west = jnp.where(mask_west == 0, biomass, biomass_west)
+        biomass_north = jnp.where(mask_north == 0, biomass, biomass_north)
+        biomass_south = jnp.where(mask_south == 0, biomass, biomass_south)
+
     # Compute Laplacian using centered differences
     # ∂²C/∂x² = (C_east - 2C + C_west) / dx²
     # ∂²C/∂y² = (C_north - 2C + C_south) / dy²

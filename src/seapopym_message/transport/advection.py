@@ -97,6 +97,21 @@ def advection_upwind_flux(
         biomass, boundary
     )
 
+    # Get neighbor masks with boundary conditions (if mask provided)
+    # Face mask = 1 if both adjacent cells are ocean, 0 otherwise
+    # This prevents fluxes across ocean-land interfaces
+    if mask is not None:
+        mask_west, mask_east, mask_south, mask_north = get_neighbors_with_bc(ocean_mask, boundary)
+        face_mask_east = ocean_mask * mask_east
+        face_mask_west = ocean_mask * mask_west
+        face_mask_north = ocean_mask * mask_north
+        face_mask_south = ocean_mask * mask_south
+    else:
+        face_mask_east = jnp.ones_like(biomass)
+        face_mask_west = jnp.ones_like(biomass)
+        face_mask_north = jnp.ones_like(biomass)
+        face_mask_south = jnp.ones_like(biomass)
+
     # Compute velocities at cell faces (average of adjacent cells)
     # For East/West faces (longitude direction)
     # u_face_ew[i, j] is velocity at face between cells [i, j-1] and [i, j]
@@ -105,18 +120,18 @@ def advection_upwind_flux(
     # Get neighbor velocities with BC
     u_west, u_east, _, _ = get_neighbors_with_bc(u, boundary)
 
-    # East face of cell (i,j): average of u[i,j] and u[i,j+1]
-    u_face_east = (u + u_east) / 2  # (nlat, nlon)
-    # West face of cell (i,j): average of u[i,j-1] and u[i,j]
-    u_face_west = (u_west + u) / 2  # (nlat, nlon)
+    # East face of cell (i,j): average of u[i,j] and u[i,j+1], masked at boundaries
+    u_face_east = (u + u_east) / 2 * face_mask_east  # (nlat, nlon)
+    # West face of cell (i,j): average of u[i,j-1] and u[i,j], masked at boundaries
+    u_face_west = (u_west + u) / 2 * face_mask_west  # (nlat, nlon)
 
     # For North/South faces (latitude direction)
     _, _, v_south, v_north = get_neighbors_with_bc(v, boundary)
 
-    # North face of cell (i,j): average of v[i,j] and v[i+1,j]
-    v_face_north = (v + v_north) / 2  # (nlat, nlon)
-    # South face of cell (i,j): average of v[i-1,j] and v[i,j]
-    v_face_south = (v_south + v) / 2  # (nlat, nlon)
+    # North face of cell (i,j): average of v[i,j] and v[i+1,j], masked at boundaries
+    v_face_north = (v + v_north) / 2 * face_mask_north  # (nlat, nlon)
+    # South face of cell (i,j): average of v[i-1,j] and v[i,j], masked at boundaries
+    v_face_south = (v_south + v) / 2 * face_mask_south  # (nlat, nlon)
 
     # Upwind choice for biomass at faces
     # East face: if u_e > 0, use C[i,j], else use C[i,j+1]
