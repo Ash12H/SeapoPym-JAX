@@ -73,7 +73,7 @@ class CellWorker2D:
         self.nlon = lon_end - lon_start
 
         # Neighbors (will be set later)
-        self.neighbors: dict[str, ray.ObjectRef | None] = {
+        self.neighbors: dict[str, ray.actor.ActorHandle | None] = {
             "north": None,
             "south": None,
             "east": None,
@@ -86,12 +86,12 @@ class CellWorker2D:
         # State (will be initialized later)
         self.state: dict[str, jnp.ndarray] = {}
 
-    def set_neighbors(self, neighbors: dict[str, ray.ObjectRef | None]) -> None:
+    def set_neighbors(self, neighbors: dict[str, ray.actor.ActorHandle | None]) -> None:
         """Set references to neighboring workers.
 
         Args:
             neighbors: Dictionary with keys 'north', 'south', 'east', 'west'.
-                      Values are Ray ObjectRefs to neighbor workers, or None at boundaries.
+                      Values are Ray ActorHandles to neighbor workers, or None at boundaries.
         """
         self.neighbors = neighbors
 
@@ -123,6 +123,19 @@ class CellWorker2D:
             Current time.
         """
         return self.t
+
+    def get_topology(self) -> dict[str, int]:
+        """Get patch topology information.
+
+        Returns:
+            Dictionary with lat_start, lat_end, lon_start, lon_end.
+        """
+        return {
+            "lat_start": self.lat_start,
+            "lat_end": self.lat_end,
+            "lon_start": self.lon_start,
+            "lon_end": self.lon_end,
+        }
 
     def get_boundary_north(self) -> dict[str, jnp.ndarray]:
         """Get northern boundary (first row) for halo exchange.
@@ -261,13 +274,13 @@ class CellWorker2D:
 
         return forcings_local
 
-    def _request_halos(self) -> dict[str, ray.ObjectRef | None]:
+    def _request_halos(self) -> dict[str, ray.ObjectRef[Any] | None]:
         """Request boundary data from neighbors.
 
         Returns:
-            Dictionary with futures for each neighbor's boundary data.
+            Dictionary with ObjectRef futures for each neighbor's boundary data.
         """
-        halo_futures = {}
+        halo_futures: dict[str, ray.ObjectRef[Any] | None] = {}
 
         if self.neighbors["north"] is not None:
             halo_futures["north"] = self.neighbors["north"].get_boundary_south.remote()
@@ -292,7 +305,7 @@ class CellWorker2D:
         return halo_futures
 
     async def _gather_halos(
-        self, halo_futures: dict[str, ray.ObjectRef | None]
+        self, halo_futures: dict[str, ray.ObjectRef[Any] | None]
     ) -> dict[str, dict[str, jnp.ndarray] | None]:
         """Wait for and gather halo data from neighbors.
 
@@ -331,3 +344,38 @@ class CellWorker2D:
             diagnostics[f"{key}_mean"] = float(jnp.mean(val))
 
         return diagnostics
+
+    def get_biomass(self) -> jnp.ndarray:
+        """Get current biomass field for this patch.
+
+        Returns:
+            Biomass array with shape (nlat, nlon).
+            Returns zeros if 'biomass' not in state.
+        """
+        return self.state.get("biomass", jnp.zeros((self.nlat, self.nlon)))
+
+    def set_biomass(self, biomass: jnp.ndarray) -> None:
+        """Set biomass field for this patch (after transport).
+
+        Args:
+            biomass: Biomass array with shape (nlat, nlon).
+        """
+        self.state["biomass"] = jnp.array(biomass)
+
+    async def biology_step(
+        self, dt: float, forcings_global: dict[str, jnp.ndarray] | None = None
+    ) -> dict[str, Any]:
+        """Execute one biology timestep (without transport).
+
+        This method is identical to step() but semantically represents
+        the biology-only phase when transport is handled externally
+        by TransportWorker.
+
+        Args:
+            dt: Time step size.
+            forcings_global: Optional global forcings dict.
+
+        Returns:
+            Dictionary with diagnostics (time, mean values, etc.).
+        """
+        return await self.step(dt, forcings_global)
