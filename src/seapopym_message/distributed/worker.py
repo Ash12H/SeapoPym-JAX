@@ -238,22 +238,32 @@ class CellWorker2D:
         """Extract local patch from global forcing fields.
 
         Args:
-            forcings_global: Dictionary of global forcing arrays.
+            forcings_global: Dictionary of global forcing arrays or scalars.
 
         Returns:
-            Dictionary with forcing arrays sliced to local patch.
+            Dictionary with forcing arrays sliced to local patch (or scalars unchanged).
 
         Note:
             Assumes forcing dimensions include lat and lon as the last two dimensions.
             Handles 2D (lat, lon), 3D (depth, lat, lon), etc.
+            Scalars (floats, ints) are passed through unchanged.
         """
         forcings_local = {}
 
         for name, field in forcings_global.items():
+            # Check if field is a scalar (float, int) or has no ndim attribute
+            if not hasattr(field, "ndim"):
+                # Scalar value - pass through unchanged
+                forcings_local[name] = field
+                continue
+
             # Determine number of dimensions
             ndim = field.ndim
 
-            if ndim == 2:
+            if ndim == 0:
+                # 0D array (scalar wrapped in array) - pass through unchanged
+                forcings_local[name] = field
+            elif ndim == 2:
                 # (lat, lon)
                 forcings_local[name] = field[
                     self.lat_start : self.lat_end, self.lon_start : self.lon_end
