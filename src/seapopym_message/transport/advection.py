@@ -10,7 +10,11 @@ References:
 
 import jax.numpy as jnp
 
-from seapopym_message.transport.boundary import BoundaryConditions, get_neighbors_with_bc
+from seapopym_message.transport.boundary import (
+    BoundaryConditions,
+    BoundaryType,
+    get_neighbors_with_bc,
+)
 from seapopym_message.transport.grid import Grid
 
 
@@ -79,27 +83,42 @@ def advection_upwind_flux(
     """
     nlat, nlon = biomass.shape
 
-    # Apply land mask if provided
+    # --- FIX 1 & 2 : Nettoyage des vitesses et des masques ---
+
+    # Vitesses "propres" (u_clean, v_clean)
+    u_clean = u
+    v_clean = v
+
+    # Appliquer le masque si fourni
     if mask is not None:
-        # Create ocean mask (1 where ocean, 0 where land)
+        # Créer le masque océan (1=ocean, 0=terre)
         ocean_mask = jnp.where(jnp.isnan(mask), 0.0, mask)
-        # Set velocities to zero on land
-        u = u * ocean_mask
-        v = v * ocean_mask
 
-    # Get cell areas and volumes (for 2D, volume = area)
-    cell_areas = grid.cell_areas()  # (nlat, nlon)
-    face_areas_ew = grid.face_areas_ew()  # (nlat, nlon+1)
-    face_areas_ns = grid.face_areas_ns()  # (nlat+1, nlon)
+        # FIX 2: Remplacer les NaN dans les vitesses par 0.0
+        # Empêche (NaN * 0.0 = NaN) et (v_ocean + NaN = NaN)
+        u_clean = jnp.nan_to_num(u, nan=0.0)
+        v_clean = jnp.nan_to_num(v, nan=0.0)
 
-    # Get neighbor biomass values with boundary conditions
+        # FIX 1: SUPPRESSION des lignes `u = u * ocean_mask`
+        # Nous ne modifions PAS les vitesses au centre des cellules.
+
+    else:
+        # S'il n'y a pas de masque, tout est océan
+        ocean_mask = jnp.ones_like(biomass)
+
+    # --- Fin des FIX 1 & 2 ---
+
+    # Obtenir les géométries (inchangé)
+    cell_areas = grid.cell_areas()
+    face_areas_ew = grid.face_areas_ew()
+    face_areas_ns = grid.face_areas_ns()
+
+    # Obtenir les voisins de la biomasse (inchangé)
     biomass_west, biomass_east, biomass_south, biomass_north = get_neighbors_with_bc(
         biomass, boundary
     )
 
-    # Get neighbor masks with boundary conditions (if mask provided)
-    # Face mask = 1 if both adjacent cells are ocean, 0 otherwise
-    # This prevents fluxes across ocean-land interfaces
+    # Obtenir les masques des voisins (logique inchangée)
     if mask is not None:
         mask_west, mask_east, mask_south, mask_north = get_neighbors_with_bc(ocean_mask, boundary)
         face_mask_east = ocean_mask * mask_east
@@ -112,76 +131,58 @@ def advection_upwind_flux(
         face_mask_north = jnp.ones_like(biomass)
         face_mask_south = jnp.ones_like(biomass)
 
-    # Compute velocities at cell faces (average of adjacent cells)
-    # For East/West faces (longitude direction)
-    # u_face_ew[i, j] is velocity at face between cells [i, j-1] and [i, j]
-    # Shape: (nlat, nlon+1)
+    # --- FIX 3 : Forcer les frontières 'CLOSED' à être des murs ---
+    # Corrige le problème de création de masse dû à `get_neighbors_with_bc`
+    # qui copie la valeur intérieure (gradient nul) au lieu de la mettre à 0.
 
-    # Get neighbor velocities with BC
-    u_west, u_east, _, _ = get_neighbors_with_bc(u, boundary)
+    if boundary.north == BoundaryType.CLOSED:
+        face_mask_north = face_mask_north.at[nlat - 1, :].set(0.0)
+    if boundary.south == BoundaryType.CLOSED:
+        face_mask_south = face_mask_south.at[0, :].set(0.0)
+    if boundary.east == BoundaryType.CLOSED:
+        face_mask_east = face_mask_east.at[:, nlon - 1].set(0.0)
+    if boundary.west == BoundaryType.CLOSED:
+        face_mask_west = face_mask_west.at[:, 0].set(0.0)
 
-    # East face of cell (i,j): average of u[i,j] and u[i,j+1], masked at boundaries
-    u_face_east = (u + u_east) / 2 * face_mask_east  # (nlat, nlon)
-    # West face of cell (i,j): average of u[i,j-1] and u[i,j], masked at boundaries
-    u_face_west = (u_west + u) / 2 * face_mask_west  # (nlat, nlon)
+    # --- Fin du FIX 3 ---
 
-    # For North/South faces (latitude direction)
-    _, _, v_south, v_north = get_neighbors_with_bc(v, boundary)
+    # Calcul des vitesses aux faces
+    # Utilise u_clean et v_clean (du FIX 2)
 
-    # North face of cell (i,j): average of v[i,j] and v[i+1,j], masked at boundaries
-    v_face_north = (v + v_north) / 2 * face_mask_north  # (nlat, nlon)
-    # South face of cell (i,j): average of v[i-1,j] and v[i,j], masked at boundaries
-    v_face_south = (v_south + v) / 2 * face_mask_south  # (nlat, nlon)
+    # Obtenir les voisins des vitesses PROPRES
+    u_west, u_east, _, _ = get_neighbors_with_bc(u_clean, boundary)
+    _, _, v_south, v_north = get_neighbors_with_bc(v_clean, boundary)
 
-    # Upwind choice for biomass at faces
-    # East face: if u_e > 0, use C[i,j], else use C[i,j+1]
+    # Vitesse aux faces (utilise les vitesses propres ET les masques de face corrigés)
+    u_face_east = (u_clean + u_east) / 2 * face_mask_east
+    u_face_west = (u_west + u_clean) / 2 * face_mask_west
+    v_face_north = (v_clean + v_north) / 2 * face_mask_north
+    v_face_south = (v_south + v_clean) / 2 * face_mask_south
+
+    # Choix Upwind (inchangé)
     biomass_face_east = jnp.where(u_face_east > 0, biomass, biomass_east)
-    # West face: if u_w > 0, use C[i,j-1], else use C[i,j]
     biomass_face_west = jnp.where(u_face_west > 0, biomass_west, biomass)
-
-    # North face: if v_n > 0, use C[i,j], else use C[i+1,j]
     biomass_face_north = jnp.where(v_face_north > 0, biomass, biomass_north)
-    # South face: if v_s > 0, use C[i-1,j], else use C[i,j]
     biomass_face_south = jnp.where(v_face_south > 0, biomass_south, biomass)
 
-    # Compute fluxes at faces [kg/s]
-    # Flux = velocity × concentration × area
-    # Need to extract correct face areas for each cell
-
-    # For E/W faces, we need areas at i and i+1
-    # face_areas_ew has shape (nlat, nlon+1)
-    # East face of cell (i,j) is at index j+1 in the face array
-    # West face of cell (i,j) is at index j in the face array
-
-    # Extract face areas for each cell
-    area_east = face_areas_ew[:, 1:]  # (nlat, nlon) - east faces
-    area_west = face_areas_ew[:, :-1]  # (nlat, nlon) - west faces
-
+    # Calcul des flux (inchangé)
+    area_east = face_areas_ew[:, 1:]
+    area_west = face_areas_ew[:, :-1]
     flux_east = u_face_east * biomass_face_east * area_east
     flux_west = u_face_west * biomass_face_west * area_west
 
-    # For N/S faces
-    # face_areas_ns has shape (nlat+1, nlon)
-    # North face of cell (i,j) is at index i+1 in the face array
-    # South face of cell (i,j) is at index i in the face array
-
-    area_north = face_areas_ns[1:, :]  # (nlat, nlon) - north faces
-    area_south = face_areas_ns[:-1, :]  # (nlat, nlon) - south faces
-
+    area_north = face_areas_ns[1:, :]
+    area_south = face_areas_ns[:-1, :]
     flux_north = v_face_north * biomass_face_north * area_north
     flux_south = v_face_south * biomass_face_south * area_south
 
-    # Compute flux divergence [kg/(m²·s)]
-    # div(F) = (F_out - F_in) / Volume
-    # Positive flux = outward, negative = inward
-    # Net flux out = F_east - F_west + F_north - F_south
+    # Calcul de la divergence (inchangé)
     flux_divergence = (flux_east - flux_west + flux_north - flux_south) / cell_areas
 
-    # Update biomass (Euler forward)
-    # dC/dt = -div(F)
+    # Mise à jour de la biomasse (inchangé)
     biomass_new = biomass - dt * flux_divergence
 
-    # Apply mask to final result (ensure land stays at zero if masked)
+    # Appliquer le masque final (inchangé, c'est correct)
     if mask is not None:
         biomass_new = biomass_new * ocean_mask
 
