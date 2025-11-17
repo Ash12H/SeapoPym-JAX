@@ -1,0 +1,1 @@
+- Lorsque tu fais des tests tu ne peux les lancer que 1 par 1. Si tu veux lancer une routine de test tu dois me demander.
