@@ -268,7 +268,7 @@ class TestAdvectionBoundaryConditions:
 
         biomass_closed = advection_upwind_flux(biomass, u, v, dt, grid, bc_closed)
 
-        # With CLOSED, mass accumulates at western boundary
+        # With CLOSED, mass accumulates at western boundary (wall blocks flux)
         cell_areas = grid.cell_areas()
         mass_closed = jnp.sum(biomass_closed * cell_areas)
 
@@ -285,21 +285,25 @@ class TestAdvectionBoundaryConditions:
         # With PERIODIC, mass wraps to eastern edge
         mass_periodic = jnp.sum(biomass_periodic * cell_areas)
 
-        # With CLOSED, mass can leave the domain (flux out at western boundary)
-        # With PERIODIC, mass is conserved (wraps around)
         mass_original = jnp.sum(biomass * cell_areas)
 
-        # PERIODIC should conserve mass perfectly
-        assert jnp.isclose(mass_periodic, mass_original, rtol=1e-5)
+        # Both CLOSED and PERIODIC should conserve mass perfectly
+        # CLOSED = wall (no flux in or out)
+        # PERIODIC = wraparound (mass exits one side, enters other side)
+        assert jnp.isclose(
+            mass_closed, mass_original, rtol=1e-5
+        ), f"CLOSED should conserve mass: {mass_closed} vs {mass_original}"
+        assert jnp.isclose(
+            mass_periodic, mass_original, rtol=1e-5
+        ), f"PERIODIC should conserve mass: {mass_periodic} vs {mass_original}"
 
-        # CLOSED allows mass to leave, so mass_closed < mass_original
-        # (flux exits through western boundary with no return)
-        assert mass_closed < mass_original
+        # The difference is in DISTRIBUTION, not total mass:
+        # With PERIODIC, mass wraps around to eastern edge
+        assert jnp.sum(biomass_periodic[:, -1]) > 0, "PERIODIC should wrap mass to eastern edge"
 
-        # With periodic, some mass should appear on eastern edge (wrapped)
-        assert jnp.sum(biomass_periodic[:, -1]) > 0
-        # With closed, western edge should have less mass
-        assert jnp.sum(biomass_closed[:, 0]) < jnp.sum(biomass[:, 0])
+        # With CLOSED, mass stays at western edge (blocked by wall)
+        # The western column should still have significant mass (not transported away)
+        assert jnp.sum(biomass_closed[:, 0]) > 0, "CLOSED should keep mass at western wall"
 
 
 class TestAdvectionDiagnostics:
