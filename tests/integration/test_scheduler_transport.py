@@ -1,8 +1,8 @@
 """Integration tests for EventScheduler with TransportWorker.
 
 Tests verify:
-- Biology-only mode (transport disabled)
-- Transport-only mode (no biology growth)
+- Biology-only mode (no transport)
+- Transport with generic field configuration
 - Coupled biology + transport
 - Mass conservation during collect/redistribute
 - Multi-worker coordination
@@ -14,6 +14,7 @@ import ray
 from seapopym_message.core.kernel import Kernel
 from seapopym_message.core.unit import unit
 from seapopym_message.distributed.scheduler import EventScheduler
+from seapopym_message.distributed.transport_config import FieldConfig, TransportConfig
 from seapopym_message.distributed.worker import CellWorker2D
 from seapopym_message.transport.worker import TransportWorker
 from seapopym_message.utils.grid import GridInfo
@@ -85,10 +86,8 @@ class TestSchedulerTransportIntegration:
 
                 workers.append(worker)
 
-        # Create scheduler WITHOUT transport
-        scheduler = EventScheduler(
-            workers=workers, dt=3600.0, t_max=7200.0, transport_enabled=False
-        )
+        # Create scheduler WITHOUT transport (no transport_config provided)
+        scheduler = EventScheduler(workers=workers, dt=3600.0, t_max=7200.0)
 
         # Run simulation (2 timesteps)
         diagnostics = scheduler.run()
@@ -165,13 +164,16 @@ class TestSchedulerTransportIntegration:
             lon_bc="closed",
         )
 
+        # Create transport config for biomass field
+        transport_config = TransportConfig(fields=[FieldConfig(name="biomass", dims=["Y", "X"])])
+
         # Create scheduler WITH transport
         scheduler = EventScheduler(
             workers=workers,
             dt=100.0,
             t_max=100.0,
             transport_worker=transport_worker,
-            transport_enabled=True,
+            transport_config=transport_config,
             global_nlat=global_nlat,
             global_nlon=global_nlon,
             forcing_params={"horizontal_diffusivity": 100.0},  # Small diffusion
@@ -181,8 +183,8 @@ class TestSchedulerTransportIntegration:
         initial_states = ray.get([w.get_state.remote() for w in workers])
         initial_mass = sum(float(jnp.sum(s["biomass"])) for s in initial_states)
 
-        # Collect global biomass
-        biomass_global = scheduler._collect_global_biomass()
+        # Collect global biomass using generic method
+        biomass_global = scheduler._collect_global_field("biomass", (global_nlat, global_nlon))
         collected_mass = float(jnp.sum(biomass_global))
 
         # Check collection conserves mass
@@ -190,8 +192,8 @@ class TestSchedulerTransportIntegration:
             abs(collected_mass - initial_mass) < 1e-6
         ), f"Collection lost mass: {initial_mass:.6f} -> {collected_mass:.6f}"
 
-        # Redistribute
-        scheduler._redistribute_biomass(biomass_global)
+        # Redistribute using generic method
+        scheduler._redistribute_field("biomass", biomass_global)
 
         # Get final mass
         final_states = ray.get([w.get_state.remote() for w in workers])
@@ -263,13 +265,16 @@ class TestSchedulerTransportIntegration:
             lon_bc="closed",
         )
 
+        # Create transport config for biomass
+        transport_config = TransportConfig(fields=[FieldConfig(name="biomass", dims=["Y", "X"])])
+
         # Create scheduler WITH transport
         scheduler = EventScheduler(
             workers=workers,
             dt=100.0,
             t_max=300.0,
             transport_worker=transport_worker,
-            transport_enabled=True,
+            transport_config=transport_config,
             global_nlat=global_nlat,
             global_nlon=global_nlon,
             forcing_params={"horizontal_diffusivity": 100.0},
