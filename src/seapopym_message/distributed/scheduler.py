@@ -6,13 +6,20 @@ The EventScheduler manages the temporal evolution of the simulation by:
 - Synchronizing simulation time across all workers
 - Collecting and aggregating diagnostics
 - Optionally coordinating centralized transport via TransportWorker
+
+Note:
+    The scheduler is domain-agnostic. It uses TransportConfig to know which
+    fields to transport, making it extensible to different simulation types.
 """
 
 import heapq
+import itertools
 from typing import Any
 
 import jax.numpy as jnp
 import ray
+
+from seapopym_message.distributed.transport_config import TransportConfig
 
 
 class EventScheduler:
@@ -58,11 +65,24 @@ class EventScheduler:
         forcing_manager: Any = None,
         forcing_params: dict[str, Any] | None = None,
         transport_worker: ray.actor.ActorHandle | None = None,
-        transport_enabled: bool = False,
+        transport_config: TransportConfig | None = None,
         global_nlat: int | None = None,
         global_nlon: int | None = None,
     ) -> None:
-        """Initialize scheduler with workers and time parameters."""
+        """Initialize scheduler with workers and time parameters.
+
+        Args:
+            workers: List of CellWorker2D actors.
+            dt: Timestep size.
+            t_max: Maximum simulation time.
+            forcing_manager: Optional ForcingManager for environmental forcings.
+            forcing_params: Optional parameters for derived forcings and field dimensions.
+            transport_worker: Optional TransportWorker actor for centralized transport.
+            transport_config: Optional TransportConfig specifying fields to transport.
+                             If provided with transport_worker, enables centralized transport.
+            global_nlat: Global grid latitude dimension.
+            global_nlon: Global grid longitude dimension.
+        """
         self.workers = workers
         self.dt = dt
         self.t_max = t_max
@@ -72,7 +92,8 @@ class EventScheduler:
 
         # Transport configuration
         self.transport_worker = transport_worker
-        self.transport_enabled = transport_enabled and transport_worker is not None
+        self.transport_config = transport_config
+        self.transport_enabled = transport_worker is not None and transport_config is not None
 
         # Global grid dimensions (for transport)
         self.global_nlat = global_nlat
@@ -80,7 +101,7 @@ class EventScheduler:
 
         if self.transport_enabled:
             if self.global_nlat is None or self.global_nlon is None:
-                raise ValueError("global_nlat and global_nlon required when transport_enabled=True")
+                raise ValueError("global_nlat and global_nlon required when transport is enabled")
             # Build worker topology by querying workers
             self._build_worker_topology()
         else:
@@ -122,27 +143,32 @@ class EventScheduler:
         futures = [worker.get_topology.remote() for worker in self.workers]
         self.worker_topology = ray.get(futures)
 
-    def _collect_global_biomass(self) -> jnp.ndarray:
-        """Assemble global biomass field from all workers.
+    def _collect_global_field(self, field_name: str, field_shape: tuple[int, ...]) -> jnp.ndarray:
+        """Assemble a global field from all workers.
 
-        Collects biomass patches from each worker and assembles them
-        into a global grid according to worker topology.
+        Generic method that collects a field from all workers and assembles
+        the patches into a global grid according to worker topology.
+
+        Args:
+            field_name: Name of the field to collect.
+            field_shape: Expected global shape of the field (including extra dimensions).
+                        Example: (nlat, nlon) for 2D, (n_ages, nlat, nlon) for 3D.
 
         Returns:
-            Global biomass array with shape (global_nlat, global_nlon).
+            Global field array with the specified shape.
 
         Raises:
-            ValueError: If transport not enabled or topology not available.
+            ValueError: If field patches have incorrect shapes.
         """
         if not self.transport_enabled:
-            raise ValueError("Cannot collect biomass: transport not enabled")
+            raise ValueError(f"Cannot collect field '{field_name}': transport not enabled")
 
-        # Collect biomass from all workers in parallel
-        futures = [worker.get_biomass.remote() for worker in self.workers]
+        # Collect field from all workers in parallel
+        futures = [worker.get_field.remote(field_name) for worker in self.workers]
         patches = ray.get(futures)
 
-        # Initialize global biomass grid
-        biomass_global = jnp.zeros((self.global_nlat, self.global_nlon), dtype=jnp.float32)
+        # Initialize global field
+        field_global = jnp.zeros(field_shape, dtype=jnp.float32)
 
         # Assemble patches into global grid
         for patch, topology in zip(patches, self.worker_topology, strict=True):
@@ -151,25 +177,40 @@ class EventScheduler:
             lon_start = topology["lon_start"]
             lon_end = topology["lon_end"]
 
+            # Check if patch is empty (field might not exist in worker state)
+            if patch.size == 0:
+                raise ValueError(
+                    f"Worker returned empty patch for field '{field_name}'. "
+                    f"Field may not exist in worker state."
+                )
+
             # Insert patch into global grid
-            biomass_global = biomass_global.at[lat_start:lat_end, lon_start:lon_end].set(patch)
+            # Handle different dimensionalities
+            if len(field_shape) == 2:
+                # 2D field (nlat, nlon)
+                field_global = field_global.at[lat_start:lat_end, lon_start:lon_end].set(patch)
+            else:
+                # Multi-dimensional field (extra_dims..., nlat, nlon)
+                # Use ellipsis to handle arbitrary number of leading dimensions
+                field_global = field_global.at[..., lat_start:lat_end, lon_start:lon_end].set(patch)
 
-        return biomass_global
+        return field_global
 
-    def _redistribute_biomass(self, biomass_global: jnp.ndarray) -> None:
-        """Redistribute global biomass field to all workers.
+    def _redistribute_field(self, field_name: str, field_global: jnp.ndarray) -> None:
+        """Redistribute a global field to all workers.
 
-        Extracts patches from the global biomass grid and distributes
-        them to the corresponding workers according to topology.
+        Generic method that extracts patches from a global field and distributes
+        them to workers according to topology.
 
         Args:
-            biomass_global: Global biomass array with shape (global_nlat, global_nlon).
+            field_name: Name of the field to redistribute.
+            field_global: Global field array.
 
         Raises:
-            ValueError: If transport not enabled or topology not available.
+            ValueError: If transport not enabled.
         """
         if not self.transport_enabled:
-            raise ValueError("Cannot redistribute biomass: transport not enabled")
+            raise ValueError(f"Cannot redistribute field '{field_name}': transport not enabled")
 
         # Extract and send patches to workers
         futures = []
@@ -180,86 +221,18 @@ class EventScheduler:
             lon_end = topology["lon_end"]
 
             # Extract patch from global grid
-            patch = biomass_global[lat_start:lat_end, lon_start:lon_end]
+            # Handle different dimensionalities
+            if field_global.ndim == 2:
+                # 2D field
+                patch = field_global[lat_start:lat_end, lon_start:lon_end]
+            else:
+                # Multi-dimensional field (extra_dims..., nlat, nlon)
+                patch = field_global[..., lat_start:lat_end, lon_start:lon_end]
 
             # Send to worker (non-blocking)
-            futures.append(worker.set_biomass.remote(patch))
+            futures.append(worker.set_field.remote(field_name, patch))
 
-        # Wait for all workers to receive their biomass
-        ray.get(futures)
-
-    def _collect_global_production(self) -> jnp.ndarray:
-        """Assemble global production field from all workers.
-
-        Collects production patches from each worker and assembles them
-        into a global grid according to worker topology.
-
-        Returns:
-            Global production array with shape (n_ages, global_nlat, global_nlon).
-
-        Raises:
-            ValueError: If transport not enabled or topology not available.
-        """
-        if not self.transport_enabled:
-            raise ValueError("Cannot collect production: transport not enabled")
-
-        # Get n_ages from forcing_params or use default
-        n_ages = self.forcing_params.get("n_ages", 11)
-
-        # Collect production from all workers in parallel
-        futures = [worker.get_production.remote() for worker in self.workers]
-        patches = ray.get(futures)  # List of (n_ages, nlat_local, nlon_local)
-
-        # Initialize global production grid
-        assert self.global_nlat is not None and self.global_nlon is not None
-        production_global = jnp.zeros(
-            (n_ages, self.global_nlat, self.global_nlon), dtype=jnp.float32
-        )
-
-        # Assemble patches into global grid
-        for patch, topology in zip(patches, self.worker_topology, strict=True):
-            lat_start = topology["lat_start"]
-            lat_end = topology["lat_end"]
-            lon_start = topology["lon_start"]
-            lon_end = topology["lon_end"]
-
-            # Insert patch into global grid (all ages at once)
-            production_global = production_global.at[:, lat_start:lat_end, lon_start:lon_end].set(
-                patch
-            )
-
-        return production_global
-
-    def _redistribute_production(self, production_global: jnp.ndarray) -> None:
-        """Redistribute global production field to all workers.
-
-        Extracts patches from the global production grid and distributes
-        them to the corresponding workers according to topology.
-
-        Args:
-            production_global: Global production array, shape (n_ages, global_nlat, global_nlon).
-
-        Raises:
-            ValueError: If transport not enabled or topology not available.
-        """
-        if not self.transport_enabled:
-            raise ValueError("Cannot redistribute production: transport not enabled")
-
-        # Extract and send patches to workers
-        futures = []
-        for worker, topology in zip(self.workers, self.worker_topology, strict=True):
-            lat_start = topology["lat_start"]
-            lat_end = topology["lat_end"]
-            lon_start = topology["lon_start"]
-            lon_end = topology["lon_end"]
-
-            # Extract patch from global grid (all ages)
-            patch = production_global[:, lat_start:lat_end, lon_start:lon_end]
-
-            # Send to worker (non-blocking)
-            futures.append(worker.set_production.remote(patch))
-
-        # Wait for all workers to receive their production
+        # Wait for all workers to receive the field
         ray.get(futures)
 
     def _get_transport_forcings(self, forcings_ref: ray.ObjectRef | None) -> dict[str, jnp.ndarray]:
@@ -311,14 +284,14 @@ class EventScheduler:
         3. Wait for all workers to complete
         4. Collect and aggregate diagnostics
 
-        Workflow (with transport, 6 phases for zooplankton model):
-        1. PHASE BIOLOGIE: Launch biology_step() on all workers in parallel
-        2. COLLECTE: Assemble global biomass + production grids from workers
-        3. PHASE TRANSPORT: Execute transport_step() on TransportWorker
-           - Transport biomass (1 field)
-           - Transport production (n_ages fields, loop over age classes)
-        4. REDISTRIBUTION: Distribute updated biomass + production to workers
-        5. AGRÉGATION: Aggregate biology + transport diagnostics
+        Workflow (with transport, generic for any fields):
+        1. PHASE LOCAL: Launch step() on all workers in parallel
+        2. PHASE COLLECT: For each field in transport_config, assemble global grid
+        3. PHASE TRANSPORT: For each field, execute transport:
+           - If 2D field: transport directly
+           - If N-D field: loop over all non-spatial dimensions and transport each slice
+        4. PHASE REDISTRIBUTE: Distribute updated fields back to workers
+        5. PHASE AGGREGATE: Aggregate diagnostics
 
         Returns:
             Dictionary with aggregated diagnostics:
@@ -335,64 +308,38 @@ class EventScheduler:
                 time=self.t_current, params=self.forcing_params
             )
 
-        # PHASE 1: Biology (parallel)
-        if self.transport_enabled:
-            # Use biology_step when transport is external
-            futures = [worker.biology_step.remote(self.dt, forcings_ref) for worker in self.workers]
-        else:
-            # Use regular step when transport is local (legacy mode)
-            futures = [worker.step.remote(self.dt, forcings_ref) for worker in self.workers]
-
+        # PHASE 1: Local computation on all workers (parallel)
+        futures = [worker.step.remote(self.dt, forcings_ref) for worker in self.workers]
         bio_diagnostics = ray.get(futures)
 
-        # PHASE 2-4: Transport (if enabled)
+        # PHASE 2-4: Transport (if enabled and configured)
         transport_diag = None
-        if self.transport_enabled:
+        if self.transport_enabled and self.transport_config is not None:
             assert self.transport_worker is not None  # For type checking
 
-            # PHASE 2: Collect global biomass + production
-            biomass_global = self._collect_global_biomass()
-            production_global = self._collect_global_production()
-
-            # PHASE 3: Transport step
             # Get transport forcings (u, v, D, mask)
             transport_forcings = self._get_transport_forcings(forcings_ref)
 
-            # Transport biomass
-            transport_result = ray.get(
-                self.transport_worker.transport_step.remote(
-                    biomass=biomass_global,
-                    u=transport_forcings["u"],
-                    v=transport_forcings["v"],
-                    D=transport_forcings["D"],
-                    dt=self.dt,
-                    mask=transport_forcings.get("mask"),
+            # Process each field in transport configuration
+            for field_name in self.transport_config.get_field_names():
+                # PHASE 2: Compute field shape and collect global field
+                field_dims = self.transport_config.get_field_dims(field_name)
+                field_shape = self._compute_field_shape(field_name, field_dims)
+
+                # Collect global field from all workers
+                field_global = self._collect_global_field(field_name, field_shape)
+
+                # PHASE 3: Transport field
+                field_global, transport_diag = self._transport_field(
+                    field_name=field_name,
+                    field_global=field_global,
+                    field_dims=field_dims,
+                    transport_forcings=transport_forcings,
+                    last_diag=transport_diag,
                 )
-            )
 
-            biomass_global = transport_result["biomass"]
-            transport_diag = transport_result["diagnostics"]
-
-            # Transport production (loop over age classes)
-            n_ages = self.forcing_params.get("n_ages", 11)
-            production_transported = jnp.zeros_like(production_global)
-
-            for age in range(n_ages):
-                prod_result = ray.get(
-                    self.transport_worker.transport_step.remote(
-                        biomass=production_global[age],  # (nlat, nlon)
-                        u=transport_forcings["u"],
-                        v=transport_forcings["v"],
-                        D=transport_forcings["D"],
-                        dt=self.dt,
-                        mask=transport_forcings.get("mask"),
-                    )
-                )
-                production_transported = production_transported.at[age].set(prod_result["biomass"])
-
-            # PHASE 4: Redistribute biomass + production
-            self._redistribute_biomass(biomass_global)
-            self._redistribute_production(production_transported)
+                # PHASE 4: Redistribute field
+                self._redistribute_field(field_name, field_global)
 
         # Update current time
         self.t_current += self.dt
@@ -405,6 +352,126 @@ class EventScheduler:
             aggregated["transport"] = transport_diag
 
         return aggregated
+
+    def _compute_field_shape(self, field_name: str, field_dims: list[str]) -> tuple[int, ...]:
+        """Compute global shape for a field based on its dimensions.
+
+        Args:
+            field_name: Name of the field.
+            field_dims: List of dimension names for this field.
+
+        Returns:
+            Tuple representing the global shape.
+
+        Example:
+            >>> # Field with dims ['age', 'Y', 'X'] and n_ages=11
+            >>> shape = self._compute_field_shape('production', ['age', 'Y', 'X'])
+            >>> shape
+            (11, 120, 360)  # (n_ages, nlat, nlon)
+        """
+        shape = []
+        for dim in field_dims:
+            if dim == "Y":
+                assert self.global_nlat is not None
+                shape.append(self.global_nlat)
+            elif dim == "X":
+                assert self.global_nlon is not None
+                shape.append(self.global_nlon)
+            else:
+                # Non-spatial dimension: get size from forcing_params
+                dim_size = self.forcing_params.get(dim)
+                if dim_size is None:
+                    raise ValueError(
+                        f"Size for dimension '{dim}' of field '{field_name}' not found in forcing_params. "
+                        f"Please provide '{dim}' in forcing_params."
+                    )
+                shape.append(dim_size)
+
+        return tuple(shape)
+
+    def _transport_field(
+        self,
+        field_name: str,
+        field_global: jnp.ndarray,
+        field_dims: list[str],
+        transport_forcings: dict[str, jnp.ndarray],
+        last_diag: dict[str, Any] | None,
+    ) -> tuple[jnp.ndarray, dict[str, Any]]:
+        """Transport a field using the transport worker.
+
+        Handles both 2D and N-dimensional fields by looping over non-spatial dimensions.
+
+        Args:
+            field_name: Name of the field being transported.
+            field_global: Global field array.
+            field_dims: List of dimension names for this field.
+            transport_forcings: Dictionary with u, v, D, mask for transport.
+            last_diag: Previous transport diagnostics (to keep last one).
+
+        Returns:
+            Tuple of (transported_field, diagnostics).
+        """
+        assert self.transport_config is not None
+
+        # Get non-spatial dimensions
+        non_spatial_dims = self.transport_config.get_non_spatial_dims(field_name)
+
+        # Case 1: Pure 2D field (no extra dimensions)
+        if len(non_spatial_dims) == 0:
+            assert self.transport_worker is not None  # For mypy
+            result = ray.get(
+                self.transport_worker.transport_step.remote(
+                    biomass=field_global,
+                    u=transport_forcings["u"],
+                    v=transport_forcings["v"],
+                    D=transport_forcings["D"],
+                    dt=self.dt,
+                    mask=transport_forcings.get("mask"),
+                )
+            )
+            return result["biomass"], result["diagnostics"]
+
+        # Case 2: N-dimensional field (has extra dimensions)
+        # Build list of dimension sizes for iteration
+        dim_sizes = []
+        for dim in non_spatial_dims:
+            dim_idx = field_dims.index(dim)
+            dim_sizes.append(field_global.shape[dim_idx])
+
+        # Create all combinations of indices using itertools.product
+        assert self.transport_worker is not None  # For mypy
+        transported = jnp.zeros_like(field_global)
+        diagnostics: dict[str, Any] = last_diag if last_diag is not None else {}
+
+        for indices in itertools.product(*[range(size) for size in dim_sizes]):
+            # Build slice for extracting 2D slice
+            # We need to place indices in correct positions
+            full_slice = [slice(None)] * len(field_global.shape)
+
+            for i, dim in enumerate(non_spatial_dims):
+                dim_idx = field_dims.index(dim)
+                full_slice[dim_idx] = indices[i]
+
+            # Extract 2D slice
+            slice_2d = field_global[tuple(full_slice)]
+
+            # Transport this slice
+            result = ray.get(
+                self.transport_worker.transport_step.remote(
+                    biomass=slice_2d,
+                    u=transport_forcings["u"],
+                    v=transport_forcings["v"],
+                    D=transport_forcings["D"],
+                    dt=self.dt,
+                    mask=transport_forcings.get("mask"),
+                )
+            )
+
+            # Store transported slice back
+            transported = transported.at[tuple(full_slice)].set(result["biomass"])
+            diagnostics = result["diagnostics"]  # Update diagnostics
+
+        return transported, diagnostics
 
     def _aggregate_diagnostics(self, worker_diagnostics: list[dict[str, Any]]) -> dict[str, Any]:
         """Aggregate diagnostics from all workers.

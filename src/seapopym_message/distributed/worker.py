@@ -355,55 +355,42 @@ class CellWorker2D:
 
         return diagnostics
 
-    def get_biomass(self) -> jnp.ndarray:
-        """Get current biomass field for this patch.
+    def get_field(self, field_name: str) -> jnp.ndarray:
+        """Get a field from the current state.
 
-        Returns:
-            Biomass array with shape (nlat, nlon).
-            Returns zeros if 'biomass' not in state.
-        """
-        return self.state.get("biomass", jnp.zeros((self.nlat, self.nlon)))
-
-    def set_biomass(self, biomass: jnp.ndarray) -> None:
-        """Set biomass field for this patch (after transport).
+        This is a generic accessor for any field in the state dictionary.
+        Used by the scheduler to collect fields for transport.
 
         Args:
-            biomass: Biomass array with shape (nlat, nlon).
-        """
-        self.state["biomass"] = jnp.array(biomass)
-
-    def get_production(self) -> jnp.ndarray:
-        """Get current production field for this patch.
+            field_name: Name of the field to retrieve.
 
         Returns:
-            Production array with shape (n_ages, nlat, nlon).
-            Returns zeros if 'production' not in state.
-        """
-        n_ages = self.params.get("n_ages", 11)
-        return self.state.get("production", jnp.zeros((n_ages, self.nlat, self.nlon)))
+            Field array from state, or empty array if field not found.
 
-    def set_production(self, production: jnp.ndarray) -> None:
-        """Set production field for this patch (after transport).
+        Example:
+            >>> worker = CellWorker2D.remote(...)
+            >>> biomass = ray.get(worker.get_field.remote('biomass'))
+            >>> production = ray.get(worker.get_field.remote('production'))
+        """
+        if field_name not in self.state:
+            # Return empty array if field doesn't exist
+            # This allows graceful handling of optional fields
+            return jnp.array([])
+        return self.state[field_name]
+
+    def set_field(self, field_name: str, data: jnp.ndarray) -> None:
+        """Set a field in the current state.
+
+        This is a generic mutator for any field in the state dictionary.
+        Used by the scheduler to redistribute fields after transport.
 
         Args:
-            production: Production array with shape (n_ages, nlat, nlon).
+            field_name: Name of the field to set.
+            data: Field data array.
+
+        Example:
+            >>> worker = CellWorker2D.remote(...)
+            >>> ray.get(worker.set_field.remote('biomass', new_biomass))
+            >>> ray.get(worker.set_field.remote('production', new_production))
         """
-        self.state["production"] = jnp.array(production)
-
-    async def biology_step(
-        self, dt: float, forcings_global: dict[str, jnp.ndarray] | None = None
-    ) -> dict[str, Any]:
-        """Execute one biology timestep (without transport).
-
-        This method is identical to step() but semantically represents
-        the biology-only phase when transport is handled externally
-        by TransportWorker.
-
-        Args:
-            dt: Time step size.
-            forcings_global: Optional global forcings dict.
-
-        Returns:
-            Dictionary with diagnostics (time, mean values, etc.).
-        """
-        return await self.step(dt, forcings_global)
+        self.state[field_name] = jnp.array(data)

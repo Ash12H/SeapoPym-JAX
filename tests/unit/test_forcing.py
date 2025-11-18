@@ -8,9 +8,7 @@ import xarray as xr
 
 from seapopym_message.forcing import (
     DerivedForcing,
-    ForcingConfig,
     ForcingManager,
-    ForcingManagerConfig,
     derived_forcing,
 )
 from seapopym_message.forcing.derived import resolve_dependencies
@@ -67,63 +65,24 @@ def sample_pp_dataset():
     return ds
 
 
-def test_forcing_config():
-    """Test ForcingConfig dataclass."""
-    config = ForcingConfig(
-        source="data/temp.zarr",
-        dims=["time", "depth", "lat", "lon"],
-        units="°C",
-        interpolation_method="linear",
-    )
-
-    assert config.source == "data/temp.zarr"
-    assert config.dims == ["time", "depth", "lat", "lon"]
-    assert config.units == "°C"
-    assert config.interpolation_method == "linear"
-
-
 def test_forcing_manager_initialization(sample_temperature_dataset):
     """Test ForcingManager initialization with xarray Dataset."""
-    config = ForcingManagerConfig(
-        forcings={
-            "temperature": ForcingConfig(
-                source=sample_temperature_dataset,
-                dims=["time", "depth", "lat", "lon"],
-            ),
-        }
-    )
+    # Set metadata in attrs
+    sample_temperature_dataset.attrs["units"] = "°C"
+    sample_temperature_dataset.attrs["interpolation_method"] = "linear"
 
-    manager = ForcingManager(config)
+    manager = ForcingManager(datasets={"temperature": sample_temperature_dataset})
 
     assert "temperature" in manager.datasets
     assert isinstance(manager.datasets["temperature"], xr.Dataset)
-
-
-def test_forcing_manager_from_dict(sample_temperature_dataset):
-    """Test ForcingManager initialization from dict."""
-    config_dict = {
-        "temperature": {
-            "source": sample_temperature_dataset,
-            "dims": ["time", "depth", "lat", "lon"],
-        },
-    }
-
-    manager = ForcingManager(config_dict)
-
-    assert "temperature" in manager.datasets
-    assert isinstance(manager.datasets["temperature"], xr.Dataset)
+    assert manager.datasets["temperature"].attrs["units"] == "°C"
 
 
 def test_interpolate_time(sample_temperature_dataset):
     """Test temporal interpolation."""
-    config = {
-        "temperature": {
-            "source": sample_temperature_dataset,
-            "dims": ["time", "depth", "lat", "lon"],
-        },
-    }
+    sample_temperature_dataset.attrs["interpolation_method"] = "linear"
 
-    manager = ForcingManager(config)
+    manager = ForcingManager(datasets={"temperature": sample_temperature_dataset})
 
     # Interpolate at t=1800s (halfway between 0 and 3600)
     forcings = manager.prepare_timestep(time=1800.0)
@@ -135,14 +94,7 @@ def test_interpolate_time(sample_temperature_dataset):
 
 def test_interpolate_time_extrapolation_error(sample_temperature_dataset):
     """Test that extrapolation raises an error."""
-    config = {
-        "temperature": {
-            "source": sample_temperature_dataset,
-            "dims": ["time", "depth", "lat", "lon"],
-        },
-    }
-
-    manager = ForcingManager(config)
+    manager = ForcingManager(datasets={"temperature": sample_temperature_dataset})
 
     # Try to extrapolate beyond time range
     with pytest.raises(ValueError, match="outside the forcing data range"):
@@ -194,14 +146,7 @@ def test_derived_forcing_compute():
 def test_forcing_manager_with_derived(sample_pp_dataset):
     """Test ForcingManager with derived forcings."""
     # Create manager with base forcing
-    config = {
-        "primary_production": {
-            "source": sample_pp_dataset,
-            "dims": ["time", "lat", "lon"],
-        },
-    }
-
-    manager = ForcingManager(config)
+    manager = ForcingManager(datasets={"primary_production": sample_pp_dataset})
 
     # Register derived forcing
     @derived_forcing(
@@ -314,14 +259,7 @@ def test_prepare_timestep_distributed(sample_temperature_dataset):
         ray.init(num_cpus=2)
 
     try:
-        config = {
-            "temperature": {
-                "source": sample_temperature_dataset,
-                "dims": ["time", "depth", "lat", "lon"],
-            },
-        }
-
-        manager = ForcingManager(config)
+        manager = ForcingManager(datasets={"temperature": sample_temperature_dataset})
 
         # Prepare forcings and put in object store
         forcings_ref = manager.prepare_timestep_distributed(time=1800.0)

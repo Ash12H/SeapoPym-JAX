@@ -1,17 +1,24 @@
 """ForcingManager: Central orchestrator for environmental forcings.
 
-The ForcingManager handles loading, interpolation, and distribution of
-environmental forcing data (temperature, currents, primary production, etc.)
-to distributed workers.
+The ForcingManager handles interpolation and distribution of environmental
+forcing data (temperature, currents, primary production, etc.) to distributed workers.
 
 Key features:
-- Lazy loading from Zarr/NetCDF via xarray
 - Temporal interpolation using xarray.interp()
 - Caching in Ray object store for zero-copy sharing
 - Support for derived forcings (computed from base forcings)
+
+Note:
+    ForcingManager expects pre-loaded xarray Datasets. Loading from files
+    is the user's responsibility, allowing full control over I/O (chunking,
+    caching, parallel loading, etc.).
+
+Metadata:
+    Datasets should store metadata in their .attrs dictionary:
+    - 'units': Physical units (e.g., '°C', 'm/s')
+    - 'interpolation_method': Temporal interpolation method ('linear', 'nearest')
 """
 
-from dataclasses import dataclass, field
 from typing import Any
 
 import jax.numpy as jnp
@@ -21,142 +28,66 @@ import xarray as xr
 from seapopym_message.forcing.derived import resolve_dependencies
 
 
-@dataclass
-class ForcingConfig:
-    """Configuration for a single forcing variable.
-
-    Args:
-        source: Path to Zarr/NetCDF file or xarray.Dataset directly.
-        dims: List of dimension names (e.g., ["time", "depth", "lat", "lon"]).
-        units: Physical units (optional, for documentation).
-        interpolation_method: Temporal interpolation method ("linear", "nearest").
-
-    Example:
-        >>> config = ForcingConfig(
-        ...     source="data/temperature.zarr",
-        ...     dims=["time", "depth", "lat", "lon"],
-        ...     units="°C",
-        ...     interpolation_method="linear",
-        ... )
-    """
-
-    source: str | xr.Dataset
-    dims: list[str]
-    units: str = ""
-    interpolation_method: str = "linear"
-
-
-@dataclass
-class ForcingManagerConfig:
-    """Configuration for ForcingManager.
-
-    Args:
-        forcings: Dictionary mapping forcing names to their configs.
-
-    Example:
-        >>> config = ForcingManagerConfig(
-        ...     forcings={
-        ...         "temperature": ForcingConfig(
-        ...             source="data/temp.zarr",
-        ...             dims=["time", "depth", "lat", "lon"],
-        ...         ),
-        ...         "primary_production": ForcingConfig(
-        ...             source="data/pp.zarr",
-        ...             dims=["time", "lat", "lon"],
-        ...         ),
-        ...     }
-        ... )
-    """
-
-    forcings: dict[str, ForcingConfig] = field(default_factory=dict)
-
-
 class ForcingManager:
     """Central manager for environmental forcing data.
 
-    The ForcingManager loads forcing datasets from Zarr/NetCDF files,
-    performs temporal interpolation, and distributes data to workers
-    via Ray object store.
+    The ForcingManager performs temporal interpolation and distributes data
+    to workers via Ray object store.
 
     Architecture:
-    - Level 1: Base forcings (loaded from files)
+    - Level 1: Base forcings (pre-loaded xarray Datasets)
     - Level 2: Derived forcings (computed from base forcings)
     - Distribution via Ray object store (zero-copy)
 
     Args:
-        config: ForcingManagerConfig with forcing specifications.
+        datasets: Dictionary mapping forcing names to pre-loaded xarray Datasets.
+                 Datasets should include metadata in .attrs:
+                 - 'interpolation_method': 'linear' or 'nearest' (default: 'linear')
+                 - 'units': Physical units (optional, for documentation)
+        derived_forcings: Optional dict of DerivedForcing instances.
 
     Example:
-        >>> config = ForcingManagerConfig(
-        ...     forcings={
-        ...         "temperature": ForcingConfig(
-        ...             source="data/temp.zarr",
-        ...             dims=["time", "depth", "lat", "lon"],
-        ...         ),
-        ...     }
-        ... )
-        >>> manager = ForcingManager(config)
+        >>> import xarray as xr
+        >>> # User controls I/O
+        >>> temp_ds = xr.open_zarr("data/temp.zarr", chunks={'time': 10})
+        >>> temp_ds.attrs['units'] = '°C'
+        >>> temp_ds.attrs['interpolation_method'] = 'linear'
+        >>>
+        >>> manager = ForcingManager(datasets={'temperature': temp_ds})
         >>> forcings_at_t = manager.prepare_timestep(time=3600.0)
     """
 
-    def __init__(self, config: ForcingManagerConfig | dict[str, dict]) -> None:
-        """Initialize ForcingManager.
+    def __init__(
+        self,
+        datasets: dict[str, xr.Dataset],
+        derived_forcings: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize ForcingManager with pre-loaded datasets.
 
         Args:
-            config: ForcingManagerConfig or dict that will be converted to config.
+            datasets: Dict mapping forcing names to xarray Datasets.
+            derived_forcings: Optional dict of DerivedForcing instances.
         """
-        # Convert dict to ForcingManagerConfig if needed
-        if isinstance(config, dict):
-            forcing_configs = {
-                name: ForcingConfig(**cfg) if isinstance(cfg, dict) else cfg
-                for name, cfg in config.items()
-            }
-            self.config = ForcingManagerConfig(forcings=forcing_configs)
-        else:
-            self.config = config
-
-        # Load datasets (lazy loading with xarray)
-        self.datasets: dict[str, xr.Dataset] = {}
-        self._load_datasets()
+        self.datasets = datasets
 
         # Cache for interpolated forcings
         # Key: (time,) -> Ray ObjectRef
         self._cache: dict[tuple[float], ray.ObjectRef] = {}
 
-        # Registry for derived forcings (will be populated later)
-        self.derived_forcings: dict[str, Any] = {}
+        # Registry for derived forcings
+        self.derived_forcings = derived_forcings if derived_forcings is not None else {}
 
-    def _load_datasets(self) -> None:
-        """Load forcing datasets from sources.
-
-        Uses xarray.open_zarr() or xarray.open_dataset() depending on source type.
-        Datasets are loaded lazily (data not read until accessed).
-        """
-        for name, forcing_config in self.config.forcings.items():
-            source = forcing_config.source
-
-            if isinstance(source, xr.Dataset):
-                # Already a dataset (useful for testing)
-                self.datasets[name] = source
-            elif isinstance(source, str):
-                # Path to file
-                if source.endswith(".zarr") or "/" in source and ".zarr" in source:
-                    # Zarr store
-                    self.datasets[name] = xr.open_zarr(source)
-                else:
-                    # NetCDF file
-                    self.datasets[name] = xr.open_dataset(source)
-            else:
-                msg = f"Unsupported source type for forcing '{name}': {type(source)}"
-                raise TypeError(msg)
-
-    def _interpolate_time(self, dataset: xr.Dataset, time: float, method: str) -> xr.Dataset:
+    def _interpolate_time(
+        self, dataset: xr.Dataset, time: float, method: str | None = None
+    ) -> xr.Dataset:
         """Interpolate dataset to a specific time.
 
         Args:
             dataset: xarray Dataset to interpolate.
             time: Target time (in same units as dataset's time coordinate).
             method: Interpolation method ("linear", "nearest").
+                   If None, reads from dataset.attrs['interpolation_method'],
+                   defaulting to 'linear'.
 
         Returns:
             Interpolated dataset at the given time.
@@ -174,6 +105,10 @@ class ForcingManager:
                 f"[{time_min}, {time_max}]. Extrapolation is not supported."
             )
             raise ValueError(msg)
+
+        # Get interpolation method from attrs if not provided
+        if method is None:
+            method = dataset.attrs.get("interpolation_method", "linear")
 
         # Interpolate using xarray
         interpolated = dataset.interp(time=time, method=method)
@@ -210,14 +145,10 @@ class ForcingManager:
 
         forcings: dict[str, jnp.ndarray] = {}
 
-        # Load base forcings from files
-        for name, forcing_config in self.config.forcings.items():
-            dataset = self.datasets[name]
-
-            # Interpolate to time
-            interpolated = self._interpolate_time(
-                dataset, time, forcing_config.interpolation_method
-            )
+        # Load base forcings from datasets
+        for name, dataset in self.datasets.items():
+            # Interpolate to time (method read from dataset.attrs)
+            interpolated = self._interpolate_time(dataset, time)
 
             # Convert to JAX array
             # Assuming single data variable in dataset, or using name as variable
@@ -298,6 +229,6 @@ class ForcingManager:
 
     def __repr__(self) -> str:
         """String representation."""
-        num_base = len(self.config.forcings)
+        num_base = len(self.datasets)
         num_derived = len(self.derived_forcings)
         return f"ForcingManager(base_forcings={num_base}, " f"derived_forcings={num_derived})"

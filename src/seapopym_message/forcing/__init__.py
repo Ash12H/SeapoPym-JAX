@@ -1,28 +1,31 @@
-"""Forcing data management: NetCDF/Zarr readers, interpolation.
+"""Forcing data management: interpolation and distribution.
 
 This module provides:
 - ForcingManager: Central orchestrator for environmental forcings
-- ForcingConfig: Configuration for base forcings (from files)
 - @derived_forcing: Decorator to create derived forcings
 - DerivedForcing: Metadata for derived forcings
+- I/O helpers: load_forcing_from_path, load_forcings_from_paths
 
 Example:
+    >>> import xarray as xr
     >>> from seapopym_message.forcing import (
     ...     ForcingManager,
-    ...     ForcingConfig,
     ...     derived_forcing,
+    ...     load_forcing_from_path,
     ... )
     >>>
-    >>> # Configure base forcings
-    >>> config = {
-    ...     "temperature": ForcingConfig(
-    ...         source="data/temp.zarr",
-    ...         dims=["time", "depth", "lat", "lon"],
-    ...     ),
-    ... }
+    >>> # Option 1: User controls I/O directly
+    >>> temp_ds = xr.open_zarr("data/temp.zarr", chunks={'time': 10})
+    >>> temp_ds.attrs['units'] = '°C'
+    >>> temp_ds.attrs['interpolation_method'] = 'linear'
     >>>
-    >>> # Create manager
-    >>> manager = ForcingManager(config)
+    >>> # Option 2: Use helper function
+    >>> temp_ds = load_forcing_from_path("data/temp.zarr", chunks={'time': 10})
+    >>> temp_ds.attrs['units'] = '°C'
+    >>> temp_ds.attrs['interpolation_method'] = 'linear'
+    >>>
+    >>> # Create manager with pre-loaded datasets
+    >>> manager = ForcingManager(datasets={'temperature': temp_ds})
     >>>
     >>> # Add derived forcing
     >>> @derived_forcing(
@@ -37,16 +40,13 @@ Example:
 """
 
 from seapopym_message.forcing.derived import DerivedForcing, derived_forcing
-from seapopym_message.forcing.manager import (
-    ForcingConfig,
-    ForcingManager,
-    ForcingManagerConfig,
-)
+from seapopym_message.forcing.io import load_forcing_from_path, load_forcings_from_paths
+from seapopym_message.forcing.manager import ForcingManager
 
 __all__ = [
     "ForcingManager",
-    "ForcingManagerConfig",
-    "ForcingConfig",
     "DerivedForcing",
     "derived_forcing",
+    "load_forcing_from_path",
+    "load_forcings_from_paths",
 ]

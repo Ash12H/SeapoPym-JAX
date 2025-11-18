@@ -10,7 +10,7 @@ from seapopym_message import create_distributed_simulation, initialize_workers
 from seapopym_message.core.kernel import Kernel
 from seapopym_message.core.unit import unit
 from seapopym_message.distributed.scheduler import EventScheduler
-from seapopym_message.forcing import ForcingConfig, ForcingManager, derived_forcing
+from seapopym_message.forcing import ForcingManager, derived_forcing
 from seapopym_message.utils.grid import GridInfo
 
 
@@ -55,14 +55,8 @@ def test_forcing_with_unit(ray_context):
     )
 
     # Create ForcingManager
-    forcing_manager = ForcingManager(
-        {
-            "recruitment": ForcingConfig(
-                source=recruitment_ds,
-                dims=["time", "lat", "lon"],
-            ),
-        }
-    )
+    recruitment_ds.attrs["interpolation_method"] = "linear"
+    forcing_manager = ForcingManager(datasets={"recruitment": recruitment_ds})
 
     # Create grid and workers
     grid = GridInfo(lat_min=-5, lat_max=5, lon_min=-5, lon_max=5, nlat=10, nlon=10)
@@ -152,14 +146,8 @@ def test_derived_forcing_with_workers(ray_context):
         return biomass + (R - lambda_val * biomass) * dt
 
     # Setup forcing manager with derived forcing
-    forcing_manager = ForcingManager(
-        {
-            "primary_production": ForcingConfig(
-                source=pp_ds,
-                dims=["time", "lat", "lon"],
-            ),
-        }
-    )
+    pp_ds.attrs["interpolation_method"] = "linear"
+    forcing_manager = ForcingManager(datasets={"primary_production": pp_ds})
     forcing_manager.register_derived(compute_recruitment)
 
     # Create simulation
