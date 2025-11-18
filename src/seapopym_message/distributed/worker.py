@@ -372,6 +372,24 @@ class CellWorker2D:
         """
         self.state["biomass"] = jnp.array(biomass)
 
+    def get_production(self) -> jnp.ndarray:
+        """Get current production field for this patch.
+
+        Returns:
+            Production array with shape (n_ages, nlat, nlon).
+            Returns zeros if 'production' not in state.
+        """
+        n_ages = self.params.get("n_ages", 11)
+        return self.state.get("production", jnp.zeros((n_ages, self.nlat, self.nlon)))
+
+    def set_production(self, production: jnp.ndarray) -> None:
+        """Set production field for this patch (after transport).
+
+        Args:
+            production: Production array with shape (n_ages, nlat, nlon).
+        """
+        self.state["production"] = jnp.array(production)
+
     async def biology_step(
         self, dt: float, forcings_global: dict[str, jnp.ndarray] | None = None
     ) -> dict[str, Any]:

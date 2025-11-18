@@ -188,6 +188,80 @@ class EventScheduler:
         # Wait for all workers to receive their biomass
         ray.get(futures)
 
+    def _collect_global_production(self) -> jnp.ndarray:
+        """Assemble global production field from all workers.
+
+        Collects production patches from each worker and assembles them
+        into a global grid according to worker topology.
+
+        Returns:
+            Global production array with shape (n_ages, global_nlat, global_nlon).
+
+        Raises:
+            ValueError: If transport not enabled or topology not available.
+        """
+        if not self.transport_enabled:
+            raise ValueError("Cannot collect production: transport not enabled")
+
+        # Get n_ages from forcing_params or use default
+        n_ages = self.forcing_params.get("n_ages", 11)
+
+        # Collect production from all workers in parallel
+        futures = [worker.get_production.remote() for worker in self.workers]
+        patches = ray.get(futures)  # List of (n_ages, nlat_local, nlon_local)
+
+        # Initialize global production grid
+        assert self.global_nlat is not None and self.global_nlon is not None
+        production_global = jnp.zeros(
+            (n_ages, self.global_nlat, self.global_nlon), dtype=jnp.float32
+        )
+
+        # Assemble patches into global grid
+        for patch, topology in zip(patches, self.worker_topology, strict=True):
+            lat_start = topology["lat_start"]
+            lat_end = topology["lat_end"]
+            lon_start = topology["lon_start"]
+            lon_end = topology["lon_end"]
+
+            # Insert patch into global grid (all ages at once)
+            production_global = production_global.at[:, lat_start:lat_end, lon_start:lon_end].set(
+                patch
+            )
+
+        return production_global
+
+    def _redistribute_production(self, production_global: jnp.ndarray) -> None:
+        """Redistribute global production field to all workers.
+
+        Extracts patches from the global production grid and distributes
+        them to the corresponding workers according to topology.
+
+        Args:
+            production_global: Global production array, shape (n_ages, global_nlat, global_nlon).
+
+        Raises:
+            ValueError: If transport not enabled or topology not available.
+        """
+        if not self.transport_enabled:
+            raise ValueError("Cannot redistribute production: transport not enabled")
+
+        # Extract and send patches to workers
+        futures = []
+        for worker, topology in zip(self.workers, self.worker_topology, strict=True):
+            lat_start = topology["lat_start"]
+            lat_end = topology["lat_end"]
+            lon_start = topology["lon_start"]
+            lon_end = topology["lon_end"]
+
+            # Extract patch from global grid (all ages)
+            patch = production_global[:, lat_start:lat_end, lon_start:lon_end]
+
+            # Send to worker (non-blocking)
+            futures.append(worker.set_production.remote(patch))
+
+        # Wait for all workers to receive their production
+        ray.get(futures)
+
     def _get_transport_forcings(self, forcings_ref: ray.ObjectRef | None) -> dict[str, jnp.ndarray]:
         """Extract transport forcings from global forcings.
 
@@ -237,11 +311,13 @@ class EventScheduler:
         3. Wait for all workers to complete
         4. Collect and aggregate diagnostics
 
-        Workflow (with transport, 5 phases):
+        Workflow (with transport, 6 phases for zooplankton model):
         1. PHASE BIOLOGIE: Launch biology_step() on all workers in parallel
-        2. COLLECTE BIOMASSE: Assemble global biomass grid from workers
+        2. COLLECTE: Assemble global biomass + production grids from workers
         3. PHASE TRANSPORT: Execute transport_step() on TransportWorker
-        4. REDISTRIBUTION: Distribute updated biomass to workers
+           - Transport biomass (1 field)
+           - Transport production (n_ages fields, loop over age classes)
+        4. REDISTRIBUTION: Distribute updated biomass + production to workers
         5. AGRÉGATION: Aggregate biology + transport diagnostics
 
         Returns:
@@ -274,14 +350,15 @@ class EventScheduler:
         if self.transport_enabled:
             assert self.transport_worker is not None  # For type checking
 
-            # PHASE 2: Collect global biomass
+            # PHASE 2: Collect global biomass + production
             biomass_global = self._collect_global_biomass()
+            production_global = self._collect_global_production()
 
             # PHASE 3: Transport step
             # Get transport forcings (u, v, D, mask)
             transport_forcings = self._get_transport_forcings(forcings_ref)
 
-            # Execute transport on global grid
+            # Transport biomass
             transport_result = ray.get(
                 self.transport_worker.transport_step.remote(
                     biomass=biomass_global,
@@ -296,8 +373,26 @@ class EventScheduler:
             biomass_global = transport_result["biomass"]
             transport_diag = transport_result["diagnostics"]
 
-            # PHASE 4: Redistribute biomass
+            # Transport production (loop over age classes)
+            n_ages = self.forcing_params.get("n_ages", 11)
+            production_transported = jnp.zeros_like(production_global)
+
+            for age in range(n_ages):
+                prod_result = ray.get(
+                    self.transport_worker.transport_step.remote(
+                        biomass=production_global[age],  # (nlat, nlon)
+                        u=transport_forcings["u"],
+                        v=transport_forcings["v"],
+                        D=transport_forcings["D"],
+                        dt=self.dt,
+                        mask=transport_forcings.get("mask"),
+                    )
+                )
+                production_transported = production_transported.at[age].set(prod_result["biomass"])
+
+            # PHASE 4: Redistribute biomass + production
             self._redistribute_biomass(biomass_global)
+            self._redistribute_production(production_transported)
 
         # Update current time
         self.t_current += self.dt
