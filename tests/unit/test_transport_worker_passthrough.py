@@ -50,8 +50,8 @@ class TestTransportWorkerPassthrough:
                 v=v,
                 D=D,
                 dt=dt,
-                dx=dx,
-                dy=dy,
+                _dx=dx,
+                _dy=dy,
                 mask=None,
             )
         )
@@ -86,8 +86,8 @@ class TestTransportWorkerPassthrough:
                 v=v,
                 D=0.0,
                 dt=1000.0,
-                dx=10000.0,
-                dy=10000.0,
+                _dx=10000.0,
+                _dy=10000.0,
                 mask=mask,
             )
         )
@@ -116,8 +116,8 @@ class TestTransportWorkerPassthrough:
                     v=v,
                     D=D,
                     dt=600.0,
-                    dx=15000.0,
-                    dy=15000.0,
+                    _dx=15000.0,
+                    _dy=15000.0,
                     mask=None,
                 )
             )
@@ -149,8 +149,8 @@ class TestTransportWorkerPassthrough:
                 v=v,
                 D=0.0,
                 dt=1.0,
-                dx=1000.0,
-                dy=1000.0,
+                _dx=1000.0,
+                _dy=1000.0,
                 mask=None,
             )
         )

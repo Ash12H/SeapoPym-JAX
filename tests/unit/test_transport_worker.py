@@ -64,8 +64,10 @@ class TestTransportWorkerInitialization:
 
         worker = TransportWorker.remote(grid_type="invalid")
 
-        # Should raise error when trying to use (ValueError wrapped in RayTaskError)
-        with pytest.raises((ValueError, ray.exceptions.RayTaskError)):
+        # Should raise error when trying to use (ValueError, RayTaskError, or ActorDiedError)
+        with pytest.raises(
+            (ValueError, ray.exceptions.RayTaskError, ray.exceptions.ActorDiedError)
+        ):
             ray.get(
                 worker.transport_step.remote(
                     biomass=jnp.ones((10, 10)),
