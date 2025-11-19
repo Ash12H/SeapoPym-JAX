@@ -92,10 +92,30 @@ class TransportWorker:
         R: float = 6371e3,
         lat_bc: str = "closed",
         lon_bc: str = "periodic",
+        mask: Any | None = None,
     ) -> None:
         """Initialize TransportWorker with grid and boundary conditions.
 
         The grid geometry is computed once and cached for efficiency.
+
+        Args:
+            grid_type: Type of grid ("spherical" or "plane")
+            lat_min: Minimum latitude [degrees] (spherical only)
+            lat_max: Maximum latitude [degrees] (spherical only)
+            lon_min: Minimum longitude [degrees] (spherical only)
+            lon_max: Maximum longitude [degrees] (spherical only)
+            nlat: Number of latitude grid cells
+            nlon: Number of longitude grid cells
+            dx: Grid spacing in x direction [m] (plane grid only)
+            dy: Grid spacing in y direction [m] (plane grid only)
+            R: Earth radius [m] (spherical only, default 6371e3)
+            lat_bc: North/South boundary type ("closed", "periodic", "open")
+            lon_bc: East/West boundary type ("closed", "periodic", "open")
+            mask: Ocean/land mask as xarray.DataArray (optional)
+                  - 2D: coords=["lat", "lon"] or ["Y", "X"], shape (nlat, nlon)
+                  - 3D: coords=["depth", "lat", "lon"] for bathymetry
+                  - Values: 1.0 = ocean, 0.0 = land
+                  - dtype: float32
         """
         # Create grid based on type
         self.grid: Grid
@@ -108,11 +128,12 @@ class TransportWorker:
                 nlat=nlat,
                 nlon=nlon,
                 R=R,
+                mask=mask,
             )
         elif grid_type == "plane":
             if dx is None or dy is None:
                 raise ValueError("Plane grid requires dx and dy parameters")
-            self.grid = PlaneGrid(dx=dx, dy=dy, nlat=nlat, nlon=nlon)
+            self.grid = PlaneGrid(dx=dx, dy=dy, nlat=nlat, nlon=nlon, mask=mask)
         else:
             raise ValueError(f"Unknown grid_type: {grid_type}")
 
@@ -139,7 +160,7 @@ class TransportWorker:
         dt: float,
         _dx: float | None = None,  # Legacy parameter, ignored if grid initialized
         _dy: float | None = None,  # Legacy parameter, ignored if grid initialized
-        mask: jnp.ndarray | None = None,
+        mask: jnp.ndarray | None = None,  # Deprecated: use grid.mask instead
     ) -> dict[str, Any]:
         """Execute one transport step with advection + diffusion.
 
@@ -151,7 +172,9 @@ class TransportWorker:
             dt: Time step [s]
             _dx: Legacy parameter (ignored, grid spacing from self.grid)
             _dy: Legacy parameter (ignored, grid spacing from self.grid)
-            mask: Ocean mask (1=ocean, 0=land, NaN=land), shape (nlat, nlon)
+            mask: Deprecated parameter (use grid.mask instead)
+                  Ocean mask (1=ocean, 0=land, NaN=land), shape (nlat, nlon)
+                  If provided, overrides grid.mask for backward compatibility
 
         Returns:
             Dictionary containing:
@@ -161,6 +184,10 @@ class TransportWorker:
         import time
 
         t_start = time.perf_counter()
+
+        # Use grid mask if available, otherwise fall back to parameter mask
+        # Grid mask takes precedence (new architecture)
+        effective_mask = self.grid.get_mask() if self.grid.get_mask() is not None else mask
 
         # Convert D to scalar if array (take mean for stability check)
         D_scalar = float(jnp.mean(D)) if isinstance(D, jnp.ndarray) else D
@@ -186,12 +213,12 @@ class TransportWorker:
             dt=dt,
             grid=self.grid,
             boundary=self.boundary,
-            mask=mask,
+            mask=effective_mask,
         )
         t_adv_end = time.perf_counter()
 
         adv_diagnostics = compute_advection_diagnostics(
-            biomass, biomass_advected, u, v, dt, self.grid, mask
+            biomass, biomass_advected, u, v, dt, self.grid, effective_mask
         )
 
         # Step 2: Diffusion
@@ -202,14 +229,14 @@ class TransportWorker:
             dt=dt,
             grid=self.grid,
             boundary=self.boundary,
-            mask=mask,
+            mask=effective_mask,
         )
         t_diff_end = time.perf_counter()
 
         # Final diagnostics
         cell_areas = self.grid.cell_areas()
-        if mask is not None:
-            ocean_mask = jnp.where(jnp.isnan(mask), 0.0, mask)
+        if effective_mask is not None:
+            ocean_mask = jnp.where(jnp.isnan(effective_mask), 0.0, effective_mask)
         else:
             ocean_mask = jnp.ones_like(biomass)
 

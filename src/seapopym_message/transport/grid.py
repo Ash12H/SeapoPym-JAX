@@ -12,6 +12,7 @@ References:
 from abc import ABC, abstractmethod
 
 import jax.numpy as jnp
+import xarray as xr
 
 
 class Grid(ABC):
@@ -21,9 +22,12 @@ class Grid(ABC):
     - Cell areas (for volume calculations)
     - Face areas (for flux calculations)
     - Grid spacing (for gradient/laplacian approximations)
+    - Ocean/land mask (optional, for coastal boundaries)
 
     All implementations must pre-compute these quantities for efficiency.
     """
+
+    mask: xr.DataArray | None = None
 
     @abstractmethod
     def cell_areas(self) -> jnp.ndarray:
@@ -73,6 +77,20 @@ class Grid(ABC):
         """
         pass
 
+    def get_mask(self) -> jnp.ndarray | None:
+        """Return ocean/land mask as JAX array.
+
+        Returns:
+            Ocean mask array or None if no mask defined:
+            - 2D mask: shape (nlat, nlon)
+            - 3D mask: shape (n_depths, nlat, nlon)
+            - Values: 1.0 = ocean, 0.0 = land
+            - dtype: float32
+        """
+        if self.mask is None:
+            return None
+        return jnp.array(self.mask.values, dtype=jnp.float32)
+
 
 class SphericalGrid(Grid):
     """Spherical lat/lon grid for oceanic transport.
@@ -107,6 +125,7 @@ class SphericalGrid(Grid):
         nlat: int,
         nlon: int,
         R: float = 6371e3,
+        mask: xr.DataArray | None = None,
     ):
         """Initialize spherical grid.
 
@@ -118,6 +137,11 @@ class SphericalGrid(Grid):
             nlat: Number of latitude cells
             nlon: Number of longitude cells
             R: Earth radius [m], default 6371e3
+            mask: Ocean/land mask as xarray.DataArray (optional)
+                  - 2D: coords=["lat", "lon"], shape (nlat, nlon)
+                  - 3D: coords=["depth", "lat", "lon"] for bathymetry
+                  - Values: 1.0 = ocean, 0.0 = land
+                  - dtype: float32
         """
         self.lat_min = lat_min
         self.lat_max = lat_max
@@ -126,6 +150,7 @@ class SphericalGrid(Grid):
         self.nlat = nlat
         self.nlon = nlon
         self.R = R
+        self.mask = mask
 
         # Compute grid spacing in degrees
         self.dlat = (lat_max - lat_min) / nlat
@@ -258,6 +283,7 @@ class PlaneGrid(Grid):
         dy: float,
         nlat: int,
         nlon: int,
+        mask: xr.DataArray | None = None,
     ):
         """Initialize plane grid.
 
@@ -266,11 +292,17 @@ class PlaneGrid(Grid):
             dy: Grid spacing in y/latitude direction [m]
             nlat: Number of cells in y direction
             nlon: Number of cells in x direction
+            mask: Ocean/land mask as xarray.DataArray (optional)
+                  - 2D: coords=["Y", "X"], shape (nlat, nlon)
+                  - 3D: coords=["depth", "Y", "X"] for bathymetry
+                  - Values: 1.0 = ocean, 0.0 = land
+                  - dtype: float32
         """
         self._dx = dx
         self._dy = dy
         self.nlat = nlat
         self.nlon = nlon
+        self.mask = mask
 
         # Pre-compute constant areas
         self._cell_area = dx * dy
