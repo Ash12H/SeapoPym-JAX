@@ -214,9 +214,7 @@ def compute_mortality_forcing(
     scope="local",
     forcings=["npp", "tau_r"],
 )
-def age_production(
-    production: jnp.ndarray, _dt: float, params: dict, forcings: dict
-) -> jnp.ndarray:
+def age_production(production: jnp.ndarray, dt: float, params: dict, forcings: dict) -> jnp.ndarray:  # noqa: ARG001
     """Age production with NPP source and total absorption at recruitment.
 
     Algorithm (with α→∞ limit):
@@ -231,7 +229,7 @@ def age_production(
 
     Args:
         production: Production by age class, shape (n_ages, nlat, nlon) [kg/m²]
-        _dt: Time step [days] (not used, kept for unit signature compatibility)
+        dt: Time step [days] (not used, kept for unit signature compatibility)
         params: Model parameters dict with keys:
             - n_ages: Number of age classes
             - E: Transfer efficiency from NPP to production
@@ -292,7 +290,10 @@ def age_production(
     forcings=["tau_r"],
 )
 def compute_recruitment(
-    production: jnp.ndarray, _dt: float, params: dict, forcings: dict
+    production: jnp.ndarray,
+    dt: float,  # noqa: ARG001
+    params: dict,
+    forcings: dict,
 ) -> jnp.ndarray:
     """Calculate recruitment from absorbed production.
 
@@ -307,7 +308,7 @@ def compute_recruitment(
 
     Args:
         production: Production by age class, shape (n_ages, nlat, nlon) [kg/m²]
-        _dt: Time step [days] (not used, kept for unit signature compatibility)
+        dt: Time step [days] (not used, kept for unit signature compatibility)
         params: Model parameters dict with keys:
             - n_ages: Number of age classes
         forcings: Forcing fields dict with keys:
@@ -358,7 +359,11 @@ def compute_recruitment(
     forcings=["mortality"],
 )
 def update_biomass(
-    biomass: jnp.ndarray, recruitment: jnp.ndarray, dt: float, _params: dict, forcings: dict
+    biomass: jnp.ndarray,
+    recruitment: jnp.ndarray,
+    dt: float,
+    params: dict,  # noqa: ARG001
+    forcings: dict,
 ) -> jnp.ndarray:
     """Update adult biomass using implicit Euler scheme.
 
@@ -377,7 +382,7 @@ def update_biomass(
         biomass: Adult biomass [kg/m²], shape (nlat, nlon)
         recruitment: Recruitment flux [kg/m²/day], shape (nlat, nlon)
         dt: Time step [days]
-        _params: Model parameters dict (not used for this unit)
+        params: Model parameters dict (not used for this unit)
         forcings: Forcing fields dict with keys:
             - mortality: Temperature-dependent mortality rate [day⁻¹], shape (nlat, nlon)
                         (computed as derived forcing from temperature)
