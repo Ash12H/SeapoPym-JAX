@@ -10,6 +10,30 @@ Key features:
 - Recruitment by total absorption (α→∞) in window [τ_r(T), τ_r0]
 - Both compartments are transported (advection + diffusion)
 
+Unit execution order:
+    CRITICAL: The biological units must be executed in this specific order:
+
+    1. compute_recruitment(production) -> recruitment
+       Calculates recruitment from production[age-1] BEFORE aging occurs
+
+    2. age_production(production) -> production
+       Ages production and absorbs (sets to 0) recruited age classes
+
+    3. update_biomass(biomass, recruitment) -> biomass
+       Updates adult biomass with the calculated recruitment
+
+    The order is critical because compute_recruitment must read production
+    values before age_production modifies them. When creating a Kernel,
+    pass units in this order to ensure correct execution.
+
+    Example:
+        >>> from seapopym_message.core.kernel import Kernel
+        >>> kernel = Kernel([
+        ...     compute_recruitment,  # MUST be first
+        ...     age_production,       # MUST be second
+        ...     update_biomass        # MUST be third
+        ... ])
+
 Mathematical formulation:
     See: Annexe A – Formulation du modèle sans transport.md
     Implementation plan: IA/ZOOPLANKTON_IMPLEMENTATION_PLAN.md
@@ -220,8 +244,10 @@ def age_production(
         Updated production field, shape (n_ages, nlat, nlon) [kg/m²]
 
     Note:
-        This unit must be executed BEFORE compute_recruitment in the kernel
-        to ensure proper mass conservation.
+        This unit must be executed AFTER compute_recruitment in the kernel
+        to ensure proper mass conservation. The recruitment is calculated from
+        production[age-1] before aging occurs, then aging absorbs (sets to 0)
+        the recruited production.
 
     Example:
         >>> import jax.numpy as jnp
@@ -292,8 +318,9 @@ def compute_recruitment(
         Recruitment flux [kg/m²/day], shape (nlat, nlon)
 
     Note:
-        After this unit, the recruited production is already set to 0 by
-        age_production unit, ensuring mass conservation.
+        This unit must be executed BEFORE age_production in the kernel.
+        It calculates recruitment from production[age-1] before the aging
+        step absorbs (sets to 0) the recruited production.
 
     Example:
         >>> import jax.numpy as jnp

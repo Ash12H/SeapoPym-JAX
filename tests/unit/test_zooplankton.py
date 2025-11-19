@@ -472,3 +472,66 @@ class TestMassConservation:
 
         # Should match within numerical precision
         assert jnp.abs(actual_change - expected_change) / jnp.abs(expected_change) < 0.01
+
+
+class TestExecutionOrder:
+    """Tests to verify that unit execution order is critical and documented."""
+
+    def test_correct_order_produces_recruitment(self):
+        """Correct order (recruit BEFORE aging) should produce non-zero recruitment."""
+        n_ages = 11
+        nlat, nlon = 5, 5
+
+        # Set production at age 5 (will be recruited when aging to age 6)
+        production = jnp.zeros((n_ages, nlat, nlon))
+        production = production.at[5].set(jnp.ones((nlat, nlon)) * 10.0)
+
+        # High temperature → low τ_r ≈ 1.16 → age 6 recruits
+        temperature = jnp.ones((nlat, nlon)) * 20.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings_rec = {"tau_r": tau_r}
+        forcings_prod = {"npp": jnp.zeros((nlat, nlon)), "tau_r": tau_r}
+
+        params_rec = {"n_ages": n_ages}
+        params_prod = {"n_ages": n_ages, "E": 0.1668}
+
+        # CORRECT ORDER: compute_recruitment BEFORE age_production
+        recruitment = compute_recruitment(production, 1.0, params_rec, forcings_rec)
+        production_new = age_production(production, 1.0, params_prod, forcings_prod)
+
+        # Should have non-zero recruitment (production[5] aging to 6 gets recruited)
+        assert jnp.sum(recruitment) > 0.0
+        # production[6] should be 0 (absorbed)
+        assert jnp.allclose(production_new[6], 0.0)
+
+    def test_wrong_order_produces_zero_recruitment(self):
+        """Wrong order (aging BEFORE recruit) should produce zero recruitment."""
+        n_ages = 11
+        nlat, nlon = 5, 5
+
+        # Set production at age 5 (will be recruited when aging to age 6)
+        production = jnp.zeros((n_ages, nlat, nlon))
+        production = production.at[5].set(jnp.ones((nlat, nlon)) * 10.0)
+
+        # High temperature → low τ_r ≈ 1.16 → age 6 recruits
+        temperature = jnp.ones((nlat, nlon)) * 20.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings_rec = {"tau_r": tau_r}
+        forcings_prod = {"npp": jnp.zeros((nlat, nlon)), "tau_r": tau_r}
+
+        params_rec = {"n_ages": n_ages}
+        params_prod = {"n_ages": n_ages, "E": 0.1668}
+
+        # WRONG ORDER: age_production BEFORE compute_recruitment
+        production_new = age_production(production, 1.0, params_prod, forcings_prod)
+        recruitment = compute_recruitment(production_new, 1.0, params_rec, forcings_rec)
+
+        # Should have ZERO recruitment (production[5] was already absorbed to 0)
+        assert jnp.allclose(recruitment, 0.0)
+        # This demonstrates that order matters!

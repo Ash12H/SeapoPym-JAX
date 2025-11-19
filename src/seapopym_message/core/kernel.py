@@ -18,19 +18,32 @@ class Kernel:
     declared inputs/outputs dependencies. It separates local and global computation
     phases for efficient distributed execution.
 
+    Execution order:
+        When multiple Units have no dependencies between them (same inputs, different
+        outputs), they are executed in the order they appear in the units list.
+        This allows explicit control over execution order when topological sorting
+        alone cannot determine the correct sequence.
+
     Args:
-        units: List of Unit instances to execute.
+        units: List of Unit instances to execute. When Units have equivalent
+               dependencies, they will execute in the order specified in this list.
 
     Raises:
         ValueError: If dependencies are cyclic or missing.
 
     Example:
+        >>> # Order matters when Units read the same inputs
         >>> kernel = Kernel([
-        ...     compute_recruitment,
-        ...     compute_mortality,
-        ...     compute_growth
+        ...     compute_recruitment,  # Must run before age_production
+        ...     age_production,       # Modifies production after recruitment
+        ...     update_biomass
         ... ])
         >>> state = kernel.execute_local_phase(state, dt=0.1, params={...})
+
+    Note:
+        For Units with independent inputs/outputs, the topological sort preserves
+        the order from the input list. This is critical when execution order affects
+        results (e.g., reading a variable before vs. after it's modified).
     """
 
     def __init__(self, units: list[Unit]) -> None:
