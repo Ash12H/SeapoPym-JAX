@@ -1,20 +1,38 @@
 """Grid utilities for 2D spatial domains.
 
-This module provides GridInfo dataclass for managing 2D latitude/longitude grids
-with coordinate systems and metric calculations.
+This module provides a hierarchy of GridInfo dataclasses for managing
+different types of grids (spherical, plane, etc.) with their specific
+coordinate systems and metric calculations.
 """
 
+from abc import ABC
 from dataclasses import dataclass
 
 import jax.numpy as jnp
 
 
 @dataclass
-class GridInfo:
-    """Information about a 2D latitude/longitude grid.
+class GridInfo(ABC):
+    """Base class for grid information.
 
-    This class encapsulates grid geometry and provides convenient
-    properties for coordinate arrays and grid spacing.
+    All grid types share common properties (nlat, nlon) but have
+    different coordinate systems and metric calculations.
+
+    Args:
+        nlat: Number of cells in the first spatial dimension (latitude/y).
+        nlon: Number of cells in the second spatial dimension (longitude/x).
+    """
+
+    nlat: int
+    nlon: int
+
+
+@dataclass
+class SphericalGridInfo(GridInfo):
+    """Information about a 2D latitude/longitude spherical grid.
+
+    This class encapsulates geographic grid geometry and provides convenient
+    properties for coordinate arrays and grid spacing on a spherical domain.
 
     Args:
         lat_min: Minimum latitude [degrees].
@@ -25,7 +43,7 @@ class GridInfo:
         nlon: Number of longitude cells.
 
     Example:
-        >>> grid = GridInfo(
+        >>> grid = SphericalGridInfo(
         ...     lat_min=-10.0, lat_max=10.0,
         ...     lon_min=140.0, lon_max=180.0,
         ...     nlat=20, nlon=40
@@ -40,8 +58,6 @@ class GridInfo:
     lat_max: float
     lon_min: float
     lon_max: float
-    nlat: int
-    nlon: int
 
     @property
     def lat_coords(self) -> jnp.ndarray:
@@ -127,10 +143,80 @@ class GridInfo:
         return LAT, LON
 
     def __repr__(self) -> str:
-        """String representation of GridInfo."""
+        """String representation of SphericalGridInfo."""
         return (
-            f"GridInfo(lat=[{self.lat_min:.2f}, {self.lat_max:.2f}], "
+            f"SphericalGridInfo(lat=[{self.lat_min:.2f}, {self.lat_max:.2f}], "
             f"lon=[{self.lon_min:.2f}, {self.lon_max:.2f}], "
             f"shape=({self.nlat}, {self.nlon}), "
             f"dx={self.dx/1000:.1f}km, dy={self.dy/1000:.1f}km)"
+        )
+
+
+@dataclass
+class PlaneGridInfo(GridInfo):
+    """Information about a 2D Cartesian (plane) grid.
+
+    This class encapsulates plane grid geometry with uniform spacing
+    in both directions. Suitable for idealized simulations or local
+    domains where spherical geometry can be approximated as flat.
+
+    Args:
+        dx: Grid spacing in x/longitude direction [meters].
+        dy: Grid spacing in y/latitude direction [meters].
+        nlat: Number of cells in y direction.
+        nlon: Number of cells in x direction.
+
+    Example:
+        >>> grid = PlaneGridInfo(dx=10e3, dy=10e3, nlat=100, nlon=100)
+        >>> grid.dx
+        10000.0
+        >>> grid.total_area_km2
+        10000.0
+    """
+
+    dx: float
+    dy: float
+
+    @property
+    def total_area(self) -> float:
+        """Total domain area [m²].
+
+        Returns:
+            Total area of the domain in square meters.
+        """
+        return self.nlat * self.nlon * self.dx * self.dy
+
+    @property
+    def total_area_km2(self) -> float:
+        """Total domain area [km²].
+
+        Returns:
+            Total area of the domain in square kilometers.
+        """
+        return self.total_area / 1e6
+
+    @property
+    def domain_length_x(self) -> float:
+        """Domain length in x direction [meters].
+
+        Returns:
+            Total length of domain in x direction.
+        """
+        return self.nlon * self.dx
+
+    @property
+    def domain_length_y(self) -> float:
+        """Domain length in y direction [meters].
+
+        Returns:
+            Total length of domain in y direction.
+        """
+        return self.nlat * self.dy
+
+    def __repr__(self) -> str:
+        """String representation of PlaneGridInfo."""
+        return (
+            f"PlaneGridInfo(shape=({self.nlat}, {self.nlon}), "
+            f"dx={self.dx/1000:.1f}km, dy={self.dy/1000:.1f}km, "
+            f"domain={self.domain_length_x/1000:.1f}×{self.domain_length_y/1000:.1f}km)"
         )

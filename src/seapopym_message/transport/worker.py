@@ -39,6 +39,7 @@ from seapopym_message.transport.diffusion import (
     diffusion_explicit_spherical,
 )
 from seapopym_message.transport.grid import Grid, PlaneGrid, SphericalGrid
+from seapopym_message.utils.grid import PlaneGridInfo, SphericalGridInfo
 
 
 @ray.remote
@@ -120,20 +121,22 @@ class TransportWorker:
         # Create grid based on type
         self.grid: Grid
         if grid_type == "spherical":
-            self.grid = SphericalGrid(
+            # Create SphericalGridInfo
+            spherical_info = SphericalGridInfo(
                 lat_min=lat_min,
                 lat_max=lat_max,
                 lon_min=lon_min,
                 lon_max=lon_max,
                 nlat=nlat,
                 nlon=nlon,
-                R=R,
-                mask=mask,
             )
+            self.grid = SphericalGrid(grid_info=spherical_info, R=R, mask=mask)
         elif grid_type == "plane":
             if dx is None or dy is None:
                 raise ValueError("Plane grid requires dx and dy parameters")
-            self.grid = PlaneGrid(dx=dx, dy=dy, nlat=nlat, nlon=nlon, mask=mask)
+            # Create PlaneGridInfo
+            plane_info = PlaneGridInfo(dx=dx, dy=dy, nlat=nlat, nlon=nlon)
+            self.grid = PlaneGrid(grid_info=plane_info, mask=mask)
         else:
             raise ValueError(f"Unknown grid_type: {grid_type}")
 

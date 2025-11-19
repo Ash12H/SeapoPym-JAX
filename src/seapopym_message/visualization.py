@@ -12,7 +12,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from matplotlib.figure import Figure
 
-from seapopym_message.utils.grid import GridInfo
+from seapopym_message.utils.grid import SphericalGridInfo
 
 
 def plot_diagnostics_timeseries(
@@ -60,7 +60,7 @@ def plot_diagnostics_timeseries(
 
 def plot_spatial_field(
     field: jnp.ndarray,
-    grid: GridInfo,
+    grid: SphericalGridInfo,
     title: str = "Spatial Field",
     cmap: str = "viridis",
     figsize: tuple[float, float] = (10, 6),
@@ -174,7 +174,7 @@ def plot_convergence(
 
 def create_animation(
     states: list[dict[str, jnp.ndarray]],
-    grid: GridInfo,
+    grid: SphericalGridInfo,
     variable: str = "biomass",
     interval: int = 100,
     figsize: tuple[float, float] = (10, 6),

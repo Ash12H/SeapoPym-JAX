@@ -4,6 +4,11 @@ This module provides abstract grid representations for both spherical (lat/lon)
 and plane (Cartesian) geometries. Grids pre-compute cell areas and face areas
 needed for flux-based transport schemes.
 
+Grids are composed of:
+- GridInfo: Coordinate system information (from utils.grid)
+- Geometric quantities: Cell areas, face areas (computed from GridInfo)
+- Mask: Optional ocean/land mask (xarray.DataArray)
+
 References:
     - Spherical geometry: IA/Diffusion-euler-explicite-description.md (line 26)
     - Grid importance for conservation: IA/TRANSPORT_ANALYSIS.md (Section 8)
@@ -14,19 +19,23 @@ from abc import ABC, abstractmethod
 import jax.numpy as jnp
 import xarray as xr
 
+from seapopym_message.utils.grid import GridInfo, PlaneGridInfo, SphericalGridInfo
+
 
 class Grid(ABC):
     """Abstract base class for computational grids.
 
     A Grid provides geometric information needed for flux-based transport:
+    - GridInfo: Coordinate system and domain information
     - Cell areas (for volume calculations)
     - Face areas (for flux calculations)
     - Grid spacing (for gradient/laplacian approximations)
     - Ocean/land mask (optional, for coastal boundaries)
 
-    All implementations must pre-compute these quantities for efficiency.
+    All implementations must pre-compute geometric quantities for efficiency.
     """
 
+    grid_info: GridInfo
     mask: xr.DataArray | None = None
 
     @abstractmethod
@@ -118,24 +127,14 @@ class SphericalGrid(Grid):
 
     def __init__(
         self,
-        lat_min: float,
-        lat_max: float,
-        lon_min: float,
-        lon_max: float,
-        nlat: int,
-        nlon: int,
+        grid_info: SphericalGridInfo,
         R: float = 6371e3,
         mask: xr.DataArray | None = None,
     ):
-        """Initialize spherical grid.
+        """Initialize spherical grid from grid info.
 
         Args:
-            lat_min: Minimum latitude [degrees], typically -90 or -60
-            lat_max: Maximum latitude [degrees], typically 90 or 60
-            lon_min: Minimum longitude [degrees], typically 0
-            lon_max: Maximum longitude [degrees], typically 360
-            nlat: Number of latitude cells
-            nlon: Number of longitude cells
+            grid_info: Spherical grid information (coordinates, dimensions)
             R: Earth radius [m], default 6371e3
             mask: Ocean/land mask as xarray.DataArray (optional)
                   - 2D: coords=["lat", "lon"], shape (nlat, nlon)
@@ -143,14 +142,17 @@ class SphericalGrid(Grid):
                   - Values: 1.0 = ocean, 0.0 = land
                   - dtype: float32
         """
-        self.lat_min = lat_min
-        self.lat_max = lat_max
-        self.lon_min = lon_min
-        self.lon_max = lon_max
-        self.nlat = nlat
-        self.nlon = nlon
+        self.grid_info = grid_info
         self.R = R
         self.mask = mask
+
+        # Extract dimensions from grid_info
+        nlat = grid_info.nlat
+        nlon = grid_info.nlon
+        lat_min = grid_info.lat_min
+        lat_max = grid_info.lat_max
+        lon_min = grid_info.lon_min
+        lon_max = grid_info.lon_max
 
         # Compute grid spacing in degrees
         self.dlat = (lat_max - lat_min) / nlat
@@ -220,7 +222,7 @@ class SphericalGrid(Grid):
             Scalar (broadcast to shape (nlat, nlon+1))
         """
         # Return as broadcasted array for consistency
-        return jnp.full((self.nlat, self.nlon + 1), self._face_areas_ew)
+        return jnp.full((self.grid_info.nlat, self.grid_info.nlon + 1), self._face_areas_ew)
 
     def face_areas_ns(self) -> jnp.ndarray:
         """Return N/S face areas [m²].
@@ -279,35 +281,30 @@ class PlaneGrid(Grid):
 
     def __init__(
         self,
-        dx: float,
-        dy: float,
-        nlat: int,
-        nlon: int,
+        grid_info: PlaneGridInfo,
         mask: xr.DataArray | None = None,
     ):
-        """Initialize plane grid.
+        """Initialize plane grid from grid info.
 
         Args:
-            dx: Grid spacing in x/longitude direction [m]
-            dy: Grid spacing in y/latitude direction [m]
-            nlat: Number of cells in y direction
-            nlon: Number of cells in x direction
+            grid_info: Plane grid information (spacing, dimensions)
             mask: Ocean/land mask as xarray.DataArray (optional)
                   - 2D: coords=["Y", "X"], shape (nlat, nlon)
                   - 3D: coords=["depth", "Y", "X"] for bathymetry
                   - Values: 1.0 = ocean, 0.0 = land
                   - dtype: float32
         """
-        self._dx = dx
-        self._dy = dy
-        self.nlat = nlat
-        self.nlon = nlon
+        self.grid_info = grid_info
         self.mask = mask
 
+        # Extract parameters from grid_info
+        self._dx = grid_info.dx
+        self._dy = grid_info.dy
+
         # Pre-compute constant areas
-        self._cell_area = dx * dy
-        self._face_area_ew = dy  # East/West faces have height dy
-        self._face_area_ns = dx  # North/South faces have width dx
+        self._cell_area = self._dx * self._dy
+        self._face_area_ew = self._dy  # East/West faces have height dy
+        self._face_area_ns = self._dx  # North/South faces have width dx
 
     def cell_areas(self) -> jnp.ndarray:
         """Return cell areas [m²].
@@ -315,7 +312,7 @@ class PlaneGrid(Grid):
         Returns:
             Array (nlat, nlon) with constant area dx×dy
         """
-        return jnp.full((self.nlat, self.nlon), self._cell_area)
+        return jnp.full((self.grid_info.nlat, self.grid_info.nlon), self._cell_area)
 
     def face_areas_ew(self) -> jnp.ndarray:
         """Return E/W face areas [m²].
@@ -323,7 +320,7 @@ class PlaneGrid(Grid):
         Returns:
             Array (nlat, nlon+1) with constant area dy
         """
-        return jnp.full((self.nlat, self.nlon + 1), self._face_area_ew)
+        return jnp.full((self.grid_info.nlat, self.grid_info.nlon + 1), self._face_area_ew)
 
     def face_areas_ns(self) -> jnp.ndarray:
         """Return N/S face areas [m²].
@@ -331,7 +328,7 @@ class PlaneGrid(Grid):
         Returns:
             Array (nlat+1, nlon) with constant area dx
         """
-        return jnp.full((self.nlat + 1, self.nlon), self._face_area_ns)
+        return jnp.full((self.grid_info.nlat + 1, self.grid_info.nlon), self._face_area_ns)
 
     def dx(self) -> float:
         """Return x spacing [m].

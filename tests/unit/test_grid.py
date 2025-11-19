@@ -9,6 +9,7 @@ Tests verify:
 import jax.numpy as jnp
 
 from seapopym_message.transport.grid import PlaneGrid, SphericalGrid
+from seapopym_message.utils.grid import PlaneGridInfo, SphericalGridInfo
 
 
 class TestSphericalGrid:
@@ -16,7 +17,7 @@ class TestSphericalGrid:
 
     def test_spherical_grid_initialization(self):
         """Test basic initialization and array shapes."""
-        grid = SphericalGrid(
+        grid_info = SphericalGridInfo(
             lat_min=-60.0,
             lat_max=60.0,
             lon_min=0.0,
@@ -24,10 +25,11 @@ class TestSphericalGrid:
             nlat=120,
             nlon=360,
         )
+        grid = SphericalGrid(grid_info=grid_info)
 
         # Check dimensions
-        assert grid.nlat == 120
-        assert grid.nlon == 360
+        assert grid.grid_info.nlat == 120
+        assert grid.grid_info.nlon == 360
 
         # Check coordinate arrays
         assert grid.lat.shape == (120,)
@@ -55,7 +57,7 @@ class TestSphericalGrid:
         in longitude direction. This test verifies the geometric relationship:
         A(lat) = R² × cos(lat) × dλ × dφ
         """
-        grid = SphericalGrid(
+        grid_info = SphericalGridInfo(
             lat_min=-60.0,
             lat_max=60.0,
             lon_min=0.0,
@@ -63,6 +65,7 @@ class TestSphericalGrid:
             nlat=120,
             nlon=360,
         )
+        grid = SphericalGrid(grid_info=grid_info)
 
         areas = grid.cell_areas()
 
@@ -89,7 +92,7 @@ class TestSphericalGrid:
         North/South faces (horizontal faces) have area: A_ns = R × cos(lat_face) × dλ
         These should decrease toward poles just like cell areas.
         """
-        grid = SphericalGrid(
+        grid_info = SphericalGridInfo(
             lat_min=-60.0,
             lat_max=60.0,
             lon_min=0.0,
@@ -97,6 +100,7 @@ class TestSphericalGrid:
             nlat=120,
             nlon=360,
         )
+        grid = SphericalGrid(grid_info=grid_info)
 
         face_areas_ns = grid.face_areas_ns()
 
@@ -119,7 +123,7 @@ class TestSphericalGrid:
         East/West faces (vertical faces) span full latitude height:
         A_ew = R × dφ (constant, independent of longitude or latitude)
         """
-        grid = SphericalGrid(
+        grid_info = SphericalGridInfo(
             lat_min=-60.0,
             lat_max=60.0,
             lon_min=0.0,
@@ -127,6 +131,7 @@ class TestSphericalGrid:
             nlat=120,
             nlon=360,
         )
+        grid = SphericalGrid(grid_info=grid_info)
 
         face_areas_ew = grid.face_areas_ew()
 
@@ -147,15 +152,15 @@ class TestSphericalGrid:
 
         This test verifies physically reasonable values.
         """
-        grid = SphericalGrid(
+        grid_info = SphericalGridInfo(
             lat_min=-60.0,
             lat_max=60.0,
             lon_min=0.0,
             lon_max=360.0,
             nlat=120,
             nlon=160,
-            R=6371e3,  # Earth radius in meters
         )
+        grid = SphericalGrid(grid_info=grid_info, R=6371e3)
 
         # Check grid spacing
         assert grid.dlat == 1.0  # 1° latitude
@@ -198,16 +203,12 @@ class TestPlaneGrid:
 
     def test_plane_grid_constant_areas(self):
         """Test that plane grid has constant cell and face areas."""
-        grid = PlaneGrid(
-            dx=10e3,  # 10 km
-            dy=10e3,  # 10 km
-            nlat=100,
-            nlon=100,
-        )
+        grid_info = PlaneGridInfo(dx=10e3, dy=10e3, nlat=100, nlon=100)
+        grid = PlaneGrid(grid_info=grid_info)
 
         # Check dimensions
-        assert grid.nlat == 100
-        assert grid.nlon == 100
+        assert grid.grid_info.nlat == 100
+        assert grid.grid_info.nlon == 100
 
         # Check spacing
         assert grid.dx() == 10e3
@@ -230,12 +231,8 @@ class TestPlaneGrid:
 
     def test_plane_grid_different_dx_dy(self):
         """Test plane grid with non-uniform dx and dy."""
-        grid = PlaneGrid(
-            dx=20e3,  # 20 km
-            dy=10e3,  # 10 km
-            nlat=50,
-            nlon=80,
-        )
+        grid_info = PlaneGridInfo(dx=20e3, dy=10e3, nlat=50, nlon=80)
+        grid = PlaneGrid(grid_info=grid_info)
 
         # Cell areas should be dx × dy
         areas = grid.cell_areas()
