@@ -270,8 +270,10 @@ class EventScheduler:
         if D is None:
             D = self.forcing_params.get("horizontal_diffusivity", 1000.0)
 
-        # Ocean mask (optional)
+        # Ocean mask (optional): try forcings first, then forcing_params
         mask = forcings.get("ocean_mask")
+        if mask is None:
+            mask = self.forcing_params.get("mask")
 
         return {"u": u, "v": v, "D": D, "mask": mask}
 
