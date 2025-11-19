@@ -7,7 +7,9 @@ from seapopym_message.kernels.zooplankton import (
 )
 from seapopym_message.kernels.zooplankton import (
     compute_mortality,
+    compute_mortality_forcing,
     compute_tau_r,
+    compute_tau_r_forcing,
 )
 from seapopym_message.kernels.zooplankton import (
     compute_recruitment as compute_recruitment_unit,
@@ -136,11 +138,18 @@ class TestAgeProduction:
         nlat, nlon = 5, 5
 
         production = jnp.zeros((n_ages, nlat, nlon))
+
+        # Compute tau_r as derived forcing
+        temperature = jnp.ones((nlat, nlon)) * 15.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
         forcings = {
             "npp": jnp.ones((nlat, nlon)) * 10.0,
-            "temperature": jnp.ones((nlat, nlon)) * 15.0,
+            "tau_r": tau_r,
         }
-        params = {"n_ages": n_ages, "E": 0.1668, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+        params = {"n_ages": n_ages, "E": 0.1668}
 
         production_new = age_production(production, 1.0, params, forcings)
 
@@ -157,8 +166,13 @@ class TestAgeProduction:
         production = production.at[2].set(jnp.ones((nlat, nlon)) * 5.0)
 
         # Low temperature → high τ_r → age 3 not yet recruited
-        forcings = {"npp": jnp.zeros((nlat, nlon)), "temperature": jnp.ones((nlat, nlon)) * 0.0}
-        params = {"n_ages": n_ages, "E": 0.1668, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+        temperature = jnp.ones((nlat, nlon)) * 0.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings = {"npp": jnp.zeros((nlat, nlon)), "tau_r": tau_r}
+        params = {"n_ages": n_ages, "E": 0.1668}
 
         production_new = age_production(production, 1.0, params, forcings)
 
@@ -179,8 +193,13 @@ class TestAgeProduction:
 
         # High temperature → low τ_r → age 6 will be recruited
         # At T=20°C: τ_r ≈ 1.16, so age 6 > τ_r → absorbed
-        forcings = {"npp": jnp.zeros((nlat, nlon)), "temperature": jnp.ones((nlat, nlon)) * 20.0}
-        params = {"n_ages": n_ages, "E": 0.1668, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+        temperature = jnp.ones((nlat, nlon)) * 20.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings = {"npp": jnp.zeros((nlat, nlon)), "tau_r": tau_r}
+        params = {"n_ages": n_ages, "E": 0.1668}
 
         production_new = age_production(production, 1.0, params, forcings)
 
@@ -193,8 +212,14 @@ class TestAgeProduction:
         nlat, nlon = 10, 20
 
         production = jnp.zeros((n_ages, nlat, nlon))
-        forcings = {"npp": jnp.ones((nlat, nlon)), "temperature": jnp.ones((nlat, nlon)) * 15.0}
-        params = {"n_ages": n_ages, "E": 0.1668, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+
+        temperature = jnp.ones((nlat, nlon)) * 15.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings = {"npp": jnp.ones((nlat, nlon)), "tau_r": tau_r}
+        params = {"n_ages": n_ages, "E": 0.1668}
 
         production_new = age_production(production, 1.0, params, forcings)
 
@@ -217,8 +242,13 @@ class TestComputeRecruitment:
 
         # At T=5°C: τ_r = 10.38 × exp(-0.11 × 5) ≈ 5.99
         # So ages >= 6 will be recruited
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 5.0}
-        params = {"n_ages": n_ages, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+        temperature = jnp.ones((nlat, nlon)) * 5.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings = {"tau_r": tau_r}
+        params = {"n_ages": n_ages}
 
         recruitment = compute_recruitment(production, 1.0, params, forcings)
 
@@ -238,8 +268,14 @@ class TestComputeRecruitment:
         nlat, nlon = 5, 5
 
         production = jnp.zeros((n_ages, nlat, nlon))
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 15.0}
-        params = {"n_ages": n_ages, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+
+        temperature = jnp.ones((nlat, nlon)) * 15.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings = {"tau_r": tau_r}
+        params = {"n_ages": n_ages}
 
         recruitment = compute_recruitment(production, 1.0, params, forcings)
 
@@ -251,8 +287,14 @@ class TestComputeRecruitment:
         nlat, nlon = 10, 20
 
         production = jnp.zeros((n_ages, nlat, nlon))
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 15.0}
-        params = {"n_ages": n_ages, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+
+        temperature = jnp.ones((nlat, nlon)) * 15.0
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
+
+        forcings = {"tau_r": tau_r}
+        params = {"n_ages": n_ages}
 
         recruitment = compute_recruitment(production, 1.0, params, forcings)
 
@@ -270,8 +312,13 @@ class TestUpdateBiomass:
         recruitment = jnp.ones((nlat, nlon)) * 5.0
 
         # Low mortality at T=0°C
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 0.0}
-        params = {"lambda_0": 1 / 150, "gamma_lambda": 0.15, "T_ref": 0.0}
+        temperature = jnp.ones((nlat, nlon)) * 0.0
+        mortality = compute_mortality_forcing.func(
+            temperature=temperature, lambda_0=1 / 150, gamma_lambda=0.15, T_ref=0.0
+        )
+
+        forcings = {"mortality": mortality}
+        params = {}
 
         biomass_new = update_biomass(biomass, recruitment, 1.0, params, forcings)
 
@@ -285,8 +332,13 @@ class TestUpdateBiomass:
         biomass = jnp.ones((nlat, nlon)) * 100.0
         recruitment = jnp.zeros((nlat, nlon))
 
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 15.0}
-        params = {"lambda_0": 1 / 150, "gamma_lambda": 0.15, "T_ref": 0.0}
+        temperature = jnp.ones((nlat, nlon)) * 15.0
+        mortality = compute_mortality_forcing.func(
+            temperature=temperature, lambda_0=1 / 150, gamma_lambda=0.15, T_ref=0.0
+        )
+
+        forcings = {"mortality": mortality}
+        params = {}
 
         biomass_new = update_biomass(biomass, recruitment, 1.0, params, forcings)
 
@@ -299,11 +351,18 @@ class TestUpdateBiomass:
 
         # Set R and λ such that R = λB
         recruitment = jnp.ones((nlat, nlon)) * 0.1  # kg/m²/day
-        params = {"lambda_0": 1 / 150, "gamma_lambda": 0.15, "T_ref": 0.0}
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 0.0}  # λ = 1/150
+        lambda_0 = 1 / 150
+
+        temperature = jnp.ones((nlat, nlon)) * 0.0  # λ = 1/150
+        mortality = compute_mortality_forcing.func(
+            temperature=temperature, lambda_0=lambda_0, gamma_lambda=0.15, T_ref=0.0
+        )
+
+        forcings = {"mortality": mortality}
+        params = {}
 
         # Steady state: B = R/λ = 0.1 / (1/150) = 15
-        biomass_ss = recruitment / (params["lambda_0"])
+        biomass_ss = recruitment / lambda_0
 
         # Start from steady state
         biomass = biomass_ss.copy()
@@ -321,8 +380,13 @@ class TestUpdateBiomass:
         recruitment = jnp.zeros((nlat, nlon))  # No recruitment
 
         # High mortality at warm temperature
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 30.0}
-        params = {"lambda_0": 1 / 150, "gamma_lambda": 0.15, "T_ref": 0.0}
+        temperature = jnp.ones((nlat, nlon)) * 30.0
+        mortality = compute_mortality_forcing.func(
+            temperature=temperature, lambda_0=1 / 150, gamma_lambda=0.15, T_ref=0.0
+        )
+
+        forcings = {"mortality": mortality}
+        params = {}
 
         biomass_new = update_biomass(biomass, recruitment, 1.0, params, forcings)
 
@@ -335,8 +399,14 @@ class TestUpdateBiomass:
 
         biomass = jnp.ones((nlat, nlon)) * 50.0
         recruitment = jnp.ones((nlat, nlon)) * 2.0
-        forcings = {"temperature": jnp.ones((nlat, nlon)) * 15.0}
-        params = {"lambda_0": 1 / 150, "gamma_lambda": 0.15, "T_ref": 0.0}
+
+        temperature = jnp.ones((nlat, nlon)) * 15.0
+        mortality = compute_mortality_forcing.func(
+            temperature=temperature, lambda_0=1 / 150, gamma_lambda=0.15, T_ref=0.0
+        )
+
+        forcings = {"mortality": mortality}
+        params = {}
 
         biomass_new = update_biomass(biomass, recruitment, 1.0, params, forcings)
 
@@ -355,42 +425,45 @@ class TestMassConservation:
         biomass = jnp.ones((nlat, nlon)) * 50.0
         production = jnp.zeros((n_ages, nlat, nlon))
 
-        # Forcings
+        # Forcings (base)
         npp = jnp.ones((nlat, nlon)) * 3.0
         temperature = jnp.ones((nlat, nlon)) * 10.0
 
-        forcings_prod = {"npp": npp, "temperature": temperature}
-        forcings_rec = {"temperature": temperature}
-        forcings_bio = {"temperature": temperature}
+        # Compute derived forcings
+        tau_r = compute_tau_r_forcing.func(
+            temperature=temperature, tau_r0=10.38, gamma_tau_r=0.11, T_ref=0.0
+        )
 
-        params = {
-            "n_ages": n_ages,
-            "E": 0.1668,
-            "tau_r0": 10.38,
-            "gamma_tau_r": 0.11,
-            "T_ref": 0.0,
-            "lambda_0": 1 / 150,
-            "gamma_lambda": 0.15,
-        }
+        mortality = compute_mortality_forcing.func(
+            temperature=temperature, lambda_0=1 / 150, gamma_lambda=0.15, T_ref=0.0
+        )
+
+        # Prepare forcings for each unit
+        forcings_prod = {"npp": npp, "tau_r": tau_r}
+        forcings_rec = {"tau_r": tau_r}
+        forcings_bio = {"mortality": mortality}
+
+        params_prod = {"n_ages": n_ages, "E": 0.1668}
+        params_rec = {"n_ages": n_ages}
+        params_bio = {}
 
         # Calculate initial total mass
         mass_init = float(jnp.sum(biomass) + jnp.sum(production))
 
         # One timestep (correct order: recruit BEFORE aging)
-        recruitment = compute_recruitment(production, 1.0, params, forcings_rec)
-        production_new = age_production(production, 1.0, params, forcings_prod)
-        biomass_new = update_biomass(biomass, recruitment, 1.0, params, forcings_bio)
+        recruitment = compute_recruitment(production, 1.0, params_rec, forcings_rec)
+        production_new = age_production(production, 1.0, params_prod, forcings_prod)
+        biomass_new = update_biomass(biomass, recruitment, 1.0, params_bio, forcings_bio)
 
         # Calculate final total mass
         mass_final = float(jnp.sum(biomass_new) + jnp.sum(production_new))
 
         # Calculate expected change
         # Mass in = E × NPP × cells × dt = 0.1668 × 3.0 × 25 × 1.0
-        mass_in = float(params["E"] * jnp.sum(npp) * 1.0)
+        mass_in = float(params_prod["E"] * jnp.sum(npp) * 1.0)
 
         # Mass out = λ × B × cells × dt / (1 + λ × dt)
         # (Implicit Euler reduces effective mortality by factor 1/(1+λdt))
-        mortality = compute_mortality(temperature, params)
         dt = 1.0
         mass_out = float(jnp.sum(mortality * biomass * dt / (1.0 + mortality * dt)))
 

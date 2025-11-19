@@ -22,6 +22,14 @@ References:
 import jax.numpy as jnp
 
 from seapopym_message.core.unit import unit
+from seapopym_message.forcing import derived_forcing
+
+# =============================================================================
+# Legacy Helper Functions (DEPRECATED - Use derived_forcing instead)
+# =============================================================================
+# These functions are kept for backward compatibility but should not be used
+# in new code. Use the @derived_forcing versions (compute_tau_r_forcing,
+# compute_mortality_forcing) registered with ForcingManager instead.
 
 
 def compute_tau_r(temperature: jnp.ndarray, params: dict) -> jnp.ndarray:
@@ -106,12 +114,81 @@ def compute_mortality(temperature: jnp.ndarray, params: dict) -> jnp.ndarray:
     return mortality
 
 
+# =============================================================================
+# Derived Forcings (computed once per timestep by ForcingManager)
+# =============================================================================
+
+
+@derived_forcing(
+    name="tau_r",
+    inputs=["temperature"],
+    params=["tau_r0", "gamma_tau_r", "T_ref"],
+)
+def compute_tau_r_forcing(
+    temperature: jnp.ndarray, tau_r0: float, gamma_tau_r: float, T_ref: float
+) -> jnp.ndarray:
+    """Compute minimum recruitment age as derived forcing.
+
+    This derived forcing transforms temperature into tau_r field, computed
+    once per timestep by ForcingManager and distributed to all workers.
+
+    Equation:
+        τ_r(T) = τ_r0 × exp(-γ_τr × (T - T_ref))
+
+    Args:
+        temperature: Temperature field [°C], shape (nlat, nlon)
+        tau_r0: Maximum recruitment age at T_ref [days]
+        gamma_tau_r: Thermal sensitivity coefficient [°C⁻¹]
+        T_ref: Reference temperature [°C]
+
+    Returns:
+        Minimum recruitment age [days], shape (nlat, nlon)
+    """
+    return tau_r0 * jnp.exp(-gamma_tau_r * (temperature - T_ref))
+
+
+@derived_forcing(
+    name="mortality",
+    inputs=["temperature"],
+    params=["lambda_0", "gamma_lambda", "T_ref"],
+)
+def compute_mortality_forcing(
+    temperature: jnp.ndarray, lambda_0: float, gamma_lambda: float, T_ref: float
+) -> jnp.ndarray:
+    """Compute temperature-dependent mortality as derived forcing.
+
+    This derived forcing transforms temperature into mortality rate field,
+    computed once per timestep by ForcingManager and distributed to all workers.
+
+    Equation:
+        λ(T) = λ₀ × exp(γ_λ × (T - T_ref))
+
+    with temperature clipping: T_effective = max(T, T_ref)
+
+    Args:
+        temperature: Temperature field [°C], shape (nlat, nlon)
+        lambda_0: Baseline mortality at T_ref [day⁻¹]
+        gamma_lambda: Thermal sensitivity coefficient [°C⁻¹]
+        T_ref: Reference temperature [°C]
+
+    Returns:
+        Mortality rate [day⁻¹], shape (nlat, nlon)
+    """
+    T_effective = jnp.maximum(temperature, T_ref)
+    return lambda_0 * jnp.exp(gamma_lambda * (T_effective - T_ref))
+
+
+# =============================================================================
+# Units (biological model logic, executed by workers)
+# =============================================================================
+
+
 @unit(
     name="age_production",
     inputs=["production"],
     outputs=["production"],
     scope="local",
-    forcings=["npp", "temperature"],
+    forcings=["npp", "tau_r"],
 )
 def age_production(
     production: jnp.ndarray, _dt: float, params: dict, forcings: dict
@@ -121,8 +198,8 @@ def age_production(
     Algorithm (with α→∞ limit):
     1. production[0] ← E × NPP (new generation from primary production)
     2. For age=1..n_ages-1:
-       - If age < τ_r(T): production[age] ← production[age-1] (aging)
-       - If age ≥ τ_r(T): production[age] ← 0 (absorbed → recruited to biomass)
+       - If age < τ_r: production[age] ← production[age-1] (aging)
+       - If age ≥ τ_r: production[age] ← 0 (absorbed → recruited to biomass)
 
     The total absorption (α→∞) means all production reaching recruitment age
     τ_r is immediately transferred to biomass B, simplifying the original
@@ -130,14 +207,14 @@ def age_production(
 
     Args:
         production: Production by age class, shape (n_ages, nlat, nlon) [kg/m²]
-        dt: Time step [days]
+        _dt: Time step [days] (not used, kept for unit signature compatibility)
         params: Model parameters dict with keys:
             - n_ages: Number of age classes
             - E: Transfer efficiency from NPP to production
-            - tau_r0, gamma_tau_r, T_ref: recruitment age parameters
         forcings: Forcing fields dict with keys:
             - npp: Net primary production [kg/m²/day], shape (nlat, nlon)
-            - temperature: Sea temperature [°C], shape (nlat, nlon)
+            - tau_r: Minimum recruitment age [days], shape (nlat, nlon)
+                    (computed as derived forcing from temperature)
 
     Returns:
         Updated production field, shape (n_ages, nlat, nlon) [kg/m²]
@@ -151,24 +228,18 @@ def age_production(
         >>> production = jnp.zeros((11, 10, 10))  # 11 age classes
         >>> forcings = {
         ...     "npp": jnp.ones((10, 10)) * 5.0,
-        ...     "temperature": jnp.ones((10, 10)) * 15.0
+        ...     "tau_r": jnp.ones((10, 10)) * 3.45  # Pre-computed from temperature
         ... }
-        >>> params = {
-        ...     "n_ages": 11, "E": 0.1668,
-        ...     "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0
-        ... }
+        >>> params = {"n_ages": 11, "E": 0.1668}
         >>> prod_new = age_production(production, 1.0, params, forcings)
         >>> prod_new[0, 0, 0]  # New production from NPP
         Array(0.834, dtype=float32)
     """
     npp = forcings["npp"]
-    temperature = forcings["temperature"]
+    tau_r = forcings["tau_r"]
 
     n_ages = params["n_ages"]
     E = params["E"]
-
-    # Calculate minimum recruitment age (days) - depends on temperature
-    tau_r = compute_tau_r(temperature, params)
 
     # Initialize new production array
     production_new = jnp.zeros_like(production)
@@ -192,7 +263,7 @@ def age_production(
     inputs=["production"],
     outputs=["recruitment"],
     scope="local",
-    forcings=["temperature"],
+    forcings=["tau_r"],
 )
 def compute_recruitment(
     production: jnp.ndarray, _dt: float, params: dict, forcings: dict
@@ -200,21 +271,22 @@ def compute_recruitment(
     """Calculate recruitment from absorbed production.
 
     With total absorption (α→∞), all production reaching the recruitment
-    window [τ_r(T), τ_r0] is immediately recruited to adult biomass.
+    window [τ_r, τ_r0] is immediately recruited to adult biomass.
 
     Equation:
         R = Σ_{age=τ_r}^{τ_r0} p(age)
 
-    where τ_r(T) is temperature-dependent minimum recruitment age.
+    where τ_r is the minimum recruitment age (temperature-dependent,
+    pre-computed as derived forcing).
 
     Args:
         production: Production by age class, shape (n_ages, nlat, nlon) [kg/m²]
-        dt: Time step [days] (not used but required by unit signature)
+        _dt: Time step [days] (not used, kept for unit signature compatibility)
         params: Model parameters dict with keys:
             - n_ages: Number of age classes
-            - tau_r0, gamma_tau_r, T_ref: recruitment age parameters
         forcings: Forcing fields dict with keys:
-            - temperature: Sea temperature [°C], shape (nlat, nlon)
+            - tau_r: Minimum recruitment age [days], shape (nlat, nlon)
+                    (computed as derived forcing from temperature)
 
     Returns:
         Recruitment flux [kg/m²/day], shape (nlat, nlon)
@@ -229,17 +301,14 @@ def compute_recruitment(
         >>> production = jnp.zeros((11, 10, 10))
         >>> production = production.at[5].set(jnp.ones((10, 10)) * 2.0)
         >>> production = production.at[8].set(jnp.ones((10, 10)) * 1.0)
-        >>> forcings = {"temperature": jnp.ones((10, 10)) * 10.0}
-        >>> params = {"n_ages": 11, "tau_r0": 10.38, "gamma_tau_r": 0.11, "T_ref": 0.0}
+        >>> forcings = {"tau_r": jnp.ones((10, 10)) * 3.45}  # Pre-computed
+        >>> params = {"n_ages": 11}
         >>> R = compute_recruitment(production, 1.0, params, forcings)
         >>> R[0, 0]  # Sum of recruited age classes
         Array(3.0, dtype=float32)
     """
-    temperature = forcings["temperature"]
+    tau_r = forcings["tau_r"]
     n_ages = params["n_ages"]
-
-    # Calculate minimum recruitment age
-    tau_r = compute_tau_r(temperature, params)
 
     # Sum production that ages into recruitment window (and gets absorbed)
     # R_age = p_{age-1} if age >= τ_r (production aging from age-1 to age gets recruited)
@@ -259,19 +328,20 @@ def compute_recruitment(
     inputs=["biomass", "recruitment"],
     outputs=["biomass"],
     scope="local",
-    forcings=["temperature"],
+    forcings=["mortality"],
 )
 def update_biomass(
-    biomass: jnp.ndarray, recruitment: jnp.ndarray, dt: float, params: dict, forcings: dict
+    biomass: jnp.ndarray, recruitment: jnp.ndarray, dt: float, _params: dict, forcings: dict
 ) -> jnp.ndarray:
     """Update adult biomass using implicit Euler scheme.
 
     Equation (from Eq. 6 in Annexe A):
-        B^{n+1} = (B^n + Δt × R) / (1 + Δt × λ(T))
+        B^{n+1} = (B^n + Δt × R) / (1 + Δt × λ)
 
     where:
     - R is recruitment from juvenile production [kg/m²/day]
-    - λ(T) is temperature-dependent mortality [day⁻¹]
+    - λ is temperature-dependent mortality [day⁻¹]
+      (pre-computed as derived forcing from temperature)
 
     The implicit Euler scheme is unconditionally stable and ensures
     biomass remains positive.
@@ -280,10 +350,10 @@ def update_biomass(
         biomass: Adult biomass [kg/m²], shape (nlat, nlon)
         recruitment: Recruitment flux [kg/m²/day], shape (nlat, nlon)
         dt: Time step [days]
-        params: Model parameters dict with keys:
-            - lambda_0, gamma_lambda, T_ref: mortality parameters
+        _params: Model parameters dict (not used for this unit)
         forcings: Forcing fields dict with keys:
-            - temperature: Sea temperature [°C], shape (nlat, nlon)
+            - mortality: Temperature-dependent mortality rate [day⁻¹], shape (nlat, nlon)
+                        (computed as derived forcing from temperature)
 
     Returns:
         Updated biomass [kg/m²], shape (nlat, nlon)
@@ -295,16 +365,13 @@ def update_biomass(
         >>> import jax.numpy as jnp
         >>> biomass = jnp.ones((10, 10)) * 100.0
         >>> recruitment = jnp.ones((10, 10)) * 5.0
-        >>> forcings = {"temperature": jnp.ones((10, 10)) * 15.0}
-        >>> params = {"lambda_0": 1/150, "gamma_lambda": 0.15, "T_ref": 0.0}
+        >>> forcings = {"mortality": jnp.ones((10, 10)) * 0.01}  # Pre-computed
+        >>> params = {}
         >>> B_new = update_biomass(biomass, recruitment, 1.0, params, forcings)
         >>> B_new[0, 0] > biomass[0, 0]  # Biomass increases with recruitment
         Array(True, dtype=bool)
     """
-    temperature = forcings["temperature"]
-
-    # Calculate temperature-dependent mortality
-    mortality = compute_mortality(temperature, params)
+    mortality = forcings["mortality"]
 
     # Implicit Euler update (unconditionally stable)
     biomass_new = (biomass + dt * recruitment) / (1.0 + dt * mortality)
