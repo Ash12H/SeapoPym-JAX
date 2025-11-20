@@ -16,13 +16,6 @@ from seapopym_message.simulation import (
     run_simulation,
     setup_and_run,
 )
-from seapopym_message.visualization import (
-    create_animation,
-    plot_convergence,
-    plot_diagnostics_timeseries,
-    plot_multi_variable,
-    plot_spatial_field,
-)
 
 __all__ = [
     "__version__",
@@ -34,9 +27,4 @@ __all__ = [
     "run_simulation",
     "get_global_state",
     "setup_and_run",
-    "plot_diagnostics_timeseries",
-    "plot_spatial_field",
-    "plot_convergence",
-    "plot_multi_variable",
-    "create_animation",
 ]

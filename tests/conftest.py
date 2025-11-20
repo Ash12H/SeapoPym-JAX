@@ -1,9 +1,9 @@
 """Pytest configuration and shared fixtures."""
 
-import pytest
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 
 @pytest.fixture(scope="session")

@@ -201,7 +201,7 @@ class Kernel:
         # Build dependency graph
         # in_degree[unit] = number of units that must execute before this unit
         # dependencies[unit] = set of units that depend on this unit's outputs
-        in_degree: dict[Unit, int] = {unit: 0 for unit in units}
+        in_degree: dict[Unit, int] = dict.fromkeys(units, 0)
         dependencies: dict[Unit, set[Unit]] = {unit: set() for unit in units}
 
         # Build reverse mapping: output -> units that produce it
