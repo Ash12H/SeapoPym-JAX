@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import pytest
 
 from seapopym_message.utils.domain import split_domain_2d, split_domain_2d_periodic_lon
-from seapopym_message.utils.grid import GridInfo
+from seapopym_message.utils.grid import SphericalGridInfo
 
 
 @pytest.mark.unit
@@ -12,8 +12,10 @@ class TestGridInfo:
     """Test GridInfo dataclass."""
 
     def test_gridinfo_creation(self) -> None:
-        """Test creating a GridInfo instance."""
-        grid = GridInfo(lat_min=-10.0, lat_max=10.0, lon_min=140.0, lon_max=180.0, nlat=20, nlon=40)
+        """Test creating a SphericalGridInfo instance."""
+        grid = SphericalGridInfo(
+            lat_min=-10.0, lat_max=10.0, lon_min=140.0, lon_max=180.0, nlat=20, nlon=40
+        )
 
         assert grid.lat_min == -10.0
         assert grid.lat_max == 10.0
@@ -24,7 +26,9 @@ class TestGridInfo:
 
     def test_lat_lon_coords(self) -> None:
         """Test latitude and longitude coordinate arrays."""
-        grid = GridInfo(lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=11, nlon=21)
+        grid = SphericalGridInfo(
+            lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=11, nlon=21
+        )
 
         assert grid.lat_coords.shape == (11,)
         assert grid.lon_coords.shape == (21,)
@@ -35,21 +39,25 @@ class TestGridInfo:
 
     def test_dlat_dlon(self) -> None:
         """Test grid spacing in degrees."""
-        grid = GridInfo(lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=11, nlon=21)
+        grid = SphericalGridInfo(
+            lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=11, nlon=21
+        )
 
         assert jnp.allclose(grid.dlat, 1.0)
         assert jnp.allclose(grid.dlon, 1.0)
 
     def test_dy_meters(self) -> None:
         """Test meridional spacing in meters."""
-        grid = GridInfo(lat_min=0.0, lat_max=1.0, lon_min=0.0, lon_max=1.0, nlat=2, nlon=2)
+        grid = SphericalGridInfo(lat_min=0.0, lat_max=1.0, lon_min=0.0, lon_max=1.0, nlat=2, nlon=2)
 
         # 1 degree latitude ≈ 111,320 meters
         assert jnp.allclose(grid.dy, 111320.0, rtol=0.01)
 
     def test_dx_meters_at_equator(self) -> None:
         """Test zonal spacing in meters at equator."""
-        grid = GridInfo(lat_min=-1.0, lat_max=1.0, lon_min=0.0, lon_max=1.0, nlat=3, nlon=2)
+        grid = SphericalGridInfo(
+            lat_min=-1.0, lat_max=1.0, lon_min=0.0, lon_max=1.0, nlat=3, nlon=2
+        )
 
         # At equator (mean_lat=0): 1 degree longitude ≈ 111,320 meters
         # mean_lat = 0, cos(0) = 1
@@ -57,8 +65,10 @@ class TestGridInfo:
 
     def test_dx_meters_at_high_latitude(self) -> None:
         """Test zonal spacing decreases at high latitudes."""
-        grid_equator = GridInfo(lat_min=-1.0, lat_max=1.0, lon_min=0.0, lon_max=1.0, nlat=3, nlon=2)
-        grid_high_lat = GridInfo(
+        grid_equator = SphericalGridInfo(
+            lat_min=-1.0, lat_max=1.0, lon_min=0.0, lon_max=1.0, nlat=3, nlon=2
+        )
+        grid_high_lat = SphericalGridInfo(
             lat_min=59.0, lat_max=61.0, lon_min=0.0, lon_max=1.0, nlat=3, nlon=2
         )
 
@@ -68,7 +78,9 @@ class TestGridInfo:
 
     def test_get_meshgrid(self) -> None:
         """Test meshgrid generation."""
-        grid = GridInfo(lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=5, nlon=10)
+        grid = SphericalGridInfo(
+            lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=5, nlon=10
+        )
 
         LAT, LON = grid.get_meshgrid()
 
@@ -82,10 +94,12 @@ class TestGridInfo:
 
     def test_repr(self) -> None:
         """Test string representation."""
-        grid = GridInfo(lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=5, nlon=10)
+        grid = SphericalGridInfo(
+            lat_min=0.0, lat_max=10.0, lon_min=0.0, lon_max=20.0, nlat=5, nlon=10
+        )
 
         repr_str = repr(grid)
-        assert "GridInfo" in repr_str
+        assert "SphericalGridInfo" in repr_str
         assert "0.00" in repr_str
         assert "(5, 10)" in repr_str
 

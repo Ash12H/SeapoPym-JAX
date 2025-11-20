@@ -18,6 +18,7 @@ from seapopym_message.transport.diffusion import (
     diffusion_explicit_spherical,
 )
 from seapopym_message.transport.grid import PlaneGrid, SphericalGrid
+from seapopym_message.utils.grid import PlaneGridInfo, SphericalGridInfo
 
 
 class TestDiffusionBasics:
@@ -25,7 +26,7 @@ class TestDiffusionBasics:
 
     def test_diffusion_zero_coefficient_no_change(self):
         """Test that D=0 produces no change."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
         biomass = jnp.ones((10, 10), dtype=jnp.float32) * 5.0
         biomass = biomass.at[5, 5].set(20.0)  # Add a spike
 
@@ -46,7 +47,7 @@ class TestDiffusionBasics:
 
     def test_diffusion_smooths_gradients(self):
         """Test that diffusion reduces spatial gradients."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
 
         # Create field with sharp gradient (spike)
         biomass = jnp.ones((10, 10), dtype=jnp.float32) * 1.0
@@ -75,7 +76,7 @@ class TestDiffusionBasics:
 
     def test_diffusion_conserves_mass(self):
         """Test mass conservation with closed boundaries."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=20, nlon=20)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=20, nlon=20))
 
         # Non-uniform field
         biomass = jnp.ones((20, 20), dtype=jnp.float32) * 2.0
@@ -107,7 +108,7 @@ class TestDiffusionStability:
 
     def test_stability_check_stable(self):
         """Test that small dt passes stability check."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
         D = 1000.0
 
         # dt_max = dx² / (4D) = (10e3)² / (4×1000) = 25e6 / 4000 = 6250 s
@@ -121,7 +122,7 @@ class TestDiffusionStability:
 
     def test_stability_check_unstable(self):
         """Test that large dt fails stability check."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
         D = 1000.0
 
         # dt_max = dx²/(4D) = (10e3)²/(4×1000) = 100e6/4000 = 25000 s
@@ -137,12 +138,14 @@ class TestDiffusionStability:
     def test_stability_spherical_grid_pole_constraint(self):
         """Test that spherical grid stability is limited by poles (min dx)."""
         grid = SphericalGrid(
-            lat_min=-60.0,
-            lat_max=60.0,
-            lon_min=0.0,
-            lon_max=360.0,
-            nlat=120,
-            nlon=360,
+            grid_info=SphericalGridInfo(
+                lat_min=-60.0,
+                lat_max=60.0,
+                lon_min=0.0,
+                lon_max=360.0,
+                nlat=120,
+                nlon=360,
+            )
         )
 
         D = 1000.0
@@ -163,7 +166,7 @@ class TestDiffusionMasking:
 
     def test_diffusion_with_mask(self):
         """Test that land cells remain zero with mask."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
 
         # Create biomass
         biomass = jnp.ones((10, 10), dtype=jnp.float32) * 5.0
@@ -194,7 +197,7 @@ class TestDiffusionMasking:
 
     def test_diffusion_mask_blocks_flux(self):
         """Test that land acts as zero-flux boundary."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=5, nlon=5)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=5, nlon=5))
 
         # Ocean with spike, land barrier in middle
         biomass = jnp.ones((5, 5), dtype=jnp.float32) * 1.0
@@ -230,12 +233,14 @@ class TestDiffusionSphericalGrid:
     def test_diffusion_spherical_grid_dx_variation(self):
         """Test diffusion on spherical grid accounts for dx(lat)."""
         grid = SphericalGrid(
-            lat_min=-30.0,
-            lat_max=30.0,
-            lon_min=0.0,
-            lon_max=360.0,
-            nlat=60,
-            nlon=120,
+            grid_info=SphericalGridInfo(
+                lat_min=-30.0,
+                lat_max=30.0,
+                lon_min=0.0,
+                lon_max=360.0,
+                nlat=60,
+                nlon=120,
+            )
         )
 
         # Uniform biomass with spike
@@ -266,7 +271,7 @@ class TestDiffusionSphericalGrid:
 
     def test_diffusion_uniform_field_no_change(self):
         """Test that uniform field remains unchanged."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
 
         # Perfectly uniform field
         biomass = jnp.ones((10, 10), dtype=jnp.float32) * 10.0
@@ -292,7 +297,7 @@ class TestDiffusionDiagnostics:
 
     def test_diagnostics_computation(self):
         """Test that diagnostics are computed correctly."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
         biomass = jnp.ones((10, 10), dtype=jnp.float32) * 5.0
         biomass = biomass.at[5, 5].set(50.0)
 

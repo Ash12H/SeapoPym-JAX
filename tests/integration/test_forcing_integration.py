@@ -11,7 +11,7 @@ from seapopym_message.core.kernel import Kernel
 from seapopym_message.core.unit import unit
 from seapopym_message.distributed.scheduler import EventScheduler
 from seapopym_message.forcing import ForcingManager, derived_forcing
-from seapopym_message.utils.grid import GridInfo
+from seapopym_message.utils.grid import SphericalGridInfo
 
 
 @pytest.fixture(scope="module")
@@ -59,7 +59,7 @@ def test_forcing_with_unit(ray_context):
     forcing_manager = ForcingManager(datasets={"recruitment": recruitment_ds})
 
     # Create grid and workers
-    grid = GridInfo(lat_min=-5, lat_max=5, lon_min=-5, lon_max=5, nlat=10, nlon=10)
+    grid = SphericalGridInfo(lat_min=-5, lat_max=5, lon_min=-5, lon_max=5, nlat=10, nlon=10)
 
     kernel = Kernel([compute_growth_with_forcing])
     params = {"lambda": 0.1}
@@ -151,7 +151,7 @@ def test_derived_forcing_with_workers(ray_context):
     forcing_manager.register_derived(compute_recruitment)
 
     # Create simulation
-    grid = GridInfo(lat_min=-5, lat_max=5, lon_min=-5, lon_max=5, nlat=10, nlon=10)
+    grid = SphericalGridInfo(lat_min=-5, lat_max=5, lon_min=-5, lon_max=5, nlat=10, nlon=10)
 
     kernel = Kernel([compute_growth])
     params = {"lambda": 0.1}
@@ -210,7 +210,7 @@ def test_forcing_without_forcing_manager(ray_context):
         lambda_val = params["lambda"]
         return biomass + (R - lambda_val * biomass) * dt
 
-    grid = GridInfo(lat_min=-5, lat_max=5, lon_min=-5, lon_max=5, nlat=10, nlon=10)
+    grid = SphericalGridInfo(lat_min=-5, lat_max=5, lon_min=-5, lon_max=5, nlat=10, nlon=10)
 
     kernel = Kernel([compute_simple_growth])
     params = {"R": 5.0, "lambda": 0.1}

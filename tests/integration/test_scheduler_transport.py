@@ -17,7 +17,7 @@ from seapopym_message.distributed.scheduler import EventScheduler
 from seapopym_message.distributed.transport_config import FieldConfig, TransportConfig
 from seapopym_message.distributed.worker import CellWorker2D
 from seapopym_message.transport.worker import TransportWorker
-from seapopym_message.utils.grid import GridInfo
+from seapopym_message.utils.grid import SphericalGridInfo
 
 
 # Simple growth compute unit for testing
@@ -48,7 +48,7 @@ class TestSchedulerTransportIntegration:
         nlat_per_worker = global_nlat // n_workers_lat
         nlon_per_worker = global_nlon // n_workers_lon
 
-        grid_info = GridInfo(
+        grid_info = SphericalGridInfo(
             lat_min=-30.0,
             lat_max=30.0,
             lon_min=0.0,
@@ -115,7 +115,7 @@ class TestSchedulerTransportIntegration:
         nlat_per_worker = global_nlat // n_workers_lat
         nlon_per_worker = global_nlon // n_workers_lon
 
-        grid_info = GridInfo(
+        grid_info = SphericalGridInfo(
             lat_min=-30.0,
             lat_max=30.0,
             lon_min=0.0,
@@ -216,7 +216,7 @@ class TestSchedulerTransportIntegration:
         nlat_per_worker = global_nlat // n_workers_lat
         nlon_per_worker = global_nlon // n_workers_lon
 
-        grid_info = GridInfo(
+        grid_info = SphericalGridInfo(
             lat_min=-30.0,
             lat_max=30.0,
             lon_min=0.0,

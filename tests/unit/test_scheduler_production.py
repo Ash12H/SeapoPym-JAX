@@ -9,7 +9,7 @@ from seapopym_message.distributed.scheduler import EventScheduler
 from seapopym_message.distributed.transport_config import FieldConfig, TransportConfig
 from seapopym_message.distributed.worker import CellWorker2D
 from seapopym_message.transport.worker import TransportWorker
-from seapopym_message.utils.grid import GridInfo
+from seapopym_message.utils.grid import SphericalGridInfo
 
 
 @pytest.mark.unit
@@ -26,7 +26,7 @@ class TestSchedulerFieldCollection:
         n_ages = 11
 
         # Create workers
-        grid = GridInfo(
+        grid = SphericalGridInfo(
             lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=nlat_global, nlon=nlon_global
         )
         kernel = Kernel([])  # Empty kernel for this test
@@ -123,7 +123,7 @@ class TestSchedulerFieldCollection:
         # Setup: 2 workers
         nlat_global, nlon_global = 10, 10
 
-        grid = GridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=10, nlon=10)
+        grid = SphericalGridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=10, nlon=10)
         kernel = Kernel([])
         params = {}
 

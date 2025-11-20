@@ -163,6 +163,16 @@ def check_diffusion_stability(
     # Find minimum dx
     dx_min = float(jnp.min(dx)) if isinstance(dx, jnp.ndarray) else float(dx)
 
+    # Handle D=0 case (no diffusion, always stable)
+    if D == 0.0:
+        return {
+            "is_stable": True,
+            "dt_max": float("inf"),
+            "dx_min": dx_min,
+            "dy": dy,
+            "cfl_diffusion": 0.0,
+        }
+
     # Stability criterion: dt ≤ min(dx², dy²) / (4D)
     dt_max = min(dx_min**2, dy**2) / (4 * D)
 

@@ -17,6 +17,7 @@ from seapopym_message.transport.advection import (
 )
 from seapopym_message.transport.boundary import BoundaryConditions, BoundaryType
 from seapopym_message.transport.grid import PlaneGrid, SphericalGrid
+from seapopym_message.utils.grid import PlaneGridInfo, SphericalGridInfo
 
 
 class TestAdvectionBasics:
@@ -24,7 +25,7 @@ class TestAdvectionBasics:
 
     def test_advection_zero_velocity_no_change(self):
         """Test that zero velocity produces no change in biomass."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
         biomass = jnp.ones((10, 10), dtype=jnp.float32) * 5.0
         u = jnp.zeros((10, 10), dtype=jnp.float32)
         v = jnp.zeros((10, 10), dtype=jnp.float32)
@@ -44,7 +45,7 @@ class TestAdvectionBasics:
 
     def test_advection_conserves_mass_uniform_flow(self):
         """Test mass conservation with uniform eastward flow."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=20)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=20))
         biomass = jnp.ones((10, 20), dtype=jnp.float32) * 2.0
         u = jnp.ones((10, 20), dtype=jnp.float32) * 0.5  # 0.5 m/s eastward
         v = jnp.zeros((10, 20), dtype=jnp.float32)
@@ -71,7 +72,7 @@ class TestAdvectionBasics:
     def test_advection_eastward_flow_shifts_field(self):
         """Test that eastward flow shifts concentration field to the east."""
         # Create plane grid
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=5, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=5, nlon=10))
 
         # Create initial field with blob in western half
         biomass = jnp.zeros((5, 10), dtype=jnp.float32)
@@ -113,7 +114,7 @@ class TestAdvectionUpwindChoice:
 
     def test_upwind_choice_positive_velocity(self):
         """Test upwind choice when velocity is positive (eastward)."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=3, nlon=5)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=3, nlon=5))
 
         # Create field with gradient: low on left, high on right
         biomass = jnp.array(
@@ -149,7 +150,7 @@ class TestAdvectionUpwindChoice:
 
     def test_upwind_choice_negative_velocity(self):
         """Test upwind choice when velocity is negative (westward)."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=3, nlon=5)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=3, nlon=5))
 
         # Create field with gradient
         biomass = jnp.array(
@@ -185,7 +186,7 @@ class TestAdvectionMasking:
 
     def test_advection_with_mask_blocks_flux(self):
         """Test that land mask sets velocity to zero and blocks flux."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=5, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=5, nlon=10))
 
         # Create biomass field
         biomass = jnp.ones((5, 10), dtype=jnp.float32) * 5.0
@@ -217,7 +218,7 @@ class TestAdvectionMasking:
 
     def test_advection_mask_with_nan(self):
         """Test that NaN in mask is treated as land."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=3, nlon=5)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=3, nlon=5))
 
         biomass = jnp.ones((3, 5), dtype=jnp.float32) * 2.0
         u = jnp.ones((3, 5), dtype=jnp.float32) * 0.5
@@ -247,7 +248,7 @@ class TestAdvectionBoundaryConditions:
 
     def test_advection_periodic_vs_closed(self):
         """Test difference between periodic and closed boundaries."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=5, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=5, nlon=10))
 
         # Create field concentrated on western edge
         biomass = jnp.zeros((5, 10), dtype=jnp.float32)
@@ -311,7 +312,7 @@ class TestAdvectionDiagnostics:
 
     def test_diagnostics_computation(self):
         """Test that diagnostics are computed correctly."""
-        grid = PlaneGrid(dx=10e3, dy=10e3, nlat=10, nlon=10)
+        grid = PlaneGrid(grid_info=PlaneGridInfo(dx=10e3, dy=10e3, nlat=10, nlon=10))
         biomass = jnp.ones((10, 10), dtype=jnp.float32) * 5.0
         u = jnp.ones((10, 10), dtype=jnp.float32) * 0.5
         v = jnp.ones((10, 10), dtype=jnp.float32) * 0.3
@@ -348,12 +349,14 @@ class TestAdvectionSphericalGrid:
     def test_advection_spherical_grid(self):
         """Test advection on spherical grid with varying dx(lat)."""
         grid = SphericalGrid(
-            lat_min=-30.0,
-            lat_max=30.0,
-            lon_min=0.0,
-            lon_max=360.0,
-            nlat=60,
-            nlon=120,
+            grid_info=SphericalGridInfo(
+                lat_min=-30.0,
+                lat_max=30.0,
+                lon_min=0.0,
+                lon_max=360.0,
+                nlat=60,
+                nlon=120,
+            )
         )
 
         # Uniform biomass

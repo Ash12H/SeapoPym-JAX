@@ -6,7 +6,7 @@ import ray
 
 from seapopym_message.core.kernel import Kernel
 from seapopym_message.distributed.worker import CellWorker2D
-from seapopym_message.utils.grid import GridInfo
+from seapopym_message.utils.grid import SphericalGridInfo
 
 
 @pytest.mark.unit
@@ -19,7 +19,7 @@ class TestCellWorkerProduction:
             ray.init(ignore_reinit_error=True)
 
         # Create minimal kernel and worker
-        grid = GridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=20, nlon=40)
+        grid = SphericalGridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=20, nlon=40)
         kernel = Kernel([])  # Empty kernel
         params = {"age": 11}
 
@@ -46,7 +46,7 @@ class TestCellWorkerProduction:
             ray.init(ignore_reinit_error=True)
 
         # Create worker
-        grid = GridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=20, nlon=40)
+        grid = SphericalGridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=20, nlon=40)
         kernel = Kernel([])
         params = {"age": 11}
 
@@ -90,7 +90,7 @@ class TestCellWorkerProduction:
             ray.init(ignore_reinit_error=True)
 
         # Create worker
-        grid = GridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=20, nlon=40)
+        grid = SphericalGridInfo(lat_min=-60, lat_max=60, lon_min=0, lon_max=360, nlat=20, nlon=40)
         kernel = Kernel([])
         params = {}
 
