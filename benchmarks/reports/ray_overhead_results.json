@@ -1,0 +1,29 @@
+{
+  "grid_size": {
+    "nlat": 120,
+    "nlon": 360
+  },
+  "num_workers": 1,
+  "task_overhead": {
+    "local_mean_us": 0.6120200032455614,
+    "ray_mean_us": 112550.24251000577,
+    "overhead_us": 112549.63049000253,
+    "overhead_factor": 183899.6142497766
+  },
+  "data_transfer": {
+    "data_size_mb": 0.164794921875,
+    "put_mean_ms": 0.372607519993835,
+    "put_std_ms": 0.24394512751000078,
+    "get_mean_ms": 0.12966747998689243,
+    "get_std_ms": 0.027621869176999853,
+    "total_roundtrip_ms": 0.5022749999807273,
+    "bandwidth_mb_s": 328.0970024017188
+  },
+  "transport_comparison": {
+    "local_ms": 8.25462510001671,
+    "ray_ms": 12.312516699967091,
+    "overhead_ms": 4.057891599950381,
+    "overhead_pct": 49.159005415547774,
+    "slowdown_factor": 1.4915900541554776
+  }
+}
