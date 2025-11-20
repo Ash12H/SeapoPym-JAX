@@ -4,23 +4,16 @@ This module provides:
 - ForcingManager: Central orchestrator for environmental forcings
 - @derived_forcing: Decorator to create derived forcings
 - DerivedForcing: Metadata for derived forcings
-- I/O helpers: load_forcing_from_path, load_forcings_from_paths
 
 Example:
     >>> import xarray as xr
     >>> from seapopym_message.forcing import (
     ...     ForcingManager,
     ...     derived_forcing,
-    ...     load_forcing_from_path,
     ... )
     >>>
-    >>> # Option 1: User controls I/O directly
+    >>> # Load forcing data using xarray directly
     >>> temp_ds = xr.open_zarr("data/temp.zarr", chunks={'time': 10})
-    >>> temp_ds.attrs['units'] = '°C'
-    >>> temp_ds.attrs['interpolation_method'] = 'linear'
-    >>>
-    >>> # Option 2: Use helper function
-    >>> temp_ds = load_forcing_from_path("data/temp.zarr", chunks={'time': 10})
     >>> temp_ds.attrs['units'] = '°C'
     >>> temp_ds.attrs['interpolation_method'] = 'linear'
     >>>
@@ -40,13 +33,10 @@ Example:
 """
 
 from seapopym_message.forcing.derived import DerivedForcing, derived_forcing
-from seapopym_message.forcing.io import load_forcing_from_path, load_forcings_from_paths
 from seapopym_message.forcing.manager import ForcingManager
 
 __all__ = [
     "ForcingManager",
     "DerivedForcing",
     "derived_forcing",
-    "load_forcing_from_path",
-    "load_forcings_from_paths",
 ]
