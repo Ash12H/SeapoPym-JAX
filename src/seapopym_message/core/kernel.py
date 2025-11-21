@@ -8,6 +8,7 @@ respecting dependencies between Units. It separates execution into two phases:
 
 from typing import Any
 
+from seapopym_message.core.group import FunctionalGroup
 from seapopym_message.core.unit import Unit
 
 
@@ -18,45 +19,61 @@ class Kernel:
     declared inputs/outputs dependencies. It separates local and global computation
     phases for efficient distributed execution.
 
-    Execution order:
-        When multiple Units have no dependencies between them (same inputs, different
-        outputs), they are executed in the order they appear in the units list.
-        This allows explicit control over execution order when topological sorting
-        alone cannot determine the correct sequence.
-
     Args:
-        units: List of Unit instances to execute. When Units have equivalent
-               dependencies, they will execute in the order specified in this list.
+        units_or_groups: List of Unit instances or FunctionalGroup instances.
+                         FunctionalGroups are flattened into their constituent Units,
+                         with variables bound to the group's namespace.
 
     Raises:
         ValueError: If dependencies are cyclic or missing.
-
-    Example:
-        >>> # Order matters when Units read the same inputs
-        >>> kernel = Kernel([
-        ...     compute_recruitment,  # Must run before age_production
-        ...     age_production,       # Modifies production after recruitment
-        ...     update_biomass
-        ... ])
-        >>> state = kernel.execute_local_phase(state, dt=0.1, params={...})
-
-    Note:
-        For Units with independent inputs/outputs, the topological sort preserves
-        the order from the input list. This is critical when execution order affects
-        results (e.g., reading a variable before vs. after it's modified).
     """
 
-    def __init__(self, units: list[Unit]) -> None:
-        """Initialize the Kernel with a list of Units.
+    def __init__(self, units_or_groups: list[Unit | FunctionalGroup]) -> None:
+        """Initialize the Kernel.
 
         Args:
-            units: List of Unit instances to manage.
+            units_or_groups: List of Units or FunctionalGroups.
         """
-        self.units = units
+        self.units: list[Unit] = []
+
+        # Flatten groups and bind units
+        for item in units_or_groups:
+            if isinstance(item, FunctionalGroup):
+                # Bind all units in the group
+                for unit in item.units:
+                    # Create a bound copy of the unit
+                    # The group's variable_map handles the mapping
+                    # But we also need to handle default namespacing if not mapped
+                    # FunctionalGroup.get_mapped_name does this, but Unit.bind expects a full map
+                    # or relies on the map provided.
+
+                    # We need to construct a full map for this unit
+                    full_map = {}
+                    # Map inputs
+                    for internal_name in unit.internal_inputs:
+                        full_map[internal_name] = item.get_mapped_name(internal_name)
+                    # Map outputs
+                    for internal_name in unit.internal_outputs:
+                        full_map[internal_name] = item.get_mapped_name(internal_name)
+                    # Map forcings
+                    for internal_name in unit.internal_forcings:
+                        full_map[internal_name] = item.get_mapped_name(internal_name)
+
+                    bound_unit = unit.bind(full_map)
+                    # Rename unit to include group name for uniqueness
+                    bound_unit.name = f"{item.name}/{unit.name}"
+                    self.units.append(bound_unit)
+            elif isinstance(item, Unit):
+                self.units.append(item)
+            else:
+                raise TypeError(f"Expected Unit or FunctionalGroup, got {type(item)}")
+
         self._check_dependencies()
-        self._local_units_sorted = self._topological_sort([u for u in units if u.scope == "local"])
+        self._local_units_sorted = self._topological_sort(
+            [u for u in self.units if u.scope == "local"]
+        )
         self._global_units_sorted = self._topological_sort(
-            [u for u in units if u.scope == "global"]
+            [u for u in self.units if u.scope == "global"]
         )
 
     @property
@@ -74,9 +91,6 @@ class Kernel:
     ) -> dict[str, Any]:
         """Execute all local-scope Units in topological order.
 
-        Local Units are embarrassingly parallel - they don't require neighbor communication.
-        This phase can be executed independently on each worker.
-
         Args:
             state: Current simulation state (dict of arrays).
             dt: Time step size.
@@ -85,15 +99,14 @@ class Kernel:
 
         Returns:
             Updated state after executing all local Units.
-
-        Example:
-            >>> state = {'biomass': jnp.array([10., 20., 30.])}
-            >>> params = {'R': 5.0, 'lambda': 0.1}
-            >>> forcings = {'recruitment': jnp.array([...])}
-            >>> state = kernel.execute_local_phase(state, dt=0.1, params=params,
-            ...                                     forcings=forcings)
         """
         for unit in self._local_units_sorted:
+            # We pass the global params dict.
+            # Units might need specific params.
+            # Currently, Unit.execute passes all params.
+            # If FunctionalGroup has params, they should be merged or handled.
+            # Ideally, params should be namespaced too.
+            # For now, we assume params contains everything needed.
             result = unit.execute(state, dt=dt, params=params, **kwargs)
             state.update(result)
         return state
@@ -108,31 +121,15 @@ class Kernel:
     ) -> dict[str, Any]:
         """Execute all global-scope Units in topological order.
 
-        Global Units require neighbor communication (e.g., transport, diffusion).
-        This phase is executed after synchronization and halo exchange.
-
         Args:
             state: Current simulation state (dict of arrays).
             dt: Time step size.
             params: Model parameters.
             neighbor_data: Optional dictionary with halo data from neighbors.
-                          Keys: 'halo_north', 'halo_south', 'halo_east', 'halo_west'
             forcings: Optional dictionary with forcing data.
 
         Returns:
             Updated state after executing all global Units.
-
-        Example:
-            >>> neighbor_data = {
-            ...     'halo_north': {'biomass': jnp.array([...])},
-            ...     'halo_south': {'biomass': jnp.array([...])},
-            ...     'halo_east': {'biomass': jnp.array([...])},
-            ...     'halo_west': {'biomass': jnp.array([...])}
-            ... }
-            >>> forcings = {'recruitment': jnp.array([...])}
-            >>> state = kernel.execute_global_phase(state, dt=0.1, params=params,
-            ...                                     neighbor_data=neighbor_data,
-            ...                                     forcings=forcings)
         """
         kwargs = {"dt": dt, "params": params}
         if neighbor_data:
@@ -152,6 +149,49 @@ class Kernel:
             True if there are global Units, False otherwise.
         """
         return len(self._global_units_sorted) > 0
+
+    def visualize_graph(self) -> str:
+        """Generate a DOT string representation of the dependency graph.
+
+        Returns:
+            String containing the Graphviz DOT definition.
+        """
+        lines = ["digraph Kernel {"]
+        lines.append("  rankdir=LR;")
+        lines.append("  node [shape=box, style=filled, fillcolor=lightgrey];")
+
+        # Add nodes (Units)
+        for unit in self.units:
+            lines.append(f'  "{unit.name}" [label="{unit.name}"];')
+
+        # Add edges based on data flow
+        # We need to know which unit produces which variable
+        producers: dict[str, str] = {}  # variable -> unit_name
+
+        # Sort all units to ensure deterministic output
+        all_units = self._local_units_sorted + self._global_units_sorted
+
+        for unit in all_units:
+            for output in unit.outputs:
+                producers[output] = unit.name
+
+        for unit in all_units:
+            for input_var in unit.inputs:
+                if input_var in producers:
+                    producer_name = producers[input_var]
+                    if producer_name != unit.name:
+                        lines.append(f'  "{producer_name}" -> "{unit.name}" [label="{input_var}"];')
+                else:
+                    # Input comes from external source (Initial State or Forcing)
+                    # We can add a node for it
+                    ext_node = f"EXT_{input_var}"
+                    lines.append(
+                        f'  "{ext_node}" [label="{input_var}", shape=ellipse, fillcolor=white];'
+                    )
+                    lines.append(f'  "{ext_node}" -> "{unit.name}";')
+
+        lines.append("}")
+        return "\n".join(lines)
 
     def _check_dependencies(self) -> None:
         """Check that all Unit inputs can be satisfied.
@@ -216,6 +256,11 @@ class Kernel:
                         # Multiple units producing same output - use last one
                         pass
                     producers[output] = unit
+                # Also register if it modifies an input but we want to track the flow
+                # Actually, if unit reads A and writes A, it depends on whoever produced A before.
+                # And whoever reads A next depends on this unit.
+                # So we should register it as producer of A (the new version).
+                producers[output] = unit
 
         # Calculate in-degrees
         for unit in units:

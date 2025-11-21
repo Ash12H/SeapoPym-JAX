@@ -25,11 +25,17 @@
 - [x] Implémenter `DielMigrationUnit` (moyenne pondérée jour/nuit).
 - [x] Tests unitaires pour `FunctionalGroup` et les nouvelles unités.
 
-## Phase 3 : Le "Kernel Compiler"
-- [ ] Modifier le constructeur de `Kernel` dans `src/seapopym_message/core/kernel.py`.
-    - [ ] Accepter `list[FunctionalGroup]` en plus de `list[Unit]`.
-    - [ ] Implémenter la logique d'aplatissement : itérer sur les groupes, binder les unités, et créer une liste plate d'unités liées.
-- [ ] Ajouter la validation statique :
-    - [ ] Vérifier les dépendances sur le graphe global.
-- [ ] Ajouter la visualisation du graphe (`visualize_graph`).
-- [ ] Mettre à jour les tests du Kernel.
+## Phase 3 : Le "Kernel Compiler" - ✅ COMPLÉTÉ
+- [x] Modifier le constructeur de `Kernel` dans `src/seapopym_message/core/kernel.py`.
+    - [x] Accepter `list[FunctionalGroup]` en plus de `list[Unit]`.
+    - [x] Implémenter la logique d'aplatissement : itérer sur les groupes, binder les unités, et créer une liste plate d'unités liées.
+- [x] Ajouter la validation statique :
+    - [x] Vérifier les dépendances sur le graphe global (déjà géré par `_check_dependencies` sur la liste plate).
+- [x] Ajouter la visualisation du graphe (`visualize_graph`).
+- [x] Mettre à jour les tests du Kernel.
+
+## Phase 4 : Migration du Modèle Zooplancton
+- [ ] Créer `src/seapopym_message/model/zooplankton.py` (ou modifier l'existant).
+- [ ] Définir les `FunctionalGroup` pour le zooplancton (ex: `epipelagic`, `mesopelagic`, `migrant`).
+- [ ] Configurer les `variable_map` pour chaque groupe.
+- [ ] Créer un script de test/démonstration pour valider l'exécution multi-groupes.
