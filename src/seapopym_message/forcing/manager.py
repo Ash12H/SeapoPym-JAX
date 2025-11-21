@@ -65,14 +65,69 @@ class ForcingManager:
         # Registry for derived forcings
         self.derived_forcings = derived_forcings if derived_forcings is not None else {}
 
-    def prepare_timestep(
+    def prepare_timestep_xarray(
         self, time: float, params: dict[str, Any] | None = None
-    ) -> dict[str, jnp.ndarray]:
-        """Prepare all forcings for a given timestep.
+    ) -> dict[str, Any]:
+        """Prepare all forcings as xarray DataArrays (preserves metadata).
 
         Loads and interpolates all base forcings to the specified time.
         Then computes derived forcings if registered.
-        Results are converted to JAX arrays for use in kernels.
+        Returns xarray DataArrays with dimension metadata preserved.
+
+        Args:
+            time: Simulation time.
+            params: Parameters for derived forcings (optional).
+
+        Returns:
+            Dictionary mapping forcing names to xarray DataArrays.
+            DataArrays preserve dimension names, coordinates, and attributes.
+            Includes both base and derived forcings.
+
+        Example:
+            >>> forcings = manager.prepare_timestep_xarray(time=3600.0)
+            >>> forcings["temperature"].dims  # ('depth', 'lat', 'lon')
+            >>> forcings["temperature"].sel(depth=0)  # Select by name!
+        """
+        if params is None:
+            params = {}
+
+        import xarray as xr
+
+        forcings_xr: dict[str, Any] = {}
+
+        # Load base forcings from sources (keep as xarray)
+        for name, source in self.forcings.items():
+            # Interpolate to time (returns DataArray without time dim)
+            forcings_xr[name] = source.interpolate(time)
+
+        # Compute derived forcings in dependency order
+        if self.derived_forcings:
+            derived_order = resolve_dependencies(self.derived_forcings)
+
+            for name in derived_order:
+                derived = self.derived_forcings[name]
+                # Convert xarray to numpy for derived forcing computation
+                forcings_numpy = {k: jnp.array(v.values) for k, v in forcings_xr.items()}
+                result = derived.compute(forcings_numpy, params)
+                # Wrap result back as DataArray (inherit coords from first input)
+                if derived.inputs:
+                    first_input = forcings_xr[derived.inputs[0]]
+                    forcings_xr[name] = xr.DataArray(
+                        result, coords=first_input.coords, dims=first_input.dims
+                    )
+                else:
+                    forcings_xr[name] = xr.DataArray(result)
+
+        return forcings_xr
+
+    def prepare_timestep(
+        self, time: float, params: dict[str, Any] | None = None
+    ) -> dict[str, jnp.ndarray]:
+        """Prepare all forcings for a given timestep (converts to JAX arrays).
+
+        Loads and interpolates all base forcings to the specified time.
+        Then computes derived forcings if registered.
+        Results are converted to JAX arrays for use in JIT-compiled kernels.
 
         Args:
             time: Simulation time.
@@ -88,28 +143,9 @@ class ForcingManager:
             >>> forcings["temperature"].shape  # (depth, lat, lon)
             (10, 100, 100)
         """
-        if params is None:
-            params = {}
-
-        forcings_data: dict[str, jnp.ndarray] = {}
-
-        # Load base forcings from sources
-        for name, source in self.forcings.items():
-            # Interpolate to time (returns DataArray without time dim)
-            interpolated = source.interpolate(time)
-
-            # Convert to JAX array
-            forcings_data[name] = jnp.array(interpolated.values)
-
-        # Compute derived forcings in dependency order
-        if self.derived_forcings:
-            derived_order = resolve_dependencies(self.derived_forcings)
-
-            for name in derived_order:
-                derived = self.derived_forcings[name]
-                forcings_data[name] = derived.compute(forcings_data, params)
-
-        return forcings_data
+        # Get xarray forcings and convert to numpy
+        forcings_xr = self.prepare_timestep_xarray(time, params)
+        return {k: jnp.array(v.values) for k, v in forcings_xr.items()}
 
     def prepare_timestep_distributed(
         self, time: float, params: dict[str, Any] | None = None

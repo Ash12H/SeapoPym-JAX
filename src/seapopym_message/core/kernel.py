@@ -34,34 +34,48 @@ class Kernel:
         Args:
             units_or_groups: List of Units or FunctionalGroups.
         """
+        from seapopym_message.core.group import UnitInstance
+
         self.units: list[Unit] = []
 
         # Flatten groups and bind units
         for item in units_or_groups:
             if isinstance(item, FunctionalGroup):
                 # Bind all units in the group
-                for unit in item.units:
-                    # Create a bound copy of the unit
-                    # The group's variable_map handles the mapping
-                    # But we also need to handle default namespacing if not mapped
-                    # FunctionalGroup.get_mapped_name does this, but Unit.bind expects a full map
-                    # or relies on the map provided.
+                for unit_or_instance in item.units:
+                    # Determine if this is a direct Unit or a UnitInstance
+                    if isinstance(unit_or_instance, UnitInstance):
+                        unit = unit_or_instance.unit
+                        alias = unit_or_instance.alias
+                        local_params = unit_or_instance.local_params  # noqa: F841
+                    else:
+                        unit = unit_or_instance
+                        alias = None
 
-                    # We need to construct a full map for this unit
+                    # Build full variable map for this unit instance
                     full_map = {}
                     # Map inputs
                     for internal_name in unit.internal_inputs:
-                        full_map[internal_name] = item.get_mapped_name(internal_name)
+                        full_map[internal_name] = item.get_mapped_name(internal_name, alias)
                     # Map outputs
                     for internal_name in unit.internal_outputs:
-                        full_map[internal_name] = item.get_mapped_name(internal_name)
+                        full_map[internal_name] = item.get_mapped_name(internal_name, alias)
                     # Map forcings
                     for internal_name in unit.internal_forcings:
-                        full_map[internal_name] = item.get_mapped_name(internal_name)
+                        full_map[internal_name] = item.get_mapped_name(internal_name, alias)
 
                     bound_unit = unit.bind(full_map)
-                    # Rename unit to include group name for uniqueness
-                    bound_unit.name = f"{item.name}/{unit.name}"
+
+                    # Rename unit to include group name and alias for uniqueness
+                    if alias:
+                        bound_unit.name = f"{item.name}/{alias}"
+                    else:
+                        bound_unit.name = f"{item.name}/{unit.name}"
+
+                    # Store local params for later use (if needed)
+                    # For now, they would be merged into the global params dict
+                    # This is a limitation we can address later
+
                     self.units.append(bound_unit)
             elif isinstance(item, Unit):
                 self.units.append(item)
