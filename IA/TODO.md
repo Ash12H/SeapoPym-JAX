@@ -34,8 +34,15 @@
 - [x] Ajouter la visualisation du graphe (`visualize_graph`).
 - [x] Mettre à jour les tests du Kernel.
 
-## Phase 4 : Migration du Modèle Zooplancton
-- [ ] Créer `src/seapopym_message/model/zooplankton.py` (ou modifier l'existant).
-- [ ] Définir les `FunctionalGroup` pour le zooplancton (ex: `epipelagic`, `mesopelagic`, `migrant`).
-- [ ] Configurer les `variable_map` pour chaque groupe.
-- [ ] Créer un script de test/démonstration pour valider l'exécution multi-groupes.
+## Phase 4 : Migration du Modèle Zooplancton - ✅ COMPLÉTÉ
+- [x] Créer `src/seapopym_message/model/zooplankton.py` pour la factory `zooplankton_group`.
+- [x] Refactoriser `src/seapopym_message/kernels/zooplankton.py` :
+    - [x] Transformer `compute_tau_r` et `compute_mortality` en Unités.
+    - [x] Modifier les unités biologiques pour accepter `tau_r` et `mortality` comme inputs (et non forcings).
+- [x] Implémenter la logique de mapping dans `zooplankton_group` (Epipelagic vs Migrant).
+- [x] Créer un test d'intégration `tests/integration/test_multi_group_demo.py` validant la simulation multi-groupes.
+
+## Phase 5 : Extension Multi-Couches et Transport
+- [ ] Mettre à jour le `TransportWorker` pour gérer les variables namespacées (`group/biomass`).
+- [ ] Optimiser le transport (grouper les champs par grille ?).
+- [ ] Documenter l'utilisation finale pour l'utilisateur.
