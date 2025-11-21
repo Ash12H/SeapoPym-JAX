@@ -14,13 +14,22 @@
 - [x] Créer un test unitaire `tests/unit/forcing/test_source.py` pour `ForcingSource`.
 - [x] Créer un test unitaire `tests/unit/forcing/test_manager_ndim.py` pour vérifier que le `ForcingManager` gère bien un champ 3D.
 
-## Phase 2 : Architecture des Groupes Fonctionnels
-- [ ] Créer le fichier `src/seapopym_message/core/group.py`.
-- [ ] Implémenter la classe `FunctionalGroup` (dataclass) :
-    - [ ] Attributs : `name`, `units`, `variable_map`, `params`.
-- [ ] Modifier `src/seapopym_message/core/unit.py` :
-    - [ ] Ajouter le support pour le binding dynamique (séparation nom de variable / nom dans le state).
-- [ ] Créer le module `src/seapopym_message/kernels/sensing.py` pour les Unités de Perception.
-- [ ] Implémenter `ExtractLayerUnit` (extraction d'une couche Z).
-- [ ] Implémenter `DielMigrationUnit` (moyenne pondérée jour/nuit).
-- [ ] Tests unitaires pour `FunctionalGroup` et les nouvelles unités.
+## Phase 2 : Architecture des Groupes Fonctionnels - ✅ COMPLÉTÉ
+- [x] Créer le fichier `src/seapopym_message/core/group.py`.
+- [x] Implémenter la classe `FunctionalGroup` (dataclass) :
+    - [x] Attributs : `name`, `units`, `variable_map`, `params`.
+- [x] Modifier `src/seapopym_message/core/unit.py` :
+    - [x] Ajouter le support pour le binding dynamique (séparation nom de variable / nom dans le state).
+- [x] Créer le module `src/seapopym_message/kernels/sensing.py` pour les Unités de Perception.
+- [x] Implémenter `ExtractLayerUnit` (extraction d'une couche Z).
+- [x] Implémenter `DielMigrationUnit` (moyenne pondérée jour/nuit).
+- [x] Tests unitaires pour `FunctionalGroup` et les nouvelles unités.
+
+## Phase 3 : Le "Kernel Compiler"
+- [ ] Modifier le constructeur de `Kernel` dans `src/seapopym_message/core/kernel.py`.
+    - [ ] Accepter `list[FunctionalGroup]` en plus de `list[Unit]`.
+    - [ ] Implémenter la logique d'aplatissement : itérer sur les groupes, binder les unités, et créer une liste plate d'unités liées.
+- [ ] Ajouter la validation statique :
+    - [ ] Vérifier les dépendances sur le graphe global.
+- [ ] Ajouter la visualisation du graphe (`visualize_graph`).
+- [ ] Mettre à jour les tests du Kernel.
