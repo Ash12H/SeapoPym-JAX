@@ -73,7 +73,10 @@ def extract_layer(
             )
 
     # Select layer using xarray (robust!)
-    return forcing_nd.isel({dim_to_extract: layer_index})
+    result_da = forcing_nd.isel({dim_to_extract: layer_index})
+
+    # Return as numpy array for compatibility with JAX-compiled units
+    return result_da.values
 
 
 @unit(
@@ -139,4 +142,6 @@ def diel_migration(
     # Get day_length values (handle both DataArray and ndarray)
     day_length_vals = day_length.values if isinstance(day_length, xr.DataArray) else day_length
 
-    return val_day * day_length_vals + val_night * (1.0 - day_length_vals)
+    # Compute weighted average and return as numpy for JAX compatibility
+    result = val_day.values * day_length_vals + val_night.values * (1.0 - day_length_vals)
+    return result

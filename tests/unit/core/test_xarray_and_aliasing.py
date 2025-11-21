@@ -25,9 +25,10 @@ def test_extract_layer_with_xarray():
     result_dict = extract_layer.execute(state, dt=1.0, params=params, forcings=forcings)
     result = result_dict["forcing_2d"]
 
-    assert isinstance(result, xr.DataArray)
-    assert result.dims == ("lat", "lon")
-    assert result.values[0, 0] == 25.0
+    # Result should be numpy array (not xarray) for JAX compatibility
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (1, 1)
+    assert result[0, 0] == 25.0
 
 
 def test_extract_layer_auto_detect_dimension():
@@ -46,7 +47,8 @@ def test_extract_layer_auto_detect_dimension():
     result_dict = extract_layer.execute(state, dt=1.0, params=params, forcings=forcings)
     result = result_dict["forcing_2d"]
 
-    assert result.values[0, 0] == 15.0
+    assert isinstance(result, np.ndarray)
+    assert result[0, 0] == 15.0
 
 
 def test_diel_migration_with_xarray():
@@ -69,7 +71,9 @@ def test_diel_migration_with_xarray():
     result = result_dict["forcing_effective"]
 
     # Expected: 5 * 0.5 + 25 * 0.5 = 15
-    assert np.isclose(result.values[0, 0], 15.0)
+    # Result should be numpy array for JAX compatibility
+    assert isinstance(result, np.ndarray)
+    assert np.isclose(result[0, 0], 15.0)
 
 
 def test_unit_instance_aliasing():
