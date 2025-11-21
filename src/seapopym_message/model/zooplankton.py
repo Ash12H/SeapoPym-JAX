@@ -50,19 +50,19 @@ def zooplankton_group(
     global_day_length = forcing_map.get("day_length", "forcing/day_length")
     global_npp = forcing_map.get("npp", "forcing/npp")
 
-    units = []
+    units: list[Any] = []  # Type will be Unit, compatible with FunctionalGroup
     variable_map = {}
 
     # 1. Sensing Unit (Temperature Perception)
     # Maps global 3D temperature -> Group-specific effective temperature
     if behavior == "epipelagic":
         units.append(extract_layer)
-        variable_map["forcing_3d"] = global_temp_3d
+        variable_map["forcing_nd"] = global_temp_3d  # Changed from forcing_3d
         variable_map["forcing_2d"] = f"{name}/temperature"  # Output effective temp
 
     elif behavior == "migrant":
         units.append(diel_migration)
-        variable_map["forcing_3d"] = global_temp_3d
+        variable_map["forcing_nd"] = global_temp_3d  # Changed from forcing_3d
         variable_map["day_length"] = global_day_length
         variable_map["forcing_effective"] = f"{name}/temperature"  # Output effective temp
 
