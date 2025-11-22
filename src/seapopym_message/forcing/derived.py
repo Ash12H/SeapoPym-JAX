@@ -24,8 +24,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-import jax.numpy as jnp
-
 
 @dataclass
 class DerivedForcing:
@@ -56,7 +54,7 @@ class DerivedForcing:
     params: list[str]
     func: Callable
 
-    def compute(self, forcings: dict[str, jnp.ndarray], params: dict[str, Any]) -> jnp.ndarray:
+    def compute(self, forcings: dict[str, Any], params: dict[str, Any]) -> Any:
         """Compute the derived forcing.
 
         Args:
@@ -64,7 +62,7 @@ class DerivedForcing:
             params: Dictionary of parameters.
 
         Returns:
-            Computed forcing as JAX array.
+            Computed forcing (usually xarray.DataArray or jnp.ndarray).
 
         Raises:
             KeyError: If required inputs or params are missing.

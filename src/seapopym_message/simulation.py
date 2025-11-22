@@ -44,11 +44,17 @@ def create_distributed_simulation(
         >>> import ray
         >>> ray.init()
         >>> from seapopym_message.core.kernel import Kernel
+        >>> from seapopym_message.core.blueprint import Blueprint
         >>> from seapopym_message.kernels.biology import compute_growth
         >>> from seapopym_message.utils.grid import GridInfo
         >>>
         >>> grid = GridInfo(0, 10, 0, 20, nlat=20, nlon=40)
-        >>> kernel = Kernel([compute_growth])
+        >>>
+        >>> # Build Kernel via Blueprint
+        >>> bp = Blueprint()
+        >>> bp.add_unit(compute_growth)
+        >>> kernel = Kernel(bp.build())
+        >>>
         >>> params = {"R": 10.0, "lambda": 0.1}
         >>>
         >>> workers, patches = create_distributed_simulation(

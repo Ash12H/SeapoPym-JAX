@@ -180,11 +180,8 @@ class CellWorker2D:
 
         Workflow:
         1. Extract forcings for local patch (if provided)
-        2. Execute local phase (embarrassingly parallel)
-        3. If kernel has global units:
-           a. Request halo data from neighbors
-           b. Wait for all halos to arrive
-           c. Execute global phase with halo data
+        2. Iterate over Kernel stages (Local/Global)
+        3. For Global stages, handle halo exchange automatically
         4. Update time
         5. Return diagnostics
 
@@ -200,31 +197,36 @@ class CellWorker2D:
         if forcings_global is not None:
             forcings_local = self._extract_local_forcings(forcings_global)
 
-        # Phase 1: Local computation
-        self.state = self.kernel.execute_local_phase(
-            self.state,
-            dt=dt,
-            params=self.params,
-            grid_shape=(self.nlat, self.nlon),
-            forcings=forcings_local,
-        )
+        # Iterate over execution stages defined by the Kernel
+        for scope, stage_units in self.kernel.stages:
+            if scope == "local":
+                # Execute local stage (no communication needed)
+                self.state = self.kernel.execute_stage(
+                    stage_units,
+                    self.state,
+                    dt=dt,
+                    params=self.params,
+                    grid_shape=(self.nlat, self.nlon),
+                    forcings=forcings_local,
+                )
 
-        # Phase 2: Global computation (if needed)
-        if self.kernel.has_global_units():
-            # Request boundary data from neighbors
-            halo_futures = self._request_halos()
+            elif scope == "global":
+                # Execute global stage (requires neighbor communication)
+                # 1. Request boundary data from neighbors
+                halo_futures = self._request_halos()
 
-            # Gather halo data
-            halo_data = await self._gather_halos(halo_futures)
+                # 2. Gather halo data (await futures)
+                halo_data = await self._gather_halos(halo_futures)
 
-            # Execute global phase
-            self.state = self.kernel.execute_global_phase(
-                self.state,
-                dt=dt,
-                params=self.params,
-                neighbor_data=halo_data,
-                forcings=forcings_local,
-            )
+                # 3. Execute global units with halo data
+                self.state = self.kernel.execute_stage(
+                    stage_units,
+                    self.state,
+                    dt=dt,
+                    params=self.params,
+                    neighbor_data=halo_data,
+                    forcings=forcings_local,
+                )
 
         # Update time
         self.t += dt

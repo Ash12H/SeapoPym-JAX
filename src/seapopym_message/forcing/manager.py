@@ -106,17 +106,22 @@ class ForcingManager:
 
             for name in derived_order:
                 derived = self.derived_forcings[name]
-                # Convert xarray to numpy for derived forcing computation
-                forcings_numpy = {k: jnp.array(v.values) for k, v in forcings_xr.items()}
-                result = derived.compute(forcings_numpy, params)
-                # Wrap result back as DataArray (inherit coords from first input)
-                if derived.inputs:
-                    first_input = forcings_xr[derived.inputs[0]]
-                    forcings_xr[name] = xr.DataArray(
-                        result, coords=first_input.coords, dims=first_input.dims
-                    )
+                # Pass xarray objects directly to derived forcing computation
+                result = derived.compute(forcings_xr, params)
+
+                # Ensure result is stored as DataArray
+                if isinstance(result, xr.DataArray):
+                    forcings_xr[name] = result
                 else:
-                    forcings_xr[name] = xr.DataArray(result)
+                    # Wrap result back as DataArray (inherit coords from first input)
+                    # This supports legacy functions returning numpy/jax arrays
+                    if derived.inputs:
+                        first_input = forcings_xr[derived.inputs[0]]
+                        forcings_xr[name] = xr.DataArray(
+                            result, coords=first_input.coords, dims=first_input.dims
+                        )
+                    else:
+                        forcings_xr[name] = xr.DataArray(result)
 
         return forcings_xr
 

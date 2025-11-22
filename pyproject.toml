@@ -31,6 +31,7 @@ dependencies = [
     "dask>=2023.12.0",
     "matplotlib>=3.8.0",
     "jax-cfd>=0.2.0",
+    "networkx>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,7 @@ dev = [
     "pre-commit>=3.5.0",
     "ipykernel>=6.27.0",
     "jupyter>=1.0.0",
+    "types-networkx>=3.0",
 ]
 
 docs = [

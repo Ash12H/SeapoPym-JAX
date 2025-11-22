@@ -5,10 +5,15 @@ This module defines the FunctionalGroup class, which encapsulates the behavior
 (e.g., a species or life stage).
 """
 
+import inspect
 from dataclasses import dataclass, field
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 from seapopym_message.core.unit import Unit
+
+if TYPE_CHECKING:
+    from seapopym_message.core.blueprint import Blueprint
 
 
 @dataclass
@@ -90,3 +95,69 @@ class FunctionalGroup:
 
         # Default behavior: namespace with group name
         return f"{self.name}/{internal_name}"
+
+    def add_to_blueprint(self, blueprint: "Blueprint") -> None:
+        """Register all units in this group to the Blueprint.
+
+        This method:
+        1. Resolves variable names (namespacing).
+        2. Binds group-specific parameters to the units (using partial).
+        3. Adds the configured units to the Blueprint.
+
+        Args:
+            blueprint: The Blueprint instance to populate.
+        """
+        for item in self.units:
+            if isinstance(item, UnitInstance):
+                unit = item.unit
+                alias = item.alias
+                local_params = item.local_params
+            else:
+                unit = item
+                alias = None
+                local_params = {}
+
+            # 1. Resolve Names
+            # Create a map for bind()
+            var_map = {}
+            # We map all internals to their global scoped names
+            for name in unit.internal_inputs + unit.internal_outputs + unit.internal_forcings:
+                var_map[name] = self.get_mapped_name(name, alias)
+
+            # 2. Bind variables (Creates a new Unit copy)
+            new_unit = unit.bind(var_map)
+
+            # 3. Update Name (Unique ID in Graph)
+            if alias:
+                new_unit.name = f"{self.name}/{alias}"
+            else:
+                new_unit.name = f"{self.name}/{unit.name}"
+
+            # 4. Parameter Injection
+            # Merge group params and local params
+            combined_params = {**self.params, **local_params}
+
+            if combined_params:
+                # Inspect function to see which params are applicable
+                sig = inspect.signature(unit.func)
+                relevant_params = {}
+                for p_name, p_value in combined_params.items():
+                    if p_name in sig.parameters:
+                        relevant_params[p_name] = p_value
+
+                if relevant_params:
+                    # Bind parameters to the function
+                    # This creates a new function where these params are fixed
+                    new_func = partial(unit.func, **relevant_params)
+                    new_unit.func = new_func
+
+                    # Re-compile if necessary since func changed
+                    if new_unit.compiled:
+                        import jax
+
+                        new_unit._compiled_func = jax.jit(new_func)
+                    else:
+                        new_unit._compiled_func = new_func
+
+            # 5. Add to Blueprint
+            blueprint.add_unit(new_unit)

@@ -21,6 +21,7 @@ repos:
         additional_dependencies:
           - types-setuptools
           - numpy
+          - types-networkx
         args: [--config-file=pyproject.toml]
         exclude: ^(tests/|notebooks/|examples/)
 
