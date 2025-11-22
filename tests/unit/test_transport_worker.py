@@ -270,7 +270,7 @@ class TestTransportWorkerConservation:
         mass_drift = abs(conservation - 1.0)
         assert mass_drift < 0.01, f"Mass drift {mass_drift:.4f} exceeds 1%"
 
-        print(f"10-day conservation: {conservation:.6f} ({conservation*100:.4f}%)")
+        print(f"10-day conservation: {conservation:.6f} ({conservation * 100:.4f}%)")
 
 
 class TestTransportWorkerMasking:

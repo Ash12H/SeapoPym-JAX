@@ -68,8 +68,7 @@ def extract_layer(
                 break
         if dim_to_extract is None:
             raise ValueError(
-                f"No depth dimension found in {forcing_nd.dims}. "
-                f"Expected one of: {depth_dim_names}"
+                f"No depth dimension found in {forcing_nd.dims}. Expected one of: {depth_dim_names}"
             )
 
     # Select layer using xarray (robust!)
@@ -131,8 +130,7 @@ def diel_migration(
                 break
         if dim_to_extract is None:
             raise ValueError(
-                f"No depth dimension found in {forcing_nd.dims}. "
-                f"Expected one of: {depth_dim_names}"
+                f"No depth dimension found in {forcing_nd.dims}. Expected one of: {depth_dim_names}"
             )
 
     # Extract layers using xarray

@@ -148,7 +148,7 @@ class SphericalGridInfo(GridInfo):
             f"SphericalGridInfo(lat=[{self.lat_min:.2f}, {self.lat_max:.2f}], "
             f"lon=[{self.lon_min:.2f}, {self.lon_max:.2f}], "
             f"shape=({self.nlat}, {self.nlon}), "
-            f"dx={self.dx/1000:.1f}km, dy={self.dy/1000:.1f}km)"
+            f"dx={self.dx / 1000:.1f}km, dy={self.dy / 1000:.1f}km)"
         )
 
 
@@ -217,6 +217,6 @@ class PlaneGridInfo(GridInfo):
         """String representation of PlaneGridInfo."""
         return (
             f"PlaneGridInfo(shape=({self.nlat}, {self.nlon}), "
-            f"dx={self.dx/1000:.1f}km, dy={self.dy/1000:.1f}km, "
-            f"domain={self.domain_length_x/1000:.1f}×{self.domain_length_y/1000:.1f}km)"
+            f"dx={self.dx / 1000:.1f}km, dy={self.dy / 1000:.1f}km, "
+            f"domain={self.domain_length_x / 1000:.1f}×{self.domain_length_y / 1000:.1f}km)"
         )

@@ -55,13 +55,11 @@ def split_domain_2d(
     # Validate divisibility
     if nlat_global % num_workers_lat != 0:
         raise ValueError(
-            f"nlat_global ({nlat_global}) must be divisible by "
-            f"num_workers_lat ({num_workers_lat})"
+            f"nlat_global ({nlat_global}) must be divisible by num_workers_lat ({num_workers_lat})"
         )
     if nlon_global % num_workers_lon != 0:
         raise ValueError(
-            f"nlon_global ({nlon_global}) must be divisible by "
-            f"num_workers_lon ({num_workers_lon})"
+            f"nlon_global ({nlon_global}) must be divisible by num_workers_lon ({num_workers_lon})"
         )
 
     # Patch dimensions
@@ -143,13 +141,11 @@ def split_domain_2d_periodic_lon(
     # Validate divisibility
     if nlat_global % num_workers_lat != 0:
         raise ValueError(
-            f"nlat_global ({nlat_global}) must be divisible by "
-            f"num_workers_lat ({num_workers_lat})"
+            f"nlat_global ({nlat_global}) must be divisible by num_workers_lat ({num_workers_lat})"
         )
     if nlon_global % num_workers_lon != 0:
         raise ValueError(
-            f"nlon_global ({nlon_global}) must be divisible by "
-            f"num_workers_lon ({num_workers_lon})"
+            f"nlon_global ({nlon_global}) must be divisible by num_workers_lon ({num_workers_lon})"
         )
 
     # Patch dimensions

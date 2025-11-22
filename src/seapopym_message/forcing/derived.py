@@ -80,7 +80,7 @@ class DerivedForcing:
 
     def __repr__(self) -> str:
         """String representation."""
-        return f"DerivedForcing(name='{self.name}', " f"inputs={self.inputs}, params={self.params})"
+        return f"DerivedForcing(name='{self.name}', inputs={self.inputs}, params={self.params})"
 
 
 def derived_forcing(

@@ -176,7 +176,7 @@ class Unit:
         missing = set(self.inputs) - available
         if missing:
             raise ValueError(
-                f"Unit '{self.name}' missing required inputs: {missing}. " f"Available: {available}"
+                f"Unit '{self.name}' missing required inputs: {missing}. Available: {available}"
             )
 
         # Extract inputs from state using Mapping (Internal -> Global)
