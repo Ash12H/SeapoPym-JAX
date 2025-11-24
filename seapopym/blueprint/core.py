@@ -1,6 +1,7 @@
 """Blueprint module for dependency graph construction and execution planning."""
 
 import inspect
+import itertools
 from collections.abc import Callable
 from typing import Any
 
@@ -41,6 +42,7 @@ class Blueprint:
         func: Callable[..., Any],
         output_mapping: dict[str, str],
         input_mapping: dict[str, str] | None = None,
+        output_tendencies: dict[str, str] | None = None,
         scope: str = "local",
         name: str | None = None,
     ) -> None:
@@ -48,65 +50,65 @@ class Blueprint:
 
         Args:
             func: La fonction Python à exécuter.
-            output_mapping: Mapping des sorties {key_retour: graph_var_name}.
+            output_mapping: Mapping des sorties {key_retour_fonction: nom_variable_graphe}.
             input_mapping: Surcharge des entrées {arg_name: graph_var_name}.
+            output_tendencies: Mapping {key_retour: var_cible} pour marquer une sortie comme tendance.
+                              Ex: {"rate": "biomass"} signifie que la clé "rate" est une tendance de "biomass".
+                              Les tendances sont sommées par le TimeIntegrator lors de l'intégration.
             scope: 'local' ou 'global'.
             name: Nom unique de l'étape (optionnel, défaut = nom fonction).
 
-        Raises:
-            ConfigurationError: Si output_mapping est vide.
-
+        Example:
+            >>> def compute_mortality(biomass):
+            ...     return {"rate": biomass * -0.1}
+            >>> bp.register_unit(
+            ...     compute_mortality,
+            ...     output_mapping={"rate": "mortality_rate"},
+            ...     output_tendencies={"rate": "biomass"}  # mortality_rate est une tendance de biomass
+            ... )
         """
+        if not output_mapping:
+            raise ConfigurationError("output_mapping must be provided and not empty.")
+
         input_mapping = input_mapping or {}
 
-        if not output_mapping:
-            raise ConfigurationError("output_mapping cannot be empty.")
-
-        # 1. Identification de l'unité
         func_name = func.__name__
         step_name = name or func_name
 
-        # Application du contexte de groupe au nom de l'étape si nécessaire
         if self._group_context:
             step_name = f"{self._group_context}_{step_name}"
 
-        # 2. Détermination des sorties
-        final_output_mapping: dict[str, str] = {}
-
-        # Application du namespacing
-        for key, raw_name in output_mapping.items():
-            final_name = f"{self._group_context}_{raw_name}" if self._group_context else raw_name
-            final_output_mapping[key] = final_name
+        # Résolution des noms de sortie avec préfixe de groupe si nécessaire
+        final_output_mapping = {}
+        for key, var_name in output_mapping.items():
+            if self._group_context:
+                final_output_mapping[key] = f"{self._group_context}_{var_name}"
+            else:
+                final_output_mapping[key] = var_name
 
         compute_node = ComputeNode(
             func=func,
             name=step_name,
             output_mapping=final_output_mapping,
-            input_mapping={},  # Sera rempli après résolution
+            input_mapping={},
             scope=scope,
+            group=self._group_context,  # Enregistre le groupe
         )
 
-        # 3. Introspection et Résolution des Entrées
         sig = inspect.signature(func)
         resolved_mapping = {}
 
         for arg_name, param in sig.parameters.items():
-            # On ignore 'self' ou les args spécifiques si besoin (ex: params)
-            # On ignore les paramètres avec valeur par défaut (considérés comme optionnels/config)
             if param.default != inspect.Parameter.empty:
                 continue
 
             source_var = self._resolve_input(arg_name, input_mapping)
 
-            # Validation stricte : la source doit exister
             if source_var and source_var in self.registered_variables:
                 resolved_mapping[arg_name] = source_var
-                # Création de l'arête Donnée -> Calcul
-                # On récupère le DataNode existant depuis le registre
                 source_node = self._data_nodes[source_var]
                 self.graph.add_edge(source_node, compute_node)
             else:
-                # Si on ne trouve pas, c'est une erreur
                 raise MissingInputError(
                     f"Argument '{arg_name}' for unit '{step_name}' could not be resolved (Source: '{source_var}')."
                 )
@@ -114,13 +116,17 @@ class Blueprint:
         compute_node.input_mapping = resolved_mapping
         self.graph.add_node(compute_node)
 
-        # 4. Enregistrement des Sorties
-        for graph_name in final_output_mapping.values():
-            output_node = DataNode(name=graph_name)
+        output_tendencies = output_tendencies or {}
+
+        for key, var_name in final_output_mapping.items():
+            # Déterminer si c'est une tendance
+            is_tendency_of = output_tendencies.get(key)
+
+            output_node = DataNode(name=var_name, is_tendency_of=is_tendency_of)
             self.graph.add_node(output_node)
             self.graph.add_edge(compute_node, output_node)
-            self.registered_variables.add(graph_name)
-            self._data_nodes[graph_name] = output_node
+            self.registered_variables.add(var_name)
+            self._data_nodes[var_name] = output_node
 
     def _resolve_input(self, arg_name: str, explicit_mapping: dict[str, str]) -> str | None:
         """Résout le nom de la variable dans le graphe selon la priorité.
@@ -128,7 +134,6 @@ class Blueprint:
         1. Mapping Explicite
         2. Namespacing (Groupe)
         3. Matching par défaut
-
         """
         # 1. Mapping Explicite
         if arg_name in explicit_mapping:
@@ -137,17 +142,8 @@ class Blueprint:
         # 2. Namespacing
         if self._group_context:
             prefixed_name = f"{self._group_context}_{arg_name}"
-            # On vérifie si cette variable est "connue" ou "produite" par le système
-            # C'est délicat car l'ordre d'enregistrement compte.
-            # Si l'unité A produit 'Tuna_biomass' et l'unité B (enregistrée après) la consomme,
-            # registered_variables ne l'aura peut-être pas encore si on ne fait pas attention.
-            # MAIS : register_unit est séquentiel. Donc si A est enregistré avant B, c'est bon.
-            # Si B dépend de A, A doit être enregistré avant.
             if prefixed_name in self.registered_variables:
                 return prefixed_name
-
-            # Cas subtil : Peut-être que c'est une variable qui SERA produite par le groupe lui-même ?
-            # Pour l'instant, on exige que la source soit déjà déclarée (Forçage ou Output précédent).
 
         # 3. Matching par défaut (Global)
         if arg_name in self.registered_variables:
@@ -156,7 +152,12 @@ class Blueprint:
         return None
 
     def register_group(self, group_prefix: str, units: list[dict[str, Any]]) -> None:
-        """Helper pour enregistrer un groupe d'unités."""
+        """Helper pour enregistrer un groupe d'unités.
+
+        Args:
+            group_prefix: Le préfixe du groupe (ex: 'Tuna').
+            units: Liste de dicts de configuration pour register_unit.
+        """
         previous_context = self._group_context
         self._group_context = group_prefix
 
@@ -166,6 +167,7 @@ class Blueprint:
                     func=unit_conf["func"],
                     output_mapping=unit_conf["output_mapping"],
                     input_mapping=unit_conf.get("input_mapping"),
+                    output_tendencies=unit_conf.get("output_tendencies"),
                     scope=unit_conf.get("scope", "local"),
                     name=unit_conf.get("name"),
                 )
@@ -180,7 +182,6 @@ class Blueprint:
 
         Raises:
             CycleError: Si un cycle est détecté.
-
         """
         # 1. Tri Topologique pour l'ordre d'exécution
         # Le graphe contient des DataNodes et des ComputeNodes.
@@ -192,6 +193,12 @@ class Blueprint:
             raise CycleError("Graph contains a cycle (detected during topological sort).") from None
 
         task_sequence = [node for node in sorted_nodes if isinstance(node, ComputeNode)]
+
+        # Regroupement des tâches contiguës par groupe
+        task_groups = []
+        for group_name, nodes in itertools.groupby(task_sequence, key=lambda n: n.group):
+            final_group_name = group_name or "Global"
+            task_groups.append((final_group_name, list(nodes)))
 
         # 3. Identification des variables initiales et produites
         # Initiales = DataNodes avec in_degree = 0 (pas produits par un calcul)
@@ -208,8 +215,18 @@ class Blueprint:
             if isinstance(node, DataNode) and self.graph.in_degree(node) > 0
         ]
 
+        # 4. Construction du tendency_map
+        from collections import defaultdict
+
+        tendency_map = defaultdict(list)
+
+        for node in self.graph.nodes:
+            if isinstance(node, DataNode) and node.is_tendency_of:
+                tendency_map[node.is_tendency_of].append(node.name)
+
         return ExecutionPlan(
-            task_sequence=task_sequence,
+            task_groups=task_groups,
             initial_variables=initial_vars,
             produced_variables=produced_vars,
+            tendency_map=dict(tendency_map),
         )

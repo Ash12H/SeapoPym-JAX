@@ -1,5 +1,5 @@
 """Core implementation of the Functional Group."""
-
+import warnings
 from collections.abc import Hashable
 
 import xarray as xr
@@ -15,46 +15,52 @@ class FunctionalGroup:
     Il orchestre l'exécution séquentielle des unités de calcul (ComputeNodes).
     """
 
-    def __init__(self, name: str, task_sequence: list[ComputeNode]):
+    def __init__(self, name: str, task_sequence: list[ComputeNode] | None = None):
         """Initialise le groupe fonctionnel.
 
         Args:
             name: Nom du groupe (ex: 'Tuna').
-            task_sequence: Liste ordonnée des tâches à exécuter.
-
-        Raises:
-            ValueError: Si la séquence de tâches est vide.
+            task_sequence: Liste ordonnée des tâches par défaut (optionnel).
         """
-        if not task_sequence:
-            raise ValueError("task_sequence cannot be empty")
-
         self.name = name
-        self.task_sequence = task_sequence
+        self.task_sequence = task_sequence or []
 
-    def compute(self, state: xr.Dataset) -> dict[Hashable, xr.DataArray]:
-        """Exécute la séquence de tâches sur l'état donné.
+    def compute(
+        self, state: xr.Dataset, tasks: list[ComputeNode] | None = None
+    ) -> dict[Hashable, xr.DataArray]:
+        """Exécute une séquence de tâches sur l'état donné.
 
         IMPORTANT: Cette méthode ne modifie PAS le state d'entrée (lecture seule).
         Les résultats intermédiaires sont stockés dans un contexte local.
 
         Args:
             state: L'état global (ou une vue) contenant les données nécessaires.
-                   Ce Dataset n'est jamais modifié.
+            tasks: Liste des tâches à exécuter. Si None, utilise la séquence par défaut du groupe.
 
         Returns:
-            Dictionnaire {nom_variable_graphe: DataArray} de TOUS les résultats produits
-            par la séquence de tâches.
+            Dictionnaire {nom_variable_graphe: DataArray} de TOUS les résultats produits.
 
         Raises:
-            ExecutionError: Si une erreur survient pendant l'exécution d'une unité.
+            ValueError: Si aucune tâche n'est fournie (ni dans tasks, ni dans self.task_sequence).
+            ExecutionError: Si une erreur survient pendant l'exécution.
         """
+        sequence = tasks if tasks is not None else self.task_sequence
+
+        if not sequence:
+            warnings.warn(
+                f"FunctionalGroup '{self.name}' executed with empty task sequence",
+                UserWarning,
+                stacklevel=2,
+            )
+            return {}
+
         # Contexte local pour stocker les résultats intermédiaires
         # Cela permet aux unités suivantes d'utiliser les résultats des précédentes
         local_context: dict[Hashable, xr.DataArray] = {}
 
         results: dict[Hashable, xr.DataArray] = {}
 
-        for node in self.task_sequence:
+        for node in sequence:
             try:
                 # 1. Résolution des entrées
                 inputs = {}

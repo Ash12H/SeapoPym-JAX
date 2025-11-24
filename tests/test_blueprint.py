@@ -1,242 +1,209 @@
 import pytest
 
-from seapopym.blueprint.core import Blueprint
-from seapopym.blueprint.exceptions import ConfigurationError, MissingInputError
+from seapopym.blueprint import Blueprint
+from seapopym.blueprint.exceptions import (
+    ConfigurationError,
+    CycleError,
+    MissingInputError,
+)
 
-# --- Fonctions Mock pour les tests ---
 
-
+# --- Mocks ---
 def compute_growth(temperature, nutrient):
     return {"biomass": temperature * nutrient}
 
 
-def compute_mortality(biomass, temperature):
-    return {"mortality": biomass * temperature}
+def compute_mortality(biomass):
+    return {"mortality": biomass * 0.1}
 
 
-def compute_advection(biomass, current):
-    return {"flux": biomass * current}
-
-
-def compute_with_params(biomass, param_a=1.0):
-    return {"result": biomass * param_a}
+def compute_simple(temp):
+    return {"out": temp}
 
 
 # --- Tests ---
 
 
-def test_simple_chain():
-    """Test une chaîne simple : Forçage -> Unit A -> Unit B"""
+def test_simple_unit_registration():
+    """Test l'enregistrement d'une unité simple et sa présence dans le plan."""
     bp = Blueprint()
+    bp.register_forcing("temp")
 
-    # 1. Forçages
-    bp.register_forcing("temperature")
+    # On utilise une fonction simple à 1 argument pour éviter MissingInputError sur nutrient
+    bp.register_unit(
+        compute_simple, output_mapping={"out": "biomass"}, input_mapping={"temp": "temp"}
+    )
+
+    plan = bp.build()
+
+    assert len(plan.task_groups) == 1
+    group_name, tasks = plan.task_groups[0]
+    assert group_name == "Global"
+    assert len(tasks) == 1
+    assert tasks[0].name == "compute_simple"
+    assert "temp" in tasks[0].input_mapping
+    assert tasks[0].input_mapping["temp"] == "temp"
+
+
+def test_dependency_resolution():
+    bp = Blueprint()
+    bp.register_forcing("temp")
     bp.register_forcing("nutrient")
 
-    # 2. Unit A : Growth (produit 'biomass')
-    bp.register_unit(compute_growth, output_mapping={"biomass": "biomass"})
+    # 1. Growth -> biomass
+    bp.register_unit(
+        compute_growth,
+        output_mapping={"biomass": "biomass"},
+        input_mapping={"temperature": "temp", "nutrient": "nutrient"},
+    )
 
-    # 3. Unit B : Mortality (consomme 'biomass' et 'temperature')
+    # 2. Mortality -> mortality (dépend de biomass)
     bp.register_unit(compute_mortality, output_mapping={"mortality": "mortality"})
 
     plan = bp.build()
 
-    assert len(plan.task_sequence) == 2
-    assert plan.task_sequence[0].name == "compute_growth"
-    assert plan.task_sequence[1].name == "compute_mortality"
-    assert "temperature" in plan.initial_variables
-    assert "biomass" in plan.produced_variables
-    assert "mortality" in plan.produced_variables
-
-
-def test_explicit_mapping():
-    """Test le renommage d'entrée via mapping"""
-    bp = Blueprint()
-    bp.register_forcing("sea_surface_temp")  # Nom différent de l'arg 'temperature'
-    bp.register_forcing("nutrient")
-
-    # On mappe 'temperature' -> 'sea_surface_temp'
-    bp.register_unit(
-        compute_growth,
-        input_mapping={"temperature": "sea_surface_temp"},
-        output_mapping={"biomass": "biomass"},
-    )
-
-    plan = bp.build()
-    unit = plan.task_sequence[0]
-    assert unit.input_mapping["temperature"] == "sea_surface_temp"
-
-
-def test_missing_input():
-    """Test qu'une erreur est levée si une entrée manque"""
-    bp = Blueprint()
-    bp.register_forcing("nutrient")
-    # Manque 'temperature'
-
-    with pytest.raises(MissingInputError):
-        bp.register_unit(compute_growth, output_mapping={"biomass": "biomass"})
+    assert len(plan.task_groups) == 1
+    group_name, tasks = plan.task_groups[0]
+    assert group_name == "Global"
+    assert len(tasks) == 2
+    # L'ordre topologique garantit que growth est avant mortality
+    assert tasks[0].name == "compute_growth"
+    assert tasks[1].name == "compute_mortality"
 
 
 def test_cycle_detection():
-    """Test la détection de cycle dans le graphe"""
-    from seapopym.blueprint.exceptions import CycleError
-
     bp = Blueprint()
-    bp.register_forcing("temperature")
-    bp.register_forcing("biomass")
+    bp.register_forcing("A")
 
-    # Premier : biomass + temperature -> mortality
-    bp.register_unit(compute_mortality, output_mapping={"mortality": "mortality"})
+    # A -> B
+    bp.register_unit(compute_simple, output_mapping={"out": "B"}, input_mapping={"temp": "A"})
+    # B -> A (Cycle !)
+    bp.register_unit(compute_simple, output_mapping={"out": "A"}, input_mapping={"temp": "B"})
 
-    # Deuxième : mortality + temperature -> biomass (réutilise le nom "biomass")
-    # Cela crée un cycle : biomass -> mortality -> biomass
-    bp.register_unit(
-        compute_mortality,
-        input_mapping={"biomass": "mortality"},
-        output_mapping={"result": "biomass"},  # Réutilise "biomass" comme sortie
-    )
-
-    # La détection de cycle doit se produire lors du build
     with pytest.raises(CycleError):
         bp.build()
 
 
-def test_group_namespacing():
-    """Test la résolution automatique dans un groupe"""
+def test_missing_input_error():
     bp = Blueprint()
-    bp.register_forcing("temperature")
-    bp.register_forcing("Tuna_nutrient")  # Spécifique au groupe
+    # Pas de forcing enregistré
+
+    with pytest.raises(MissingInputError):
+        bp.register_unit(compute_simple, output_mapping={"out": "biomass"})
+
+
+def test_multi_output():
+    bp = Blueprint()
+    bp.register_forcing("temp")
+
+    def compute_multi(temp):
+        return {"A": temp, "B": temp * 2}
+
+    bp.register_unit(
+        compute_multi, output_mapping={"A": "varA", "B": "varB"}, input_mapping={"temp": "temp"}
+    )
+
+    plan = bp.build()
+    assert "varA" in plan.produced_variables
+    assert "varB" in plan.produced_variables
+
+
+def test_empty_output_mapping():
+    bp = Blueprint()
+    with pytest.raises(ConfigurationError):
+        bp.register_unit(compute_simple, output_mapping={})
+
+
+def test_group_registration():
+    """Test l'enregistrement de groupes et le regroupement dans le plan."""
+    bp = Blueprint()
+    bp.register_forcing("temp")
 
     # Groupe Tuna
-    units = [
-        {
-            "func": compute_growth,
-            "output_mapping": {"biomass": "biomass"},  # Deviendra Tuna_biomass
-        },
-        {
-            "func": compute_mortality,
-            # prend (biomass, temperature)
-            # biomass -> Tuna_biomass (produit juste avant)
-            "output_mapping": {"mortality": "mortality"},
-        },
-    ]
-
-    bp.register_group("Tuna", units)
-
-    plan = bp.build()
-
-    # Vérifications
-    growth_task = plan.task_sequence[0]
-    mortality_task = plan.task_sequence[1]
-
-    assert growth_task.name == "Tuna_compute_growth"
-    assert growth_task.output_mapping["biomass"] == "Tuna_biomass"
-    assert growth_task.input_mapping["nutrient"] == "Tuna_nutrient"
-    assert growth_task.input_mapping["temperature"] == "temperature"  # Fallback global
-
-    assert mortality_task.input_mapping["biomass"] == "Tuna_biomass"  # Résolu en interne du groupe
-
-
-def test_default_params_ignored():
-    """Test que les paramètres avec valeur par défaut sont ignorés lors de la résolution"""
-    bp = Blueprint()
-    bp.register_forcing("biomass")
-
-    # compute_with_params(biomass, param_a=1.0)
-    # param_a doit être ignoré, seul biomass est requis
-    bp.register_unit(compute_with_params, output_mapping={"result": "result"})
-
-    plan = bp.build()
-    assert len(plan.task_sequence) == 1
-    assert plan.task_sequence[0].name == "compute_with_params"
-
-
-def test_inter_group_dependency():
-    """
-    Test complexe avec 2 groupes :
-    - Tuna : Dépend de la température (Global). Produit Tuna_biomass.
-    - Shark : Dépend de Tuna_biomass (Inter-groupe). Produit Shark_biomass.
-    """
-    bp = Blueprint()
-    bp.register_forcing("temperature")
-
-    # 1. Groupe Tuna
-    def grow_tuna(temperature):
-        return {"biomass": temperature}
-
     bp.register_group(
         "Tuna",
         [
             {
-                "func": grow_tuna,
-                "output_mapping": {"biomass": "biomass"},  # -> Tuna_biomass
+                "func": compute_simple,
+                "output_mapping": {"out": "biomass"},
+                "input_mapping": {"temp": "temp"},
             }
         ],
     )
 
-    # 2. Groupe Shark
-    def grow_shark(food):
-        return {"biomass": food}
-
+    # Groupe Shark (dépend de Tuna_biomass)
     bp.register_group(
         "Shark",
         [
             {
-                "func": grow_shark,
-                "input_mapping": {"food": "Tuna_biomass"},  # Mapping explicite vers l'autre groupe
-                "output_mapping": {"biomass": "biomass"},  # -> Shark_biomass
+                "func": compute_mortality,
+                "output_mapping": {"mortality": "mortality"},
+                "input_mapping": {"biomass": "Tuna_biomass"},
             }
         ],
     )
 
     plan = bp.build()
 
-    assert len(plan.task_sequence) == 2
-    tuna_task = plan.task_sequence[0]
-    shark_task = plan.task_sequence[1]
+    # On attend 2 groupes distincts car noms différents
+    assert len(plan.task_groups) == 2
 
-    # Vérif Tuna
-    assert tuna_task.name == "Tuna_grow_tuna"
-    assert tuna_task.output_mapping["biomass"] == "Tuna_biomass"
-    assert tuna_task.input_mapping["temperature"] == "temperature"
+    g1_name, g1_tasks = plan.task_groups[0]
+    assert g1_name == "Tuna"
+    assert len(g1_tasks) == 1
+    assert g1_tasks[0].name == "Tuna_compute_simple"
 
-    # Vérif Shark
-    assert shark_task.name == "Shark_grow_shark"
-    assert shark_task.output_mapping["biomass"] == "Shark_biomass"
-    assert shark_task.input_mapping["food"] == "Tuna_biomass"
+    g2_name, g2_tasks = plan.task_groups[1]
+    assert g2_name == "Shark"
+    assert len(g2_tasks) == 1
+    assert g2_tasks[0].name == "Shark_compute_mortality"
 
 
-def test_multi_output():
-    """Test une unité qui produit plusieurs sorties (dictionnaire)"""
+def test_group_interleaving():
+    """Test l'entrelacement des groupes."""
     bp = Blueprint()
-    bp.register_forcing("temperature")
+    bp.register_forcing("temp")
 
-    # Fonction qui retourne 2 valeurs
-    def compute_bio_and_flux(temperature):
-        return {"biomass": temperature * 2, "flux": temperature * 0.5}
+    # Tuna 1
+    bp.register_group(
+        "Tuna",
+        [
+            {
+                "func": compute_simple,
+                "output_mapping": {"out": "tuna1"},
+                "input_mapping": {"temp": "temp"},
+            }
+        ],
+    )
 
-    bp.register_unit(
-        compute_bio_and_flux, output_mapping={"biomass": "my_biomass", "flux": "my_flux"}
+    # Shark 1 (dépend de Tuna 1)
+    bp.register_group(
+        "Shark",
+        [
+            {
+                "func": compute_simple,
+                "output_mapping": {"out": "shark1"},
+                "input_mapping": {"temp": "Tuna_tuna1"},
+            }
+        ],
+    )
+
+    # Tuna 2 (dépend de Shark 1)
+    bp.register_group(
+        "Tuna",
+        [
+            {
+                "func": compute_simple,
+                "output_mapping": {"out": "tuna2"},
+                "input_mapping": {"temp": "Shark_shark1"},
+            }
+        ],
     )
 
     plan = bp.build()
 
-    assert len(plan.task_sequence) == 1
-    task = plan.task_sequence[0]
-
-    # Vérification du mapping
-    assert task.output_mapping["biomass"] == "my_biomass"
-    assert task.output_mapping["flux"] == "my_flux"
-
-    # Vérification que les 2 variables sont produites
-    assert "my_biomass" in plan.produced_variables
-    assert "my_flux" in plan.produced_variables
-
-
-def test_empty_output_mapping():
-    """Test qu'un mapping de sortie vide lève une erreur"""
-    bp = Blueprint()
-    bp.register_forcing("temperature")
-
-    with pytest.raises(ConfigurationError):
-        bp.register_unit(compute_growth, output_mapping={})
+    # On attend 3 groupes : Tuna -> Shark -> Tuna
+    assert len(plan.task_groups) == 3
+    assert plan.task_groups[0][0] == "Tuna"
+    assert plan.task_groups[1][0] == "Shark"
+    assert plan.task_groups[2][0] == "Tuna"

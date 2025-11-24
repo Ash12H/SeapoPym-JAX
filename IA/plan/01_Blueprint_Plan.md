@@ -29,9 +29,13 @@ Dans `nodes.py`, définir des dataclasses pour représenter les éléments du gr
 ### 2.2. Plan d'Exécution
 Dans `execution.py`, définir la structure de sortie.
 *   **ExecutionPlan** :
-    *   `task_sequence`: List[ComputeNode] (ordre topologique d'exécution)
-    *   `initial_variables`: List[str] (variables requises au démarrage / forçages)
-    *   `produced_variables`: List[str] (variables générées par le système)
+```python
+@dataclass
+class ExecutionPlan:
+    task_groups: list[tuple[str, list[ComputeNode]]] # Séquence ordonnée de (NomGroupe, [Tâches])
+    initial_variables: list[str]
+    produced_variables: list[str]
+```
 
 ## 3. Implémentation du Blueprint (Core)
 

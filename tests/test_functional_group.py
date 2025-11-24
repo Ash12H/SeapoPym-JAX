@@ -38,7 +38,7 @@ def test_simple_execution():
     bp.register_unit(compute_growth, output_mapping={"biomass": "biomass"})
     plan = bp.build()
 
-    fg = FunctionalGroup("TestGroup", plan.task_sequence)
+    fg = FunctionalGroup("TestGroup", plan.task_groups[0][1])
 
     # State
     state = xr.Dataset({"temp": (("x"), [10, 20])})
@@ -62,7 +62,7 @@ def test_chained_execution():
     bp.register_unit(compute_mortality, output_mapping={"mortality": "mortality"})
 
     plan = bp.build()
-    fg = FunctionalGroup("TestGroup", plan.task_sequence)
+    fg = FunctionalGroup("TestGroup", plan.task_groups[0][1])
 
     state = xr.Dataset({"temp": (("x"), [10])})
 
@@ -84,7 +84,7 @@ def test_execution_error_bad_return_type():
     bp.register_unit(compute_bad_return, output_mapping={"biomass": "biomass"})
     plan = bp.build()
 
-    fg = FunctionalGroup("TestGroup", plan.task_sequence)
+    fg = FunctionalGroup("TestGroup", plan.task_groups[0][1])
     state = xr.Dataset({"temp": [10]})
 
     with pytest.raises(ExecutionError) as excinfo:
@@ -100,7 +100,7 @@ def test_execution_error_missing_key():
     bp.register_unit(compute_missing_key, output_mapping={"biomass": "biomass"})
     plan = bp.build()
 
-    fg = FunctionalGroup("TestGroup", plan.task_sequence)
+    fg = FunctionalGroup("TestGroup", plan.task_groups[0][1])
     state = xr.Dataset({"temp": [10]})
 
     with pytest.raises(ExecutionError) as excinfo:
@@ -119,7 +119,7 @@ def test_missing_input_runtime():
     bp.register_unit(compute_growth, output_mapping={"biomass": "biomass"})
     plan = bp.build()
 
-    fg = FunctionalGroup("TestGroup", plan.task_sequence)
+    fg = FunctionalGroup("TestGroup", plan.task_groups[0][1])
 
     # State vide !
     state = xr.Dataset({})
@@ -130,10 +130,37 @@ def test_missing_input_runtime():
     assert "not found in state" in str(excinfo.value)
 
 
-def test_empty_task_sequence():
-    """Une séquence vide doit lever ValueError."""
-    with pytest.raises(ValueError):
-        FunctionalGroup("Empty", [])
+def test_dynamic_task_execution():
+    """Test l'exécution avec une liste de tâches fournie à compute()."""
+    bp = Blueprint()
+    bp.register_forcing("temp")
+    bp.register_unit(compute_growth, output_mapping={"biomass": "biomass"})
+    plan = bp.build()
+
+    # Init sans tâches
+    fg = FunctionalGroup("TestGroup")
+
+    # State
+    state = xr.Dataset({"temp": (("x"), [10])})
+
+    # Compute avec tâches explicites
+    # Note: plan.task_groups[0] est ("Global", [node])
+    tasks = plan.task_groups[0][1]
+    results = fg.compute(state, tasks=tasks)
+
+    assert "biomass" in results
+    assert results["biomass"].item() == 20
+
+
+def test_empty_sequence_returns_empty():
+    """Un groupe sans tâches retourne un dict vide."""
+    fg = FunctionalGroup("Empty")
+    state = xr.Dataset({"temp": [10]})
+
+    with pytest.warns(UserWarning, match="executed with empty task sequence"):
+        results = fg.compute(state)
+
+    assert results == {}
 
 
 def test_execution_error_non_dataarray():
@@ -143,7 +170,7 @@ def test_execution_error_non_dataarray():
     bp.register_unit(compute_non_dataarray, output_mapping={"biomass": "biomass"})
     plan = bp.build()
 
-    fg = FunctionalGroup("TestGroup", plan.task_sequence)
+    fg = FunctionalGroup("TestGroup", plan.task_groups[0][1])
     state = xr.Dataset({"temp": [10]})
 
     with pytest.raises(ExecutionError) as excinfo:

@@ -11,6 +11,7 @@ class DataNode:
 
     name: str
     dims: tuple[Any, ...] | None = None  # Pour validation future (ex: ('time', 'lat', 'lon'))
+    is_tendency_of: str | None = None  # Si c'est une tendance, de quelle variable ?
 
     def __hash__(self) -> int:
         """Return hash based on node name."""
@@ -19,13 +20,23 @@ class DataNode:
 
 @dataclass
 class ComputeNode:
-    """Représente une unité de calcul (fonction) dans le graphe."""
+    """Représente une unité de calcul (fonction) dans le graphe.
+
+    Attributes:
+        func: La fonction à exécuter.
+        name: Identifiant unique.
+        output_mapping: Mapping des sorties.
+        input_mapping: Mapping des entrées.
+        scope: Portée de l'unité.
+        group: Nom du groupe fonctionnel auquel appartient cette unité.
+    """
 
     func: Callable[..., Any]
     name: str  # Identifiant unique de l'étape (ex: 'compute_mortality_tuna')
     output_mapping: dict[str, str]  # key_retour -> graph_var_name
     input_mapping: dict[str, str] = field(default_factory=dict)  # arg_name -> graph_var_name
     scope: str = "local"  # 'local' ou 'global'
+    group: str | None = None  # Nom du groupe fonctionnel (ex: 'Tuna')
 
     def __hash__(self) -> int:
         """Return hash based on node name."""

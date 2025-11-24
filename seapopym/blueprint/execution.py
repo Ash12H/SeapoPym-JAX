@@ -1,22 +1,21 @@
 """Execution plan dataclass for compiled blueprints."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .nodes import ComputeNode
 
 
 @dataclass
 class ExecutionPlan:
-    """Le résultat de la compilation du Blueprint.
+    """Résultat de la compilation du Blueprint.
 
-    Contient tout ce dont le Controller a besoin pour exécuter la simulation.
+    Contient la séquence ordonnée des groupes de tâches à exécuter.
     """
 
-    task_sequence: list[ComputeNode]
-    initial_variables: list[
-        str
-    ]  # Variables qui doivent être présentes au t=0 (Forçages + Init State)
-    produced_variables: list[str]  # Variables générées par le système
+    task_groups: list[tuple[str, list[ComputeNode]]]  # [(group_name, [nodes]), ...]
+    initial_variables: list[str]
+    produced_variables: list[str]
+    tendency_map: dict[str, list[str]] = field(default_factory=dict)  # {var_cible: [tendances]}
 
     # Pour le futur : mapping des scopes pour l'optimisation
     # scope_map: Dict[str, str] = field(default_factory=dict)
