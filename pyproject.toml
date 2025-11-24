@@ -54,10 +54,6 @@ docs = [
     "mkdocstrings[python]>=0.24.0",
 ]
 
-gpu = [
-    "jax[cuda12]>=0.4.20",
-]
-
 viz = [
     "matplotlib>=3.8.0",
     "cartopy>=0.22.0",
@@ -65,7 +61,7 @@ viz = [
 ]
 
 all = [
-    "seapopym-message[dev,docs,gpu,viz]",
+    "seapopym-message[dev,docs,viz]",
 ]
 
 [project.urls]
@@ -79,7 +75,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/seapopym_message"]
+packages = ["seapopym"]
 
 # ══════════════════════════════════════════════════════════════
 # RUFF Configuration
@@ -91,7 +87,7 @@ line-length = 100
 indent-width = 4
 
 # Source directories
-src = ["src", "tests"]
+src = ["seapopym", "tests"]
 
 # Exclude common directories
 exclude = [
@@ -161,7 +157,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.ruff.lint.isort]
-known-first-party = ["seapopym_message"]
+known-first-party = ["seapopym"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py
@@ -225,7 +221,7 @@ python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--cov=seapopym_message",
+    "--cov=seapopym",
     "--cov-report=term-missing",
     "--cov-report=html",
     "--cov-report=xml",
@@ -242,7 +238,7 @@ markers = [
 # ══════════════════════════════════════════════════════════════
 
 [tool.coverage.run]
-source = ["src"]
+source = ["seapopym"]
 branch = true
 omit = [
     "*/tests/*",
