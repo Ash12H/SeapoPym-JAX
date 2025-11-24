@@ -16,12 +16,12 @@ class Blueprint:
 
     def __init__(self) -> None:
         """Initialize the Blueprint with an empty dependency graph."""
-        self.graph: nx.DiGraph = nx.DiGraph()
+        self.graph: nx.DiGraph[DataNode | ComputeNode] = nx.DiGraph()
         self.registered_variables: set[str] = set()  # Pour lookup rapide
         self._data_nodes: dict[str, DataNode] = {}  # Registre des noeuds de données
         self._group_context: str | None = None  # Pour le namespacing automatique
 
-    def register_forcing(self, name: str, dims: tuple | None = None) -> None:
+    def register_forcing(self, name: str, dims: tuple[Any, ...] | None = None) -> None:
         """Déclare une source de données externe (ex: température, courants).
 
         Raises:
@@ -38,9 +38,9 @@ class Blueprint:
 
     def register_unit(
         self,
-        func: Callable,
+        func: Callable[..., Any],
+        output_mapping: dict[str, str],
         input_mapping: dict[str, str] | None = None,
-        output_name: str | None = None,
         scope: str = "local",
         name: str | None = None,
     ) -> None:
@@ -48,13 +48,19 @@ class Blueprint:
 
         Args:
             func: La fonction Python à exécuter.
+            output_mapping: Mapping des sorties {key_retour: graph_var_name}.
             input_mapping: Surcharge des entrées {arg_name: graph_var_name}.
-            output_name: Nom de la variable produite. Si None, utilise le nom de la fonction.
             scope: 'local' ou 'global'.
             name: Nom unique de l'étape (optionnel, défaut = nom fonction).
 
+        Raises:
+            ConfigurationError: Si output_mapping est vide.
+
         """
         input_mapping = input_mapping or {}
+
+        if not output_mapping:
+            raise ConfigurationError("output_mapping cannot be empty.")
 
         # 1. Identification de l'unité
         func_name = func.__name__
@@ -64,21 +70,18 @@ class Blueprint:
         if self._group_context:
             step_name = f"{self._group_context}_{step_name}"
 
-        # 2. Détermination de la sortie
-        # Si output_name n'est pas fourni, on utilise le nom de l'étape
-        raw_output_name = output_name or func_name
+        # 2. Détermination des sorties
+        final_output_mapping: dict[str, str] = {}
 
-        if self._group_context:
-            # On préfixe toujours dans un groupe, sauf si on voulait permettre des sorties globales
-            # Pour l'instant, on suit la logique du test : tout est scopé.
-            final_output_name = f"{self._group_context}_{raw_output_name}"
-        else:
-            final_output_name = raw_output_name
+        # Application du namespacing
+        for key, raw_name in output_mapping.items():
+            final_name = f"{self._group_context}_{raw_name}" if self._group_context else raw_name
+            final_output_mapping[key] = final_name
 
         compute_node = ComputeNode(
             func=func,
             name=step_name,
-            output_name=final_output_name,
+            output_mapping=final_output_mapping,
             input_mapping={},  # Sera rempli après résolution
             scope=scope,
         )
@@ -111,12 +114,13 @@ class Blueprint:
         compute_node.input_mapping = resolved_mapping
         self.graph.add_node(compute_node)
 
-        # 4. Enregistrement de la Sortie
-        output_node = DataNode(name=final_output_name)
-        self.graph.add_node(output_node)
-        self.graph.add_edge(compute_node, output_node)
-        self.registered_variables.add(final_output_name)
-        self._data_nodes[final_output_name] = output_node
+        # 4. Enregistrement des Sorties
+        for graph_name in final_output_mapping.values():
+            output_node = DataNode(name=graph_name)
+            self.graph.add_node(output_node)
+            self.graph.add_edge(compute_node, output_node)
+            self.registered_variables.add(graph_name)
+            self._data_nodes[graph_name] = output_node
 
     def _resolve_input(self, arg_name: str, explicit_mapping: dict[str, str]) -> str | None:
         """Résout le nom de la variable dans le graphe selon la priorité.
@@ -160,8 +164,8 @@ class Blueprint:
             for unit_conf in units:
                 self.register_unit(
                     func=unit_conf["func"],
+                    output_mapping=unit_conf["output_mapping"],
                     input_mapping=unit_conf.get("input_mapping"),
-                    output_name=unit_conf.get("output_name"),
                     scope=unit_conf.get("scope", "local"),
                     name=unit_conf.get("name"),
                 )

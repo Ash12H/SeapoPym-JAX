@@ -63,7 +63,8 @@ self.graph = nx.DiGraph()
             func: La fonction Python (XarrayUnit).
             input_mapping: Dict { 'nom_arg_fonction': 'nom_variable_dans_le_graphe' }.
                            Permet de rediriger 'temperature' vers 'temp_metabolique'.
-            output_name: Nom personnalisé de la variable produite.
+            output_mapping: Dict { 'cle_retour_fonction': 'nom_variable_graphe' } ou str (si sortie unique).
+                            Permet de mapper les sorties multiples d'une fonction vers le graphe.
             scope: 'local' (element-wise) ou 'global' (transport/stencil).
         """
         # Logique de résolution appliquée ici

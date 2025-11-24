@@ -23,7 +23,7 @@ Dans `nodes.py`, définir des dataclasses pour représenter les éléments du gr
     *   `func`: Callable
     *   `name`: str (nom unique de l'étape)
     *   `input_mapping`: dict (nom_arg -> nom_variable_graphe)
-    *   `output_name`: str (nom_variable_graphe produite)
+    *   `output_mapping`: dict (cle_retour -> nom_variable_graphe)
     *   `scope`: str ('local' ou 'global')
 
 ### 2.2. Plan d'Exécution

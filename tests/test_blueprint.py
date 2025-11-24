@@ -1,27 +1,25 @@
 import pytest
 
 from seapopym.blueprint.core import Blueprint
-from seapopym.blueprint.exceptions import MissingInputError
-
+from seapopym.blueprint.exceptions import ConfigurationError, MissingInputError
 
 # --- Fonctions Mock pour les tests ---
+
+
 def compute_growth(temperature, nutrient):
-    return temperature * nutrient
+    return {"biomass": temperature * nutrient}
 
 
 def compute_mortality(biomass, temperature):
-    return biomass * temperature
+    return {"mortality": biomass * temperature}
 
 
 def compute_advection(biomass, current):
-    return biomass * current
+    return {"flux": biomass * current}
 
 
 def compute_with_params(biomass, param_a=1.0):
-    # param_a ne devrait pas être résolu par le graphe s'il a une valeur par défaut ?
-    # Ou alors on force tout ? Pour l'instant le code force tout.
-    # On va tester le comportement actuel.
-    return biomass * param_a
+    return {"result": biomass * param_a}
 
 
 # --- Tests ---
@@ -36,10 +34,10 @@ def test_simple_chain():
     bp.register_forcing("nutrient")
 
     # 2. Unit A : Growth (produit 'biomass')
-    bp.register_unit(compute_growth, output_name="biomass")
+    bp.register_unit(compute_growth, output_mapping={"biomass": "biomass"})
 
     # 3. Unit B : Mortality (consomme 'biomass' et 'temperature')
-    bp.register_unit(compute_mortality, output_name="mortality")
+    bp.register_unit(compute_mortality, output_mapping={"mortality": "mortality"})
 
     plan = bp.build()
 
@@ -59,7 +57,9 @@ def test_explicit_mapping():
 
     # On mappe 'temperature' -> 'sea_surface_temp'
     bp.register_unit(
-        compute_growth, input_mapping={"temperature": "sea_surface_temp"}, output_name="biomass"
+        compute_growth,
+        input_mapping={"temperature": "sea_surface_temp"},
+        output_mapping={"biomass": "biomass"},
     )
 
     plan = bp.build()
@@ -74,7 +74,7 @@ def test_missing_input():
     # Manque 'temperature'
 
     with pytest.raises(MissingInputError):
-        bp.register_unit(compute_growth)
+        bp.register_unit(compute_growth, output_mapping={"biomass": "biomass"})
 
 
 def test_cycle_detection():
@@ -83,15 +83,12 @@ def test_cycle_detection():
     bp.register_forcing("temperature")
 
     # A a besoin de B, B a besoin de A
-    # Pour simuler ça, on doit "tricher" car register_unit vérifie l'existence des inputs.
-    # Mais si on enregistre A (qui demande B) avant B, ça plante en MissingInputError.
-    # C'est une propriété intéressante : notre implémentation actuelle empêche les cycles
-    # par construction (on ne peut consommer que ce qui existe déjà) !
-    # Sauf si on permettait la "forward reference".
-
-    # Vérifions ce comportement :
     with pytest.raises(MissingInputError):
-        bp.register_unit(compute_mortality, input_mapping={"biomass": "future_biomass"})
+        bp.register_unit(
+            compute_mortality,
+            input_mapping={"biomass": "future_biomass"},
+            output_mapping={"mortality": "mortality"},
+        )
 
 
 def test_group_namespacing():
@@ -101,20 +98,16 @@ def test_group_namespacing():
     bp.register_forcing("Tuna_nutrient")  # Spécifique au groupe
 
     # Groupe Tuna
-    # compute_growth prend (temperature, nutrient)
-    # temperature -> global 'temperature' (match par défaut)
-    # nutrient -> 'Tuna_nutrient' (match par namespace)
-
     units = [
         {
             "func": compute_growth,
-            "output_name": "biomass",  # Deviendra Tuna_biomass
+            "output_mapping": {"biomass": "biomass"},  # Deviendra Tuna_biomass
         },
         {
             "func": compute_mortality,
             # prend (biomass, temperature)
             # biomass -> Tuna_biomass (produit juste avant)
-            "output_name": "mortality",
+            "output_mapping": {"mortality": "mortality"},
         },
     ]
 
@@ -127,7 +120,7 @@ def test_group_namespacing():
     mortality_task = plan.task_sequence[1]
 
     assert growth_task.name == "Tuna_compute_growth"
-    assert growth_task.output_name == "Tuna_biomass"
+    assert growth_task.output_mapping["biomass"] == "Tuna_biomass"
     assert growth_task.input_mapping["nutrient"] == "Tuna_nutrient"
     assert growth_task.input_mapping["temperature"] == "temperature"  # Fallback global
 
@@ -141,8 +134,99 @@ def test_default_params_ignored():
 
     # compute_with_params(biomass, param_a=1.0)
     # param_a doit être ignoré, seul biomass est requis
-    bp.register_unit(compute_with_params, output_name="result")
+    bp.register_unit(compute_with_params, output_mapping={"result": "result"})
 
     plan = bp.build()
     assert len(plan.task_sequence) == 1
     assert plan.task_sequence[0].name == "compute_with_params"
+
+
+def test_inter_group_dependency():
+    """
+    Test complexe avec 2 groupes :
+    - Tuna : Dépend de la température (Global). Produit Tuna_biomass.
+    - Shark : Dépend de Tuna_biomass (Inter-groupe). Produit Shark_biomass.
+    """
+    bp = Blueprint()
+    bp.register_forcing("temperature")
+
+    # 1. Groupe Tuna
+    def grow_tuna(temperature):
+        return {"biomass": temperature}
+
+    bp.register_group(
+        "Tuna",
+        [
+            {
+                "func": grow_tuna,
+                "output_mapping": {"biomass": "biomass"},  # -> Tuna_biomass
+            }
+        ],
+    )
+
+    # 2. Groupe Shark
+    def grow_shark(food):
+        return {"biomass": food}
+
+    bp.register_group(
+        "Shark",
+        [
+            {
+                "func": grow_shark,
+                "input_mapping": {"food": "Tuna_biomass"},  # Mapping explicite vers l'autre groupe
+                "output_mapping": {"biomass": "biomass"},  # -> Shark_biomass
+            }
+        ],
+    )
+
+    plan = bp.build()
+
+    assert len(plan.task_sequence) == 2
+    tuna_task = plan.task_sequence[0]
+    shark_task = plan.task_sequence[1]
+
+    # Vérif Tuna
+    assert tuna_task.name == "Tuna_grow_tuna"
+    assert tuna_task.output_mapping["biomass"] == "Tuna_biomass"
+    assert tuna_task.input_mapping["temperature"] == "temperature"
+
+    # Vérif Shark
+    assert shark_task.name == "Shark_grow_shark"
+    assert shark_task.output_mapping["biomass"] == "Shark_biomass"
+    assert shark_task.input_mapping["food"] == "Tuna_biomass"
+
+
+def test_multi_output():
+    """Test une unité qui produit plusieurs sorties (dictionnaire)"""
+    bp = Blueprint()
+    bp.register_forcing("temperature")
+
+    # Fonction qui retourne 2 valeurs
+    def compute_bio_and_flux(temperature):
+        return {"biomass": temperature * 2, "flux": temperature * 0.5}
+
+    bp.register_unit(
+        compute_bio_and_flux, output_mapping={"biomass": "my_biomass", "flux": "my_flux"}
+    )
+
+    plan = bp.build()
+
+    assert len(plan.task_sequence) == 1
+    task = plan.task_sequence[0]
+
+    # Vérification du mapping
+    assert task.output_mapping["biomass"] == "my_biomass"
+    assert task.output_mapping["flux"] == "my_flux"
+
+    # Vérification que les 2 variables sont produites
+    assert "my_biomass" in plan.produced_variables
+    assert "my_flux" in plan.produced_variables
+
+
+def test_empty_output_mapping():
+    """Test qu'un mapping de sortie vide lève une erreur"""
+    bp = Blueprint()
+    bp.register_forcing("temperature")
+
+    with pytest.raises(ConfigurationError):
+        bp.register_unit(compute_growth, output_mapping={})
