@@ -230,3 +230,152 @@ class Blueprint:
             produced_variables=produced_vars,
             tendency_map=dict(tendency_map),
         )
+
+    def visualize(
+        self, figsize=(14, 10), title="Blueprint Dependency Graph", layout="hierarchical"
+    ):
+        """Visualise le graphe de dépendances du Blueprint.
+
+        Args:
+            figsize: Taille de la figure matplotlib.
+            title: Titre du graphe.
+            layout: Type de layout ('hierarchical', 'spring', 'kamada_kawai', 'circular').
+
+        Returns:
+            Figure matplotlib.
+        """
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise ImportError(
+                "matplotlib is required for visualization. Install it with: pip install matplotlib"
+            ) from None
+
+        if not self.graph.nodes:
+            raise ConfigurationError("Blueprint is empty. Register units before visualizing.")
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Layout selection
+        if layout == "hierarchical":
+            pos = self._hierarchical_layout()
+        elif layout == "spring":
+            pos = nx.spring_layout(self.graph, seed=42, k=2)
+        elif layout == "kamada_kawai":
+            pos = nx.kamada_kawai_layout(self.graph)
+        elif layout == "circular":
+            pos = nx.circular_layout(self.graph)
+        else:
+            raise ValueError(
+                f"Unknown layout: {layout}. Use 'hierarchical', 'spring', 'kamada_kawai', or 'circular'."
+            )
+
+        # Séparation des noeuds par type
+        data_nodes = [n for n in self.graph.nodes if isinstance(n, DataNode)]
+        compute_nodes = [n for n in self.graph.nodes if isinstance(n, ComputeNode)]
+
+        # Distinguer les variables initiales des produites
+        initial_data_nodes = []
+        produced_data_nodes = []
+        tendency_data_nodes = []
+
+        for node in data_nodes:
+            if self.graph.in_degree(node) == 0:
+                initial_data_nodes.append(node)
+            elif node.is_tendency_of:
+                tendency_data_nodes.append(node)
+            else:
+                produced_data_nodes.append(node)
+
+        # Dessin des noeuds
+        nx.draw_networkx_nodes(
+            self.graph,
+            pos,
+            nodelist=initial_data_nodes,
+            node_color="lightgreen",
+            node_shape="o",
+            node_size=800,
+            label="Data (Initial)",
+            ax=ax,
+        )
+        nx.draw_networkx_nodes(
+            self.graph,
+            pos,
+            nodelist=produced_data_nodes,
+            node_color="lightblue",
+            node_shape="o",
+            node_size=800,
+            label="Data (Produced)",
+            ax=ax,
+        )
+        nx.draw_networkx_nodes(
+            self.graph,
+            pos,
+            nodelist=tendency_data_nodes,
+            node_color="yellow",
+            node_shape="o",
+            node_size=800,
+            label="Tendency",
+            ax=ax,
+        )
+        nx.draw_networkx_nodes(
+            self.graph,
+            pos,
+            nodelist=compute_nodes,
+            node_color="orange",
+            node_shape="s",
+            node_size=1000,
+            label="Compute",
+            ax=ax,
+        )
+
+        # Edges
+        nx.draw_networkx_edges(
+            self.graph, pos, arrowstyle="->", arrowsize=20, edge_color="gray", width=2, ax=ax
+        )
+
+        # Labels
+        labels = {n: n.name for n in self.graph.nodes}
+        nx.draw_networkx_labels(self.graph, pos, labels, font_size=9, font_weight="bold", ax=ax)
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.legend(loc="upper left", fontsize=10)
+        ax.axis("off")
+        plt.tight_layout()
+
+        return fig
+
+    def _hierarchical_layout(self):
+        """Calcule un layout hiérarchique basé sur les niveaux topologiques.
+
+        Les noeuds sont placés de haut en bas selon leur niveau de dépendance.
+
+        Returns:
+            dict: Positions {node: (x, y)}
+        """
+        # Calcul des niveaux (distance depuis les sources)
+        levels = {}
+        for node in nx.topological_sort(self.graph):
+            if self.graph.in_degree(node) == 0:
+                levels[node] = 0
+            else:
+                levels[node] = max(levels[pred] for pred in self.graph.predecessors(node)) + 1
+
+        # Regroupement par niveau
+        level_nodes: dict[int, list] = {}
+        for node, level in levels.items():
+            if level not in level_nodes:
+                level_nodes[level] = []
+            level_nodes[level].append(node)
+
+        # Calcul des positions
+        pos = {}
+        max_level = max(levels.values())
+        for level, nodes in level_nodes.items():
+            y = 1 - (level / max_level)  # De haut (1) en bas (0)
+            num_nodes = len(nodes)
+            for i, node in enumerate(nodes):
+                x = (i + 1) / (num_nodes + 1)  # Centré horizontalement
+                pos[node] = (x, y)
+
+        return pos
