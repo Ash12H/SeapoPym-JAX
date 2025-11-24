@@ -78,17 +78,27 @@ def test_missing_input():
 
 
 def test_cycle_detection():
-    """Test la détection de cycle"""
+    """Test la détection de cycle dans le graphe"""
+    from seapopym.blueprint.exceptions import CycleError
+
     bp = Blueprint()
     bp.register_forcing("temperature")
+    bp.register_forcing("biomass")
 
-    # A a besoin de B, B a besoin de A
-    with pytest.raises(MissingInputError):
-        bp.register_unit(
-            compute_mortality,
-            input_mapping={"biomass": "future_biomass"},
-            output_mapping={"mortality": "mortality"},
-        )
+    # Premier : biomass + temperature -> mortality
+    bp.register_unit(compute_mortality, output_mapping={"mortality": "mortality"})
+
+    # Deuxième : mortality + temperature -> biomass (réutilise le nom "biomass")
+    # Cela crée un cycle : biomass -> mortality -> biomass
+    bp.register_unit(
+        compute_mortality,
+        input_mapping={"biomass": "mortality"},
+        output_mapping={"result": "biomass"},  # Réutilise "biomass" comme sortie
+    )
+
+    # La détection de cycle doit se produire lors du build
+    with pytest.raises(CycleError):
+        bp.build()
 
 
 def test_group_namespacing():
