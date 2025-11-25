@@ -12,7 +12,7 @@ class SimulationConfig:
     end_date: datetime
     timestep: timedelta = timedelta(days=1)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration parameters."""
         if self.end_date <= self.start_date:
             raise ValueError("end_date must be after start_date")

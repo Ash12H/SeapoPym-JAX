@@ -2,10 +2,12 @@
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 import xarray as xr
 
-from seapopym.blueprint import Blueprint
+from seapopym.blueprint import Blueprint, ExecutionPlan
+from seapopym.forcing import ForcingManager
 from seapopym.functional_group import FunctionalGroup
 from seapopym.gsm import StateManager
 from seapopym.time_integrator import TimeIntegrator
@@ -31,18 +33,25 @@ class SimulationController:
         self.blueprint = Blueprint()
         self.state: xr.Dataset | None = None
         self.groups: dict[str, FunctionalGroup] = {}
-        self.execution_plan = None
+        self.execution_plan: ExecutionPlan | None = None
         self.time_integrator: TimeIntegrator | None = None
+        self.forcing_manager: ForcingManager | None = None
         self._current_time = config.start_date
 
     def setup(
-        self, model_configuration_func: Callable[[Blueprint], None], initial_state: xr.Dataset
+        self,
+        model_configuration_func: Callable[[Blueprint], None],
+        initial_state: xr.Dataset,
+        forcings: xr.Dataset | None = None,
     ) -> None:
         """Configure et initialise la simulation.
 
         Args:
             model_configuration_func: Fonction utilisateur qui enregistre les unités dans le Blueprint.
             initial_state: État initial du monde (physique, biologie).
+            forcings: Dataset optionnel contenant les variables de forçage temporel.
+                     Doit contenir une dimension temporelle (Coordinates.T) et ne doit pas avoir
+                     de variables en commun avec initial_state.
         """
         # 1. Configuration du modèle (Blueprint)
         model_configuration_func(self.blueprint)
@@ -51,7 +60,25 @@ class SimulationController:
         self.execution_plan = self.blueprint.build()
 
         # 3. Validation et stockage de l'état initial
-        StateManager.validate(initial_state, self.execution_plan.initial_variables)
+        # On vérifie d'abord les conflits
+        if forcings is not None:
+            common_vars = set(initial_state.data_vars) & set(forcings.data_vars)
+            if common_vars:
+                raise ValueError(
+                    f"Ambiguous definition: variables {common_vars} are defined in both initial state and forcings."
+                )
+
+        # On vérifie la couverture
+        provided_vars = set(initial_state.data_vars)
+        if forcings is not None:
+            provided_vars.update(forcings.data_vars)
+
+        missing_vars = set(self.execution_plan.initial_variables) - provided_vars
+        if missing_vars:
+            from seapopym.gsm.exceptions import StateValidationError
+
+            raise StateValidationError(f"Missing required variables: {missing_vars}")
+
         self.state = initial_state
 
         # 4. Création des groupes fonctionnels (Acteurs)
@@ -65,6 +92,10 @@ class SimulationController:
         # 5. Création du Time Integrator
         # Pour l'instant, pas de contrainte de positivité par défaut
         self.time_integrator = TimeIntegrator(scheme="euler")
+
+        # 6. Création du Forcing Manager si des forçages sont fournis
+        if forcings is not None:
+            self.forcing_manager = ForcingManager(forcings)
 
     def run(self) -> None:
         """Exécute la boucle de simulation complète."""
@@ -87,16 +118,19 @@ class SimulationController:
         if self.state is None or self.execution_plan is None or self.time_integrator is None:
             raise RuntimeError("Simulation not set up.")
 
-        # 1. (TODO) Mise à jour des forçages pour self._current_time
+        # 1. Mise à jour des forçages pour self._current_time
+        if self.forcing_manager:
+            current_forcings = self.forcing_manager.get_forcings(self._current_time)
+            self.state = StateManager.update_with_forcings(self.state, current_forcings)
 
         # 2. Exécution de la logique scientifique par groupes ordonnés
-        all_results = {}
+        all_results: dict[str, Any] = {}
         for group_name, tasks in self.execution_plan.task_groups:
             group = self.groups[group_name]
 
             # compute retourne un dict {var_name: DataArray}
             results = group.compute(self.state, tasks=tasks)
-            all_results.update(results)
+            all_results.update({str(k): v for k, v in results.items()})
 
         # 3. Intégration temporelle (applique les tendances)
         dt = self.config.timestep.total_seconds()
@@ -107,8 +141,10 @@ class SimulationController:
         # 4. Ajout des variables non-tendances (diagnostics, etc.)
         # On filtre pour ne pas réappliquer les tendances déjà intégrées
         tendency_vars = set(sum(self.execution_plan.tendency_map.values(), []))
+        # 4. Fusion des diagnostics (variables produites mais non intégrées)
+        # TODO: Filtrer ce qui doit être gardé ou non
         diagnostics = {k: v for k, v in all_results.items() if k not in tendency_vars}
-        self.state = StateManager.merge_forcings(self.state, diagnostics)
+        self.state = StateManager.update_with_forcings(self.state, diagnostics)
 
         # 5. Préparation du pas suivant
         self.state = StateManager.initialize_next_step(self.state)

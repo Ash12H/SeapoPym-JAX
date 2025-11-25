@@ -232,8 +232,11 @@ class Blueprint:
         )
 
     def visualize(
-        self, figsize=(14, 10), title="Blueprint Dependency Graph", layout="hierarchical"
-    ):
+        self,
+        figsize: tuple[int, int] = (14, 10),
+        title: str = "Blueprint Dependency Graph",
+        layout: str = "hierarchical",
+    ) -> Any:
         """Visualise le graphe de dépendances du Blueprint.
 
         Args:
@@ -345,7 +348,7 @@ class Blueprint:
 
         return fig
 
-    def _hierarchical_layout(self):
+    def _hierarchical_layout(self) -> dict[Any, Any]:
         """Calcule un layout hiérarchique basé sur les niveaux topologiques.
 
         Les noeuds sont placés de haut en bas selon leur niveau de dépendance.

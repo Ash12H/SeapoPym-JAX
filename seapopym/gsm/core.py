@@ -61,10 +61,12 @@ class StateManager:
                 raise StateValidationError(f"Missing coordinates in state: {missing_coords}")
 
     @staticmethod
-    def merge_forcings(
+    def update_with_forcings(
         state: xr.Dataset, forcings: xr.Dataset | Mapping[Hashable, Any]
     ) -> xr.Dataset:
         """Intègre les forçages du pas de temps courant dans l'état.
+
+        ATTENTION : Les valeurs des forçages écrasent celles de l'état en cas de conflit de nom.
 
         Retourne un NOUVEAU Dataset (immutabilité fonctionnelle).
 
@@ -73,11 +75,13 @@ class StateManager:
             forcings: Dataset ou Dictionnaire des forçages à ajouter/mettre à jour.
 
         Returns:
-            Un nouveau Dataset contenant l'état + les forçages.
+            Un nouveau Dataset contenant l'état mis à jour avec les forçages.
         """
         if isinstance(forcings, xr.Dataset):
-            # xr.merge crée une copie et gère les alignements
-            return xr.merge([state, forcings])
+            # On veut que forcings ECRASE state en cas de conflit
+            new_state = state.copy(deep=False)
+            new_state.update(forcings)
+            return new_state
         else:
             # assign pour un dictionnaire simple
             return state.assign(**forcings)

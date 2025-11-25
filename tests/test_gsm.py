@@ -46,26 +46,26 @@ def test_validate_failure_coords():
     assert "time" in str(excinfo.value)
 
 
-def test_merge_forcings_dict():
-    coords = {"x": [1]}
-    state = xr.Dataset({"temp": (("x"), [10])}, coords=coords)
-    forcings = {"wind": (("x"), [5])}
+def test_update_with_forcings_dict():
+    """Test merging dictionary forcings."""
+    state = xr.Dataset({"temp": (("x"), [10.0])}, coords={"x": [1]})
+    forcings = {"current": (("x"), [0.5])}
 
-    new_state = StateManager.merge_forcings(state, forcings)
+    new_state = StateManager.update_with_forcings(state, forcings)
 
-    assert "wind" in new_state
+    assert "current" in new_state
     assert "temp" in new_state
-    assert "wind" not in state
+    assert "current" not in state
 
 
-def test_merge_forcings_dataset():
-    coords = {"x": [1]}
-    state = xr.Dataset({"temp": (("x"), [10])}, coords=coords)
-    forcings_ds = xr.Dataset({"wind": (("x"), [5])}, coords=coords)
+def test_update_with_forcings_dataset():
+    """Test merging dataset forcings."""
+    state = xr.Dataset({"temp": (("x"), [10.0])}, coords={"x": [1]})
+    forcings_ds = xr.Dataset({"current": (("x"), [0.5])}, coords={"x": [1]})
 
-    new_state = StateManager.merge_forcings(state, forcings_ds)
+    new_state = StateManager.update_with_forcings(state, forcings_ds)
 
-    assert "wind" in new_state
+    assert "current" in new_state
     assert "temp" in new_state
     assert isinstance(new_state, xr.Dataset)
 

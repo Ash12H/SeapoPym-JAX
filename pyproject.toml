@@ -46,6 +46,7 @@ dev = [
     "ipykernel>=6.27.0",
     "jupyter>=1.0.0",
     "types-networkx>=3.0",
+    "pandas-stubs>=2.0.0",
 ]
 
 docs = [
@@ -182,6 +183,7 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+explicit_package_bases = true
 exclude = ["examples/"]
 
 # Ignore missing imports for third-party libraries without stubs
@@ -195,6 +197,7 @@ module = [
     "netCDF4.*",
     "cartopy.*",
     "matplotlib.*",
+    "pandas.*",
 ]
 ignore_missing_imports = true
 
