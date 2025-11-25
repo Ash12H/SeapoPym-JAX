@@ -2,13 +2,12 @@
 
 import logging
 from collections.abc import Callable
-from typing import Any
 
 import xarray as xr
 
+from seapopym.backend import SequentialBackend
 from seapopym.blueprint import Blueprint, ExecutionPlan
 from seapopym.forcing import ForcingManager
-from seapopym.functional_group import FunctionalGroup
 from seapopym.gsm import StateManager
 from seapopym.time_integrator import TimeIntegrator
 
@@ -32,10 +31,10 @@ class SimulationController:
         self.config = config
         self.blueprint = Blueprint()
         self.state: xr.Dataset | None = None
-        self.groups: dict[str, FunctionalGroup] = {}
         self.execution_plan: ExecutionPlan | None = None
         self.time_integrator: TimeIntegrator | None = None
         self.forcing_manager: ForcingManager | None = None
+        self.backend = SequentialBackend()
         self._current_time = config.start_date
 
     def setup(
@@ -81,14 +80,6 @@ class SimulationController:
 
         self.state = initial_state
 
-        # 4. Création des groupes fonctionnels (Acteurs)
-        # On identifie les groupes uniques nécessaires
-        unique_group_names = {name for name, _ in self.execution_plan.task_groups}
-
-        for name in unique_group_names:
-            # On instancie le groupe sans séquence par défaut, car elle sera fournie dynamiquement
-            self.groups[name] = FunctionalGroup(name=name)
-
         # 5. Création du Time Integrator
         # Pour l'instant, pas de contrainte de positivité par défaut
         self.time_integrator = TimeIntegrator(scheme="euler")
@@ -123,14 +114,8 @@ class SimulationController:
             current_forcings = self.forcing_manager.get_forcings(self._current_time)
             self.state = StateManager.update_with_forcings(self.state, current_forcings)
 
-        # 2. Exécution de la logique scientifique par groupes ordonnés
-        all_results: dict[str, Any] = {}
-        for group_name, tasks in self.execution_plan.task_groups:
-            group = self.groups[group_name]
-
-            # compute retourne un dict {var_name: DataArray}
-            results = group.compute(self.state, tasks=tasks)
-            all_results.update({str(k): v for k, v in results.items()})
+        # 2. Exécution de la logique scientifique via le backend
+        all_results = self.backend.execute(self.execution_plan.task_groups, self.state)
 
         # 3. Intégration temporelle (applique les tendances)
         dt = self.config.timestep.total_seconds()

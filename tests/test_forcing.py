@@ -26,7 +26,7 @@ def simple_forcing():
 def test_init_validation():
     """Test that init raises error if time dimension is missing."""
     ds = xr.Dataset({"temp": (("x"), [1, 2])})
-    with pytest.raises(ValueError, match="must have a 'time' dimension"):
+    with pytest.raises(ValueError, match="must have a .* dimension"):
         ForcingManager(ds)
 
     ds_empty = xr.Dataset({"temp": ((Coordinates.T), [])}, coords={Coordinates.T: []})

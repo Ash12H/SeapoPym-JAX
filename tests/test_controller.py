@@ -39,8 +39,6 @@ def test_controller_lifecycle():
     controller.setup(configure_model, initial_state)
 
     assert controller.state is not None
-    assert len(controller.groups) == 1
-    assert "Global" in controller.groups
 
     # 3. Run
     controller.run()

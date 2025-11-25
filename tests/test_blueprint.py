@@ -138,7 +138,7 @@ def test_group_registration():
             {
                 "func": compute_mortality,
                 "output_mapping": {"mortality": "mortality"},
-                "input_mapping": {"biomass": "Tuna_biomass"},
+                "input_mapping": {"biomass": "Tuna/biomass"},
             }
         ],
     )
@@ -151,12 +151,12 @@ def test_group_registration():
     g1_name, g1_tasks = plan.task_groups[0]
     assert g1_name == "Tuna"
     assert len(g1_tasks) == 1
-    assert g1_tasks[0].name == "Tuna_compute_simple"
+    assert g1_tasks[0].name == "Tuna/compute_simple"
 
     g2_name, g2_tasks = plan.task_groups[1]
     assert g2_name == "Shark"
     assert len(g2_tasks) == 1
-    assert g2_tasks[0].name == "Shark_compute_mortality"
+    assert g2_tasks[0].name == "Shark/compute_mortality"
 
 
 def test_group_interleaving():
@@ -183,7 +183,7 @@ def test_group_interleaving():
             {
                 "func": compute_simple,
                 "output_mapping": {"out": "shark1"},
-                "input_mapping": {"temp": "Tuna_tuna1"},
+                "input_mapping": {"temp": "Tuna/tuna1"},
             }
         ],
     )
@@ -195,7 +195,7 @@ def test_group_interleaving():
             {
                 "func": compute_simple,
                 "output_mapping": {"out": "tuna2"},
-                "input_mapping": {"temp": "Shark_shark1"},
+                "input_mapping": {"temp": "Shark/shark1"},
             }
         ],
     )

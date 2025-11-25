@@ -76,13 +76,13 @@ class Blueprint:
         step_name = name or func_name
 
         if self._group_context:
-            step_name = f"{self._group_context}_{step_name}"
+            step_name = f"{self._group_context}/{step_name}"
 
         # Résolution des noms de sortie avec préfixe de groupe si nécessaire
         final_output_mapping = {}
         for key, var_name in output_mapping.items():
             if self._group_context:
-                final_output_mapping[key] = f"{self._group_context}_{var_name}"
+                final_output_mapping[key] = f"{self._group_context}/{var_name}"
             else:
                 final_output_mapping[key] = var_name
 
@@ -141,7 +141,7 @@ class Blueprint:
 
         # 2. Namespacing
         if self._group_context:
-            prefixed_name = f"{self._group_context}_{arg_name}"
+            prefixed_name = f"{self._group_context}/{arg_name}"
             if prefixed_name in self.registered_variables:
                 return prefixed_name
 
