@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import xarray as xr
 
-from seapopym.backend import SequentialBackend
+from seapopym.backend import ComputeBackend, DaskBackend, SequentialBackend
 from seapopym.blueprint import Blueprint, ExecutionPlan
 from seapopym.forcing import ForcingManager
 from seapopym.gsm import StateManager
@@ -22,11 +22,17 @@ class SimulationController:
     Gère l'initialisation, la boucle temporelle et la coordination des composants.
     """
 
-    def __init__(self, config: SimulationConfig):
+    def __init__(
+        self,
+        config: SimulationConfig,
+        backend: ComputeBackend | str = "sequential",
+    ):
         """Initialize the simulation controller.
 
         Args:
             config: Configuration parameters for the simulation.
+            backend: The execution backend to use. Can be a string ('sequential', 'dask')
+                    or a ComputeBackend instance. Defaults to 'sequential'.
         """
         self.config = config
         self.blueprint = Blueprint()
@@ -34,7 +40,20 @@ class SimulationController:
         self.execution_plan: ExecutionPlan | None = None
         self.time_integrator: TimeIntegrator | None = None
         self.forcing_manager: ForcingManager | None = None
-        self.backend = SequentialBackend()
+        self.backend: ComputeBackend
+
+        if isinstance(backend, str):
+            if backend == "sequential":
+                self.backend = SequentialBackend()
+            elif backend == "dask":
+                self.backend = DaskBackend()
+            else:
+                raise ValueError(
+                    f"Unknown backend type: '{backend}'. Supported: 'sequential', 'dask'."
+                )
+        else:
+            self.backend = backend
+
         self._current_time = config.start_date
 
     def setup(

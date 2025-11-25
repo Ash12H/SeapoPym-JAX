@@ -32,6 +32,8 @@ dependencies = [
     "matplotlib>=3.8.0",
     "jax-cfd>=0.2.0",
     "networkx>=3.0",
+    "bokeh>=3.8.1",
+    "distributed>=2025.11.0",
 ]
 
 [project.optional-dependencies]
@@ -198,6 +200,8 @@ module = [
     "cartopy.*",
     "matplotlib.*",
     "pandas.*",
+    "dask.*",
+    "distributed.*",
 ]
 ignore_missing_imports = true
 
@@ -258,3 +262,6 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "@abstract",
 ]
+
+[dependency-groups]
+dev = []

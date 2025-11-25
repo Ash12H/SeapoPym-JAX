@@ -1,33 +1,33 @@
-"""Tests for RayBackend."""
+"""Tests for DaskBackend."""
 
 import pytest
 import xarray as xr
 
-try:
-    import ray
-except ImportError:
-    ray = None
-
-# Import helper functions from separate module to ensure Ray can serialize them
-from backend_test_helpers import add_one, group1_func, group2_func, multiply_two
-from seapopym.backend.ray import RayBackend
+from seapopym.backend.dask import DaskBackend
 from seapopym.blueprint.nodes import ComputeNode
 
 
-@pytest.mark.skipif(ray is None, reason="Ray is not installed")
-class TestRayBackend:
-    @classmethod
-    def setup_class(cls):
-        if not ray.is_initialized():
-            ray.init()
+# Helpers
+def add_one(x):
+    return {"result": x + 1.0}
 
-    @classmethod
-    def teardown_class(cls):
-        ray.shutdown()
 
-    def test_ray_backend_simple_execution(self):
+def multiply_two(x):
+    return {"result": x * 2.0}
+
+
+def group1_func(x):
+    return {"out": x + 1.0}
+
+
+def group2_func(y):
+    return {"out": y * 2.0}
+
+
+class TestDaskBackend:
+    def test_dask_backend_simple_execution(self):
         """Test basic execution with one task."""
-        backend = RayBackend()
+        backend = DaskBackend()
 
         node = ComputeNode(
             func=add_one, name="add_one", output_mapping={"result": "y"}, input_mapping={"x": "x"}
@@ -40,9 +40,9 @@ class TestRayBackend:
         assert "y" in results
         assert results["y"].values.tolist() == [2.0, 3.0, 4.0]
 
-    def test_ray_backend_multiple_tasks(self):
+    def test_dask_backend_multiple_tasks(self):
         """Test execution with multiple tasks in sequence."""
-        backend = RayBackend()
+        backend = DaskBackend()
 
         node1 = ComputeNode(
             func=add_one,
@@ -65,9 +65,9 @@ class TestRayBackend:
         assert "y" in results
         assert results["y"].values.tolist() == [4.0, 6.0, 8.0]
 
-    def test_ray_backend_multiple_groups(self):
+    def test_dask_backend_multiple_groups(self):
         """Test execution with multiple groups (dependency)."""
-        backend = RayBackend()
+        backend = DaskBackend()
 
         node1 = ComputeNode(
             func=group1_func,
@@ -90,11 +90,27 @@ class TestRayBackend:
         assert "final" in results
         assert results["final"].values.tolist() == [4.0, 6.0]
 
-    def test_ray_backend_empty_task_groups(self):
+    def test_dask_backend_empty_task_groups(self):
         """Test that empty task groups return empty results."""
-        backend = RayBackend()
+        backend = DaskBackend()
         state = xr.Dataset({"x": (("i"), [1.0])})
 
         results = backend.execute([], state)
 
         assert results == {}
+
+    def test_dask_backend_invalid_return_type(self):
+        """Test error when function doesn't return dict."""
+        backend = DaskBackend()
+
+        def bad_func(x):
+            return x  # Should return dict
+
+        node = ComputeNode(
+            func=bad_func, name="bad", output_mapping={"result": "y"}, input_mapping={"x": "x"}
+        )
+
+        state = xr.Dataset({"x": (("i"), [1.0])})
+
+        with pytest.raises(TypeError, match="must return a dictionary"):
+            backend.execute([("group1", [node])], state)
