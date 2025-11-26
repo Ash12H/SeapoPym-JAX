@@ -44,7 +44,7 @@ def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> dict[str, 
     # Day length in hours = 24 * hour_angle / pi
     day_length_hours = 24.0 * hour_angle / np.pi
 
-    return {"day_length": day_length_hours / 24.0}
+    return {"output": day_length_hours / 24.0}
 
 
 def compute_mean_temperature(
@@ -62,7 +62,7 @@ def compute_mean_temperature(
     t_day = temperature.sel({Coordinates.Z: day_layer}, method="nearest")
     t_night = temperature.sel({Coordinates.Z: night_layer}, method="nearest")
 
-    return {"mean_temperature": t_day * day_length + t_night * (1.0 - day_length)}
+    return {"output": t_day * day_length + t_night * (1.0 - day_length)}
 
 
 def compute_recruitment_age(
@@ -75,7 +75,7 @@ def compute_recruitment_age(
 
     tau_r = tau_r_0 * exp(-gamma * (T - T_ref))
     """
-    return {"recruitment_age": tau_r_0 * np.exp(-gamma_tau_r * (mean_temperature - T_ref))}
+    return {"output": tau_r_0 * np.exp(-gamma_tau_r * (mean_temperature - T_ref))}
 
 
 # -------------------------------------------------------------------------
