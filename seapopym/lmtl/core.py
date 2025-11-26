@@ -14,6 +14,7 @@ def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> dict[str, 
     """Compute day length fraction (0-1) based on latitude and day of year.
 
     Uses the CBM model (Forsythe et al., 1995).
+    Returns a dimensionless fraction of the day (0.0 to 1.0).
     """
     # Ensure time is datetime64
     # We extract day of year
@@ -74,6 +75,17 @@ def compute_recruitment_age(
     """Compute minimum recruitment age based on temperature.
 
     tau_r = tau_r_0 * exp(-gamma * (T - T_ref))
+
+    Parameters
+    ----------
+    tau_r_0 : float
+        Base recruitment age in seconds (SI units).
+    ...
+
+    Returns
+    -------
+    dict
+        "output": Recruitment age in seconds.
     """
     return {"output": tau_r_0 * np.exp(-gamma_tau_r * (mean_temperature - T_ref))}
 
@@ -93,13 +105,6 @@ def compute_production_initialization(
     Source: E * NPP
     Tendency = Source / dt (since we add dt * tendency)
 
-    Returns a dictionary mapping to the 'production' variable,
-    but we need to target specifically cohort 0.
-
-    Since the TimeIntegrator sums tendencies for the whole array,
-    we return a DataArray of the full shape (with 0s elsewhere)
-    OR we rely on the fact that we can return a sparse update?
-
     Current TimeIntegrator expects full array tendency.
     So we must broadcast NPP to the production shape (with cohort dim)
     and mask everything except cohort 0.
@@ -115,8 +120,8 @@ def compute_production_initialization(
     # Let's assume the caller (TimeIntegrator) handles broadcasting if we return
     # a DataArray with a single coordinate value for cohort=0.
 
-    # Source is a rate (e.g. mgC/m2/day)
-    # The TimeIntegrator will multiply by dt.
+    # Source is a rate (e.g. mgC/m2/s)
+    # The TimeIntegrator will multiply by dt (in seconds).
     tendency_rate = E * primary_production
 
     # We expand dims to include cohort=0
@@ -136,6 +141,11 @@ def compute_aging_tendency(
     """Compute aging tendency (advection in age).
 
     Tendency[c] = (production[c-1] - production[c]) / dt
+
+    Parameters
+    ----------
+    dt : float
+        Time step in seconds.
     """
     # Shift production to the right (c becomes c+1)
     # production.shift(cohort=1) means value at c comes from c-1.
@@ -155,12 +165,21 @@ def compute_aging_tendency(
 def compute_recruitment_tendency(
     production: xr.DataArray,
     recruitment_age: xr.DataArray,
-    cohort_ages: xr.DataArray,  # The values of the cohort coordinate (in days)
+    cohort_ages: xr.DataArray,  # The values of the cohort coordinate (in seconds)
     dt: float,
 ) -> dict[str, xr.DataArray]:
     """Compute recruitment flux from production to biomass.
 
     Transfer all production where age >= recruitment_age.
+
+    Parameters
+    ----------
+    recruitment_age : xr.DataArray
+        Age at recruitment in seconds.
+    cohort_ages : xr.DataArray
+        Age of cohorts in seconds.
+    dt : float
+        Time step in seconds.
     """
     # Create a mask for recruited cohorts
     # cohort_ages must be broadcastable to production
@@ -195,6 +214,11 @@ def compute_mortality_tendency(
 
     rate = lambda_0 * exp(gamma * (T - T_ref))
     Tendency = -rate * biomass
+
+    Parameters
+    ----------
+    lambda_0 : float
+        Base mortality rate in s^-1.
     """
     rate = lambda_0 * np.exp(gamma_lambda * (mean_temperature - T_ref))
     tendency = -rate * biomass
