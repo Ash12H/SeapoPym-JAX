@@ -85,9 +85,8 @@ def compute_recruitment_age(
 
 def compute_production_initialization(
     primary_production: xr.DataArray,
-    production: xr.DataArray,
+    cohorts: xr.DataArray,
     E: float,
-    dt: float,
 ) -> dict[str, xr.DataArray]:
     """Compute production tendency for the first cohort (age 0).
 
@@ -116,17 +115,18 @@ def compute_production_initialization(
     # Let's assume the caller (TimeIntegrator) handles broadcasting if we return
     # a DataArray with a single coordinate value for cohort=0.
 
-    source = E * primary_production
-    tendency = source / dt
+    # Source is a rate (e.g. mgC/m2/day)
+    # The TimeIntegrator will multiply by dt.
+    tendency_rate = E * primary_production
 
     # We expand dims to include cohort=0
-    tendency = tendency.expand_dims(cohort=[0])
+    tendency = tendency_rate.expand_dims(cohort=[0])
 
-    # Reindex to match the full production shape (filling other cohorts with 0)
-    # This prevents NaNs when summing with other tendencies that cover all cohorts.
-    tendency = tendency.reindex_like(production, fill_value=0.0)
+    # Reindex to match the full cohorts shape (filling other cohorts with 0)
+    # We assume 'cohorts' is the coordinate DataArray for the cohort dimension.
+    tendency = tendency.reindex(cohort=cohorts, fill_value=0.0)
 
-    return {"production_init": tendency}
+    return {"output": tendency}
 
 
 def compute_aging_tendency(
