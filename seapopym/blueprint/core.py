@@ -73,7 +73,13 @@ class Blueprint:
 
         input_mapping = input_mapping or {}
 
-        func_name = func.__name__
+        if isinstance(func, partial):
+            func_name = func.func.__name__
+        elif hasattr(func, "__name__"):
+            func_name = func.__name__
+        else:
+            func_name = str(func)
+
         step_name = name or func_name
 
         if self._group_context:
