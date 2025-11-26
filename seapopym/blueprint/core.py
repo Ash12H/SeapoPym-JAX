@@ -3,6 +3,7 @@
 import inspect
 import itertools
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import networkx as nx
@@ -151,20 +152,41 @@ class Blueprint:
 
         return None
 
-    def register_group(self, group_prefix: str, units: list[dict[str, Any]]) -> None:
+    def register_group(
+        self,
+        group_prefix: str,
+        units: list[dict[str, Any]],
+        parameters: Any | None = None,
+    ) -> None:
         """Helper pour enregistrer un groupe d'unités.
 
         Args:
             group_prefix: Le préfixe du groupe (ex: 'Tuna').
             units: Liste de dicts de configuration pour register_unit.
+            parameters: Objet optionnel contenant les paramètres constants du groupe.
+                        Si fourni, les arguments des fonctions correspondant aux attributs
+                        de cet objet seront automatiquement pré-remplis via functools.partial.
         """
         previous_context = self._group_context
         self._group_context = group_prefix
 
         try:
             for unit_conf in units:
+                func = unit_conf["func"]
+
+                # Injection automatique des paramètres
+                if parameters is not None:
+                    sig = inspect.signature(func)
+                    params_to_inject = {}
+                    for param_name in sig.parameters:
+                        if hasattr(parameters, param_name):
+                            params_to_inject[param_name] = getattr(parameters, param_name)
+
+                    if params_to_inject:
+                        func = partial(func, **params_to_inject)
+
                 self.register_unit(
-                    func=unit_conf["func"],
+                    func=func,
                     output_mapping=unit_conf["output_mapping"],
                     input_mapping=unit_conf.get("input_mapping"),
                     output_tendencies=unit_conf.get("output_tendencies"),

@@ -1,7 +1,8 @@
 """Core implementation of the Simulation Controller."""
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
+from typing import Any
 
 import xarray as xr
 
@@ -87,15 +88,20 @@ class SimulationController:
                 )
 
         # On vérifie la couverture
-        provided_vars = set(initial_state.data_vars)
+        # On inclut les data_vars ET les coords car les fonctions peuvent demander des coordonnées (ex: latitude)
+        provided_vars = set(map(str, initial_state.data_vars)) | set(map(str, initial_state.coords))
+
         if forcings is not None:
-            provided_vars.update(forcings.data_vars)
+            provided_vars.update(map(str, forcings.data_vars))
+            provided_vars.update(map(str, forcings.coords))
 
         missing_vars = set(self.execution_plan.initial_variables) - provided_vars
         if missing_vars:
             from seapopym.gsm.exceptions import StateValidationError
 
-            raise StateValidationError(f"Missing required variables: {missing_vars}")
+            raise StateValidationError(
+                f"Missing required variables (data or coords): {missing_vars}"
+            )
 
         self.state = initial_state
 
@@ -147,7 +153,9 @@ class SimulationController:
         tendency_vars = set(sum(self.execution_plan.tendency_map.values(), []))
         # 4. Fusion des diagnostics (variables produites mais non intégrées)
         # TODO: Filtrer ce qui doit être gardé ou non
-        diagnostics = {k: v for k, v in all_results.items() if k not in tendency_vars}
+        diagnostics: dict[Hashable, Any] = {
+            k: v for k, v in all_results.items() if k not in tendency_vars
+        }
         self.state = StateManager.update_with_forcings(self.state, diagnostics)
 
         # 5. Préparation du pas suivant

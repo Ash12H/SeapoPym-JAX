@@ -3,18 +3,45 @@
 import pytest
 import xarray as xr
 
+
 # Import shared test helpers
-from backend_test_helpers import (
-    add_one,
-    bad_func,
-    buggy_func,
-    create_local,
-    dummy,
-    group1_func,
-    group2_func,
-    multiply_two,
-    use_local,
-)
+# Helpers
+def add_one(x):
+    return {"result": x + 1.0}
+
+
+def multiply_two(x):
+    return {"result": x * 2.0}
+
+
+def create_local(x):
+    return {"var": x + 10.0}
+
+
+def use_local(var):
+    return {"result": var * 2.0}
+
+
+def dummy(x):
+    return {"result": x}
+
+
+def buggy_func(x):
+    raise ValueError("Bug!")
+
+
+def bad_func(x):
+    return x  # Should return dict
+
+
+def group1_func(x):
+    return {"out": x + 1.0}
+
+
+def group2_func(y):
+    return {"out": y * 2.0}
+
+
 from seapopym.backend import SequentialBackend
 from seapopym.backend.exceptions import ExecutionError
 from seapopym.blueprint.nodes import ComputeNode
