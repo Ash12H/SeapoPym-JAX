@@ -63,12 +63,14 @@ def test_compute_day_length(dummy_data):
         dummy_data["times"], dims=Coordinates.T, coords={Coordinates.T: dummy_data["times"]}
     )
 
-    dl = compute_day_length(lat, time)
+    res = compute_day_length(lat, time)
+    dl = res["day_length"]
     assert np.allclose(dl.values, 0.5, atol=0.01)
 
     # At 45 deg north
     lat_45 = xr.DataArray([45.0], dims=Coordinates.Y)
-    dl_45 = compute_day_length(lat_45, time)
+    res_45 = compute_day_length(lat_45, time)
+    dl_45 = res_45["day_length"]
 
     # Winter (Jan) should be < 0.5, Summer (Jul) > 0.5
     assert dl_45.sel({Coordinates.T: "2020-01-01"}) < 0.5
@@ -82,7 +84,8 @@ def test_compute_mean_temperature(dummy_data):
     dl = xr.DataArray(0.5)
 
     # Day at 0m (20C), Night at 100m (10C)
-    t_mean = compute_mean_temperature(temp, dl, day_layer=0, night_layer=100)
+    res = compute_mean_temperature(temp, dl, day_layer=0, night_layer=100)
+    t_mean = res["mean_temperature"]
 
     # Should be (20 * 0.5) + (10 * 0.5) = 15
     assert np.allclose(t_mean, 15.0)
@@ -96,12 +99,14 @@ def test_compute_recruitment_age():
     t_ref = 20.0
 
     # At T_ref, should be tau_r_0
-    age = compute_recruitment_age(t_mean, tau_r_0, gamma, t_ref)
+    res = compute_recruitment_age(t_mean, tau_r_0, gamma, t_ref)
+    age = res["recruitment_age"]
     assert age == 10.0
 
     # At higher temp, should be lower
     t_hot = xr.DataArray([30.0])
-    age_hot = compute_recruitment_age(t_hot, tau_r_0, gamma, t_ref)
+    res_hot = compute_recruitment_age(t_hot, tau_r_0, gamma, t_ref)
+    age_hot = res_hot["recruitment_age"]
     assert age_hot < 10.0
 
 

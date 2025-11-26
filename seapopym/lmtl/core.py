@@ -10,7 +10,7 @@ from seapopym.standard.coordinates import Coordinates
 # -------------------------------------------------------------------------
 
 
-def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> xr.DataArray:
+def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> dict[str, xr.DataArray]:
     """Compute day length fraction (0-1) based on latitude and day of year.
 
     Uses the CBM model (Forsythe et al., 1995).
@@ -44,7 +44,7 @@ def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> xr.DataArr
     # Day length in hours = 24 * hour_angle / pi
     day_length_hours = 24.0 * hour_angle / np.pi
 
-    return day_length_hours / 24.0  # type: ignore[no-any-return]
+    return {"day_length": day_length_hours / 24.0}
 
 
 def compute_mean_temperature(
@@ -52,7 +52,7 @@ def compute_mean_temperature(
     day_length: xr.DataArray,
     day_layer: float,
     night_layer: float,
-) -> xr.DataArray:
+) -> dict[str, xr.DataArray]:
     """Compute mean temperature experienced by vertically migrating organisms.
 
     T_mean = T_day * day_length + T_night * (1 - day_length)
@@ -62,7 +62,7 @@ def compute_mean_temperature(
     t_day = temperature.sel({Coordinates.Z: day_layer}, method="nearest")
     t_night = temperature.sel({Coordinates.Z: night_layer}, method="nearest")
 
-    return t_day * day_length + t_night * (1.0 - day_length)  # type: ignore[no-any-return]
+    return {"mean_temperature": t_day * day_length + t_night * (1.0 - day_length)}
 
 
 def compute_recruitment_age(
@@ -70,12 +70,12 @@ def compute_recruitment_age(
     tau_r_0: float,
     gamma_tau_r: float,
     T_ref: float,
-) -> xr.DataArray:
+) -> dict[str, xr.DataArray]:
     """Compute minimum recruitment age based on temperature.
 
     tau_r = tau_r_0 * exp(-gamma * (T - T_ref))
     """
-    return tau_r_0 * np.exp(-gamma_tau_r * (mean_temperature - T_ref))  # type: ignore[no-any-return]
+    return {"recruitment_age": tau_r_0 * np.exp(-gamma_tau_r * (mean_temperature - T_ref))}
 
 
 # -------------------------------------------------------------------------
