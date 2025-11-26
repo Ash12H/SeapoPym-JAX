@@ -85,6 +85,7 @@ def compute_recruitment_age(
 
 def compute_production_initialization(
     primary_production: xr.DataArray,
+    production: xr.DataArray,
     E: float,
     dt: float,
 ) -> dict[str, xr.DataArray]:
@@ -120,6 +121,10 @@ def compute_production_initialization(
 
     # We expand dims to include cohort=0
     tendency = tendency.expand_dims(cohort=[0])
+
+    # Reindex to match the full production shape (filling other cohorts with 0)
+    # This prevents NaNs when summing with other tendencies that cover all cohorts.
+    tendency = tendency.reindex_like(production, fill_value=0.0)
 
     return {"production_init": tendency}
 

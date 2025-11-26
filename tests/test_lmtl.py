@@ -116,17 +116,18 @@ def test_compute_production_initialization(dummy_data):
     E = 0.1
     dt = 1.0
 
-    res = compute_production_initialization(npp, E, dt)
+    res = compute_production_initialization(npp, dummy_data["production"], E, dt)
     assert "production_init" in res
     tendency = res["production_init"]
 
-    # Should have cohort dim with size 1
+    # Should have cohort dim with size matching production (3)
     assert "cohort" in tendency.dims
-    assert tendency.sizes["cohort"] == 1
-    assert tendency.cohort.values == [0]
+    assert tendency.sizes["cohort"] == 3
 
     # Value check
     assert np.allclose(tendency.isel(cohort=0), npp * E / dt)
+    # Other cohorts should be 0
+    assert np.allclose(tendency.isel(cohort=1), 0.0)
 
 
 def test_compute_aging_tendency(dummy_data):
