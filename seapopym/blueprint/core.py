@@ -23,7 +23,9 @@ class Blueprint:
         self._data_nodes: dict[str, DataNode] = {}  # Registre des noeuds de données
         self._group_context: str | None = None  # Pour le namespacing automatique
 
-    def register_forcing(self, name: str, dims: tuple[Any, ...] | None = None) -> None:
+    def register_forcing(
+        self, name: str, dims: tuple[Any, ...] | None = None, units: str | None = None
+    ) -> None:
         """Déclare une source de données externe (ex: température, courants).
 
         Raises:
@@ -33,10 +35,28 @@ class Blueprint:
         if name in self.registered_variables:
             raise ConfigurationError(f"Variable '{name}' is already registered.")
 
-        node = DataNode(name=name, dims=dims)
+        node = DataNode(name=name, dims=dims, units=units)
         self.graph.add_node(node)
         self.registered_variables.add(name)
         self._data_nodes[name] = node
+    def register_parameter(
+        self, name: str, units: str | None = None, dims: tuple[Any, ...] | None = None
+    ) -> None:
+        """Déclare un paramètre du modèle (ex: taux de mortalité, coefficient).
+
+        Args:
+            name: Nom du paramètre.
+            units: Unité attendue (ex: '1/day', 'm').
+            dims: Dimensions optionnelles (si le paramètre est spatialisé).
+        """
+        if name in self.registered_variables:
+            raise ConfigurationError(f"Variable '{name}' is already registered.")
+
+        node = DataNode(name=name, dims=dims, units=units)
+        self.graph.add_node(node)
+        self.registered_variables.add(name)
+        self._data_nodes[name] = node
+
 
     def register_unit(
         self,
@@ -44,6 +64,7 @@ class Blueprint:
         output_mapping: dict[str, str],
         input_mapping: dict[str, str] | None = None,
         output_tendencies: dict[str, str] | None = None,
+        output_units: dict[str, str] | None = None,
         scope: str = "local",
         name: str | None = None,
     ) -> None:
@@ -56,6 +77,8 @@ class Blueprint:
             output_tendencies: Mapping {key_retour: var_cible} pour marquer une sortie comme tendance.
                               Ex: {"rate": "biomass"} signifie que la clé "rate" est une tendance de "biomass".
                               Les tendances sont sommées par le TimeIntegrator lors de l'intégration.
+            output_units: Mapping {key_retour: unité} pour spécifier les unités des sorties.
+                         Ex: {"output": "gC/m²/s"}. Les unités sont validées/converties par le Controller.
             scope: 'local' ou 'global'.
             name: Nom unique de l'étape (optionnel, défaut = nom fonction).
 
@@ -65,7 +88,8 @@ class Blueprint:
             >>> bp.register_unit(
             ...     compute_mortality,
             ...     output_mapping={"rate": "mortality_rate"},
-            ...     output_tendencies={"rate": "biomass"}  # mortality_rate est une tendance de biomass
+            ...     output_tendencies={"rate": "biomass"},  # mortality_rate est une tendance de biomass
+            ...     output_units={"rate": "gC/m²/s"}  # unité de la tendance
             ... )
         """
         if not output_mapping:
@@ -124,12 +148,15 @@ class Blueprint:
         self.graph.add_node(compute_node)
 
         output_tendencies = output_tendencies or {}
+        output_units = output_units or {}
 
         for key, var_name in final_output_mapping.items():
             # Déterminer si c'est une tendance
             is_tendency_of = output_tendencies.get(key)
+            # Déterminer l'unité de sortie
+            units = output_units.get(key)
 
-            output_node = DataNode(name=var_name, is_tendency_of=is_tendency_of)
+            output_node = DataNode(name=var_name, is_tendency_of=is_tendency_of, units=units)
             self.graph.add_node(output_node)
             self.graph.add_edge(compute_node, output_node)
             self.registered_variables.add(var_name)
@@ -162,40 +189,51 @@ class Blueprint:
         self,
         group_prefix: str,
         units: list[dict[str, Any]],
-        parameters: Any | None = None,
+        parameters: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Helper pour enregistrer un groupe d'unités.
 
         Args:
             group_prefix: Le préfixe du groupe (ex: 'Tuna').
             units: Liste de dicts de configuration pour register_unit.
-            parameters: Objet optionnel contenant les paramètres constants du groupe.
-                        Si fourni, les arguments des fonctions correspondant aux attributs
-                        de cet objet seront automatiquement pré-remplis via functools.partial.
+            parameters: Dictionnaire de définition des paramètres du groupe.
+                        Format: {param_name: {units: '...', dims: ...}}
+                        Ces paramètres seront automatiquement enregistrés avec le préfixe du groupe.
         """
         previous_context = self._group_context
         self._group_context = group_prefix
 
         try:
+            # 1. Enregistrement automatique des paramètres du groupe
+            if parameters:
+                for param_name, param_spec in parameters.items():
+                    # Le nom sera automatiquement préfixé par register_parameter car on est dans le contexte
+                    # Mais register_parameter ne gère pas le contexte explicitement comme register_unit
+                    # car c'est une méthode de bas niveau.
+                    # On doit construire le nom complet ici ou modifier register_parameter.
+                    # Pour rester cohérent avec register_unit qui utilise _group_context,
+                    # on construit le nom ici.
+                    full_name = f"{group_prefix}/{param_name}"
+                    self.register_parameter(
+                        name=full_name,
+                        units=param_spec.get("units"),
+                        dims=param_spec.get("dims"),
+                    )
+
+            # 2. Enregistrement des unités
             for unit_conf in units:
                 func = unit_conf["func"]
 
-                # Injection automatique des paramètres
-                if parameters is not None:
-                    sig = inspect.signature(func)
-                    params_to_inject = {}
-                    for param_name in sig.parameters:
-                        if hasattr(parameters, param_name):
-                            params_to_inject[param_name] = getattr(parameters, param_name)
-
-                    if params_to_inject:
-                        func = partial(func, **params_to_inject)
+                # Note: On a supprimé l'injection automatique via partial (parameters=...)
+                # car maintenant les paramètres sont dans le State.
+                # Le mapping se fera via _resolve_input qui cherchera {group_prefix}_{arg_name}
 
                 self.register_unit(
                     func=func,
                     output_mapping=unit_conf["output_mapping"],
                     input_mapping=unit_conf.get("input_mapping"),
                     output_tendencies=unit_conf.get("output_tendencies"),
+                    output_units=unit_conf.get("output_units"),
                     scope=unit_conf.get("scope", "local"),
                     name=unit_conf.get("name"),
                 )

@@ -3,6 +3,10 @@
 import pytest
 import xarray as xr
 
+from seapopym.backend import SequentialBackend
+from seapopym.backend.exceptions import ExecutionError
+from seapopym.blueprint.nodes import ComputeNode
+
 
 # Import shared test helpers
 # Helpers
@@ -40,11 +44,6 @@ def group1_func(x):
 
 def group2_func(y):
     return {"out": y * 2.0}
-
-
-from seapopym.backend import SequentialBackend
-from seapopym.backend.exceptions import ExecutionError
-from seapopym.blueprint.nodes import ComputeNode
 
 
 def test_sequential_backend_simple_execution():

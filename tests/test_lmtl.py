@@ -114,7 +114,8 @@ def test_compute_production_initialization(dummy_data):
     """Test production init."""
     npp = dummy_data["temperature"].isel({Coordinates.Z: 0})  # Use temp as dummy NPP
     E = 0.1
-    dt = 1.0
+    npp = dummy_data["temperature"].isel({Coordinates.Z: 0})  # Use temp as dummy NPP
+    E = 0.1
 
     res = compute_production_initialization(npp, dummy_data["production"].cohort, E)
     assert "output" in res

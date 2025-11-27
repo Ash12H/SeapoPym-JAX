@@ -11,6 +11,7 @@ class DataNode:
 
     name: str
     dims: tuple[Any, ...] | None = None  # Pour validation future (ex: ('time', 'lat', 'lon'))
+    units: str | None = None  # Unité attendue (ex: 'degC', 'm/s')
     is_tendency_of: str | None = None  # Si c'est une tendance, de quelle variable ?
 
     def __hash__(self) -> int:

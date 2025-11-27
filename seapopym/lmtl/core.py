@@ -14,7 +14,18 @@ def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> dict[str, 
     """Compute day length fraction (0-1) based on latitude and day of year.
 
     Uses the CBM model (Forsythe et al., 1995).
-    Returns a dimensionless fraction of the day (0.0 to 1.0).
+
+    Parameters
+    ----------
+    latitude : xr.DataArray
+        Latitude in degrees.
+    time : xr.DataArray
+        Time coordinate (datetime64).
+
+    Returns
+    -------
+    dict
+        {"output": day_length} where day_length is dimensionless [0.0-1.0].
     """
     # Ensure time is datetime64
     # We extract day of year
@@ -26,7 +37,8 @@ def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> dict[str, 
     phi = np.deg2rad(latitude)
 
     # Declination of the sun
-    theta = 0.2163108 + 2 * np.arctan(0.9671396 * np.tan(0.00860 * (doy - 186)))
+    # Declination of the sun
+    # theta = 0.2163108 + 2 * np.arctan(0.9671396 * np.tan(0.00860 * (doy - 186)))
 
     # Hour angle
     # P = asin[ 0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(0.00860 * (J - 186)))) ]
@@ -57,6 +69,22 @@ def compute_mean_temperature(
     """Compute mean temperature experienced by vertically migrating organisms.
 
     T_mean = T_day * day_length + T_night * (1 - day_length)
+
+    Parameters
+    ----------
+    temperature : xr.DataArray
+        Temperature field [degC] with depth dimension.
+    day_length : xr.DataArray
+        Day length fraction [dimensionless, 0-1].
+    day_layer : float
+        Depth layer for daytime [m].
+    night_layer : float
+        Depth layer for nighttime [m].
+
+    Returns
+    -------
+    dict
+        {"output": mean_temperature} in [degC].
     """
     # Select temperature at specific layers
     # We assume 'depth' coordinate exists or we use method='nearest'
@@ -78,14 +106,19 @@ def compute_recruitment_age(
 
     Parameters
     ----------
+    mean_temperature : xr.DataArray
+        Mean temperature [degC].
     tau_r_0 : float
-        Base recruitment age in seconds (SI units).
-    ...
+        Base recruitment age [s] at reference temperature.
+    gamma_tau_r : float
+        Thermal sensitivity coefficient [1/degC].
+    T_ref : float
+        Reference temperature [degC].
 
     Returns
     -------
     dict
-        "output": Recruitment age in seconds.
+        {"output": recruitment_age} in [s].
     """
     return {"output": tau_r_0 * np.exp(-gamma_tau_r * (mean_temperature - T_ref))}
 
@@ -102,12 +135,24 @@ def compute_production_initialization(
 ) -> dict[str, xr.DataArray]:
     """Compute production tendency for the first cohort (age 0).
 
-    Source: E * NPP
-    Tendency = Source / dt (since we add dt * tendency)
+    IMPORTANT: This function expects primary_production in SI units [g/m²/s].
+    If your NPP data is in [g/m²/day], it must be converted before calling
+    this function (the Controller handles this via unit conversion).
 
-    Current TimeIntegrator expects full array tendency.
-    So we must broadcast NPP to the production shape (with cohort dim)
-    and mask everything except cohort 0.
+    Parameters
+    ----------
+    primary_production : xr.DataArray
+        Net Primary Production [g/m²/s].
+    cohorts : xr.DataArray
+        Cohort ages coordinate [s].
+    E : float
+        Transfer efficiency from primary production [dimensionless].
+
+    Returns
+    -------
+    dict
+        {"output": production_tendency} in [g/m²/s] for cohort dimension.
+        Only cohort 0 receives flux (E * NPP), others are zero.
     """
     # This assumes we can construct the full array or that xarray handles broadcasting.
     # But we don't know the cohort dimension size here easily without the state.
@@ -120,7 +165,7 @@ def compute_production_initialization(
     # Let's assume the caller (TimeIntegrator) handles broadcasting if we return
     # a DataArray with a single coordinate value for cohort=0.
 
-    # Source is a rate (e.g. mgC/m2/s)
+    # Source is a rate (e.g. gC/m2/s)
     # The TimeIntegrator will multiply by dt (in seconds).
     tendency_rate = E * primary_production
 
@@ -134,73 +179,54 @@ def compute_production_initialization(
     return {"output": tendency}
 
 
-def compute_aging_tendency(
-    production: xr.DataArray,
-    dt: float,
-) -> dict[str, xr.DataArray]:
-    """Compute aging tendency (advection in age).
-
-    Tendency[c] = (production[c-1] - production[c]) / dt
-
-    Parameters
-    ----------
-    dt : float
-        Time step in seconds.
-    """
-    # Shift production to the right (c becomes c+1)
-    # production.shift(cohort=1) means value at c comes from c-1.
-    shifted = production.shift(cohort=1, fill_value=0.0)
-
-    # The flux coming into c is p[c-1]
-    # The flux leaving c is p[c]
-    # Net change = In - Out
-    tendency = (shifted - production) / dt
-
-    # Note: For cohort 0, shifted is 0, so tendency is -p[0]/dt (outflux).
-    # The influx for cohort 0 is handled by compute_production_initialization.
-
-    return {"aging_flux": tendency}
-
-
-def compute_recruitment_tendency(
+def compute_production_dynamics(
     production: xr.DataArray,
     recruitment_age: xr.DataArray,
-    cohort_ages: xr.DataArray,  # The values of the cohort coordinate (in seconds)
+    cohort_ages: xr.DataArray,
     dt: float,
 ) -> dict[str, xr.DataArray]:
-    """Compute recruitment flux from production to biomass.
+    """Compute combined aging and recruitment dynamics.
 
-    Transfer all production where age >= recruitment_age.
+    Handles:
+    1. Aging flux (transport from C-1 to C).
+    2. Outflow from C:
+       - If recruited: Transfer to biomass (Recruitment).
+       - If NOT recruited: Exit the model (Senescence/Outflow).
 
-    Parameters
-    ----------
-    recruitment_age : xr.DataArray
-        Age at recruitment in seconds.
-    cohort_ages : xr.DataArray
-        Age of cohorts in seconds.
-    dt : float
-        Time step in seconds.
+    Prevents double-counting of outflows for the last cohort.
     """
-    # Create a mask for recruited cohorts
-    # cohort_ages must be broadcastable to production
-    # recruitment_age varies in space/time (T, Y, X)
+    # 1. Aging Influx (from previous cohort)
+    # Flux entrant dans C = P[C-1] / dt
+    # shift(cohort=1) décale vers la droite : la valeur à l'index C vient de C-1
+    influx = production.shift(cohort=1, fill_value=0.0) / dt
 
-    # We ensure cohort_ages is properly aligned
-    # If cohort_ages is just a coordinate, xarray handles comparison
+    # 2. Identify Recruited Cohorts
+    # cohort_ages doit être aligné avec production
     is_recruited = cohort_ages >= recruitment_age
 
-    # Select recruited production
-    recruited_production = production.where(is_recruited, 0.0)
+    # 3. Calculate Outflows
+    # Le contenu de la case P[C] sort au taux 1/dt
+    total_outflow_rate = production / dt
 
-    # Tendency for production (sink): remove all recruited
-    # tendency = -amount / dt
-    production_sink = -recruited_production / dt
+    # Séparation des flux sortants (Exclusion Mutuelle)
+    # Si recruté -> va dans recruitment_source
+    # Si pas recruté -> va dans aging_out (perdu pour le système)
+    recruitment_flux = total_outflow_rate.where(is_recruited, 0.0)
+    # aging_out_flux = total_outflow_rate.where(~is_recruited, 0.0) # Implicite
 
-    # Tendency for biomass (source): sum of recruited
-    # We sum over the cohort dimension
-    biomass_source = recruited_production.sum(dim="cohort") / dt
+    # 4. Tendency for Production (P)
+    # dP/dt = Influx - Total_Outflow
+    # On retire tout ce qui sort, peu importe où ça va (biomasse ou dehors)
+    production_tendency = influx - total_outflow_rate
 
-    return {"recruitment_sink": production_sink, "recruitment_source": biomass_source}
+    # 5. Source for Biomass
+    # Somme de tout ce qui est recruté sur toutes les cohortes
+    biomass_source = recruitment_flux.sum(dim="cohort")
+
+    return {
+        "production_tendency": production_tendency,
+        "recruitment_source": biomass_source,
+    }
 
 
 def compute_mortality_tendency(
@@ -217,8 +243,22 @@ def compute_mortality_tendency(
 
     Parameters
     ----------
+    biomass : xr.DataArray
+        Biomass [g/m²].
+    mean_temperature : xr.DataArray
+        Mean temperature [degC].
     lambda_0 : float
-        Base mortality rate in s^-1.
+        Base mortality rate [s^-1] at reference temperature.
+    gamma_lambda : float
+        Thermal sensitivity coefficient [1/degC].
+    T_ref : float
+        Reference temperature [degC].
+
+    Returns
+    -------
+    dict
+        {"mortality_loss": tendency} in [g/m²/s].
+        Negative tendency representing biomass loss.
     """
     rate = lambda_0 * np.exp(gamma_lambda * (mean_temperature - T_ref))
     tendency = -rate * biomass
