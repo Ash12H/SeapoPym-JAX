@@ -195,32 +195,115 @@ def compute_production_dynamics(
 
     Prevents double-counting of outflows for the last cohort.
     """
-    # 1. Aging Influx (from previous cohort)
-    # Flux entrant dans C = P[C-1] / dt
-    # shift(cohort=1) décale vers la droite : la valeur à l'index C vient de C-1
-    influx = production.shift(cohort=1, fill_value=0.0) / dt
+    # Calculate Delta_tau (cohort duration)
+    # We assume cohort_ages represents the age of the cohort.
+    # If cohorts are [0, 1, 2], delta_tau is difference.
+    # For the last cohort, we repeat the last delta.
+    # Note: This assumes cohort_ages is sorted.
 
-    # 2. Identify Recruited Cohorts
-    # cohort_ages doit être aligné avec production
+    # Calculate differences between consecutive cohorts
+    # We use numpy gradient or diff. Since it's xarray, we can use diff but it reduces size.
+    # Let's try to be robust.
+
+    # Or we can assume constant step if appropriate, but variable support is requested.
+
+    # Strategy: Use the mean diff if constant, or extend the last diff.
+    # Since xarray padding is sometimes verbose, let's do it via numpy values if needed
+    # or simply reindex.
+
+    # Let's use xarray features:
+    # shift(-1) to get next value, then subtract.
+    # This gives Delta[i] = Age[i+1] - Age[i]
+    # The last one will be NaN. We fill it with the previous Delta.
+
+    # Ideally, we want the width of the bin.
+    # If 'cohort_ages' are the lower bounds: Width[i] = Age[i+1] - Age[i]
+    # If 'cohort_ages' are midpoints: Width[i] ~ (Age[i+1] - Age[i-1])/2
+
+    # Given the user context (0, 1, 2 days), these look like lower bounds or indices.
+    # Let's assume standard finite volume: Age[i+1] - Age[i].
+
+    # Implementation using shift to keep size:
+    # next_ages = cohort_ages.shift(cohort=-1)
+    # d_tau = next_ages - cohort_ages
+    # This leaves the last one as NaN. We fill it with the second to last value.
+
+    d_tau = cohort_ages.diff("cohort")
+    # If single cohort, d_tau is empty. Handle edge case?
+    if d_tau.size == 0:
+        # Fallback for single cohort: assume dt or some default?
+        # But aging implies moving OUT of it.
+        # If single cohort, maybe we assume width = dt? Or 1 unit?
+        # Let's assume 1.0 * units if possible, or raise warning.
+        # For now, let's assume at least 2 cohorts for aging to make sense.
+        # If 1 cohort, it just flows out.
+        # Let's use a safe fallback if size < 2.
+        d_tau = xr.DataArray([dt], coords=cohort_ages.coords, dims=cohort_ages.dims)
+    else:
+        # Realign to original shape, filling the last one (which was lost in diff)
+        # with the last calculated difference (nearest).
+        d_tau = d_tau.reindex(cohort=cohort_ages.coords["cohort"], method="nearest")
+
+    # 1. Aging Rate (Flux per unit mass) = 1 / Delta_tau
+    # This is the speed at which mass leaves the cohort.
+    aging_rate = 1.0 / d_tau
+
+    # 2. Outflow Rate (Mass/Time) leaving cohort C
+    # Flux_out = P[C] * aging_rate
+    total_outflow_flux = production * aging_rate
+
+    # 3. Influx (from previous cohort)
+    # Flux_in[C] = Flux_out[C-1]
+    influx_flux = total_outflow_flux.shift(cohort=1, fill_value=0.0)
+
+    # 4. Identify Recruited Cohorts
     is_recruited = cohort_ages >= recruitment_age
 
-    # 3. Calculate Outflows
-    # Le contenu de la case P[C] sort au taux 1/dt
-    total_outflow_rate = production / dt
-
-    # Séparation des flux sortants (Exclusion Mutuelle)
+    # 5. Separate Outflows
     # Si recruté -> va dans recruitment_source
-    # Si pas recruté -> va dans aging_out (perdu pour le système)
-    recruitment_flux = total_outflow_rate.where(is_recruited, 0.0)
-    # aging_out_flux = total_outflow_rate.where(~is_recruited, 0.0) # Implicite
+    # Si pas recruté -> va dans aging_out (perdu pour le système ou cohorte suivante)
+    # Note: The "aging_out" part that is NOT recruited is implicitly handled:
+    # It leaves P[C] (via -total_outflow_flux) and enters P[C+1] (via +influx_flux).
+    # Wait, if it is recruited, does it STILL go to next cohort?
+    # Usually: Recruitment = removal from the population (transition to next stage).
+    # So if recruited, it leaves the system (into biomass) and DOES NOT go to C+1.
 
-    # 4. Tendency for Production (P)
-    # dP/dt = Influx - Total_Outflow
-    # On retire tout ce qui sort, peu importe où ça va (biomasse ou dehors)
-    production_tendency = influx - total_outflow_rate
+    # Logic check:
+    # If recruited: Outflow goes to Biomass.
+    # If NOT recruited: Outflow goes to C+1.
 
-    # 5. Source for Biomass
-    # Somme de tout ce qui est recruté sur toutes les cohortes
+    # Current code logic was:
+    # production_tendency = influx - total_outflow_rate
+    # This implies ALL outflow leaves the cohort C.
+    # But Influx comes from C-1.
+    # Does the outflow from C-1 go to C if C-1 was recruited?
+    # If C-1 is recruited, its outflow goes to Biomass, NOT to C.
+
+    # We need to filter the INFLUX based on whether the PREVIOUS cohort was recruited.
+    # If C-1 was recruited, it emptied into Biomass, so Influx to C is 0.
+
+    # Let's refine:
+    # Outflow from C = P[C] / d_tau
+    # Fraction Recruited from C = (1 if recruited else 0) * Outflow
+    # Fraction Aging to C+1 from C = (0 if recruited else 1) * Outflow
+
+    # So:
+    # Influx to C = (Outflow from C-1) * (1 - is_recruited[C-1])
+
+    # Let's compute the mask for the previous cohort
+    prev_is_recruited = is_recruited.shift(cohort=1, fill_value=False)
+
+    # Effective Influx to C
+    # Only receive from C-1 if C-1 was NOT recruited.
+    effective_influx = influx_flux.where(~prev_is_recruited, 0.0)
+
+    # 6. Tendency for Production (P)
+    # dP/dt = Influx_from_prev - Outflow_from_curr
+    production_tendency = effective_influx - total_outflow_flux
+
+    # 7. Source for Biomass
+    # Sum of outflows from all cohorts that ARE recruited
+    recruitment_flux = total_outflow_flux.where(is_recruited, 0.0)
     biomass_source = recruitment_flux.sum(dim="cohort")
 
     return {

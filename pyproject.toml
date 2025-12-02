@@ -204,6 +204,7 @@ module = [
     "pandas.*",
     "dask.*",
     "distributed.*",
+    "pint.*",
 ]
 ignore_missing_imports = true
 

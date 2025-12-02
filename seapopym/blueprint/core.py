@@ -39,6 +39,7 @@ class Blueprint:
         self.graph.add_node(node)
         self.registered_variables.add(name)
         self._data_nodes[name] = node
+
     def register_parameter(
         self, name: str, units: str | None = None, dims: tuple[Any, ...] | None = None
     ) -> None:
@@ -56,7 +57,6 @@ class Blueprint:
         self.graph.add_node(node)
         self.registered_variables.add(name)
         self._data_nodes[name] = node
-
 
     def register_unit(
         self,
