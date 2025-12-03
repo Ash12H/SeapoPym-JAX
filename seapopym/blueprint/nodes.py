@@ -13,6 +13,7 @@ class DataNode:
     dims: tuple[Any, ...] | None = None  # Pour validation future (ex: ('time', 'lat', 'lon'))
     units: str | None = None  # Unité attendue (ex: 'degC', 'm/s')
     is_tendency_of: str | None = None  # Si c'est une tendance, de quelle variable ?
+    is_state: bool = False  # Si c'est une variable d'état (persistante)
 
     def __hash__(self) -> int:
         """Return hash based on node name."""

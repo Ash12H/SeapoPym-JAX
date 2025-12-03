@@ -126,6 +126,17 @@ class SimulationController:
                 f"Missing required variables (data or coords): {missing_vars}"
             )
 
+        # Validation spécifique des variables d'état
+        # On s'assure que toutes les variables d'état déclarées sont fournies
+        declared_states = self.blueprint.get_state_variables()
+        missing_states = declared_states - provided_vars
+        if missing_states:
+            from seapopym.gsm.exceptions import StateValidationError
+
+            raise StateValidationError(
+                f"Initial state is missing required state variables: {missing_states}"
+            )
+
         # Fusion de l'état initial et des paramètres
         # Note: Les paramètres sont ajoutés à l'état initial
         self.state = xr.merge([initial_state, param_ds])
@@ -169,7 +180,7 @@ class SimulationController:
         try:
             # Save initial state
             if self.writer:
-                self.writer.append(self.state)
+                self.writer.append(self.state, time=self._current_time)
 
             while self._current_time < self.config.end_date:
                 self.step()
@@ -177,7 +188,7 @@ class SimulationController:
 
                 # Save state after step
                 if self.writer:
-                    self.writer.append(self.state)
+                    self.writer.append(self.state, time=self._current_time)
 
             # Finalize writing
             if self.writer:

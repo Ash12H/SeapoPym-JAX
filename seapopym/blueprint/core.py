@@ -153,6 +153,22 @@ class Blueprint:
         for key, var_name in final_output_mapping.items():
             # Déterminer si c'est une tendance
             is_tendency_of = output_tendencies.get(key)
+            if (
+                is_tendency_of
+                and is_tendency_of not in self.registered_variables
+                and self._group_context
+            ):
+                # Résolution du nom de la cible de tendance
+                # On utilise la même logique que pour les inputs :
+                # 1. Si le nom existe tel quel (global), on le garde
+                # 2. Sinon on le préfixe avec le groupe
+                prefixed_target = f"{self._group_context}/{is_tendency_of}"
+                # On préfère le nom préfixé si on est dans un groupe,
+                # surtout pour les variables d'état locales.
+                # Mais attention, la variable cible doit être déclarée (State ou Forcing).
+                # Ici on fait juste la résolution de nom, la validation se fera au build().
+                is_tendency_of = prefixed_target
+
             # Déterminer l'unité de sortie
             units = output_units.get(key)
 
@@ -165,15 +181,27 @@ class Blueprint:
     def _resolve_input(self, arg_name: str, explicit_mapping: dict[str, str]) -> str | None:
         """Résout le nom de la variable dans le graphe selon la priorité.
 
-        1. Mapping Explicite
-        2. Namespacing (Groupe)
-        3. Matching par défaut
+        1. Mapping Explicite (Direct ou Préfixé)
+        2. Namespacing (Groupe) sur arg_name
+        3. Matching par défaut (Global) sur arg_name
         """
         # 1. Mapping Explicite
         if arg_name in explicit_mapping:
-            return explicit_mapping[arg_name]
+            mapped_name = explicit_mapping[arg_name]
+            # Si le nom mappé existe tel quel (ex: forcing global), on le prend
+            if mapped_name in self.registered_variables:
+                return mapped_name
 
-        # 2. Namespacing
+            # Sinon, si on est dans un groupe, on essaie de le préfixer
+            if self._group_context:
+                prefixed_mapped = f"{self._group_context}/{mapped_name}"
+                if prefixed_mapped in self.registered_variables:
+                    return prefixed_mapped
+
+            # Si toujours pas trouvé, on retourne le nom mappé (pour l'erreur)
+            return mapped_name
+
+        # 2. Namespacing (sur le nom de l'argument)
         if self._group_context:
             prefixed_name = f"{self._group_context}/{arg_name}"
             if prefixed_name in self.registered_variables:
@@ -190,6 +218,7 @@ class Blueprint:
         group_prefix: str,
         units: list[dict[str, Any]],
         parameters: dict[str, dict[str, Any]] | None = None,
+        state_variables: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Helper pour enregistrer un groupe d'unités.
 
@@ -199,6 +228,9 @@ class Blueprint:
             parameters: Dictionnaire de définition des paramètres du groupe.
                         Format: {param_name: {units: '...', dims: ...}}
                         Ces paramètres seront automatiquement enregistrés avec le préfixe du groupe.
+            state_variables: Variables d'état maintenues par ce groupe.
+                        Format: {var_name: {"dims": (...), "units": "..."}}
+                        Ces variables sont persistantes et doivent être initialisées.
         """
         previous_context = self._group_context
         self._group_context = group_prefix
@@ -207,12 +239,6 @@ class Blueprint:
             # 1. Enregistrement automatique des paramètres du groupe
             if parameters:
                 for param_name, param_spec in parameters.items():
-                    # Le nom sera automatiquement préfixé par register_parameter car on est dans le contexte
-                    # Mais register_parameter ne gère pas le contexte explicitement comme register_unit
-                    # car c'est une méthode de bas niveau.
-                    # On doit construire le nom complet ici ou modifier register_parameter.
-                    # Pour rester cohérent avec register_unit qui utilise _group_context,
-                    # on construit le nom ici.
                     full_name = f"{group_prefix}/{param_name}"
                     self.register_parameter(
                         name=full_name,
@@ -220,7 +246,26 @@ class Blueprint:
                         dims=param_spec.get("dims"),
                     )
 
-            # 2. Enregistrement des unités
+            # 2. Enregistrement des variables d'état explicites
+            if state_variables:
+                for var_name, var_spec in state_variables.items():
+                    full_name = f"{group_prefix}/{var_name}"
+                    if full_name in self.registered_variables:
+                        raise ConfigurationError(
+                            f"State variable '{full_name}' is already registered."
+                        )
+
+                    node = DataNode(
+                        name=full_name,
+                        dims=var_spec.get("dims"),
+                        units=var_spec.get("units"),
+                        is_state=True,
+                    )
+                    self.graph.add_node(node)
+                    self.registered_variables.add(full_name)
+                    self._data_nodes[full_name] = node
+
+            # 3. Enregistrement des unités
             for unit_conf in units:
                 func = unit_conf["func"]
 
@@ -268,10 +313,11 @@ class Blueprint:
 
         # 3. Identification des variables initiales et produites
         # Initiales = DataNodes avec in_degree = 0 (pas produits par un calcul)
+        # OU DataNodes marqués comme is_state (racines pour le pas de temps courant)
         initial_vars = [
             node.name
             for node in self.graph.nodes
-            if isinstance(node, DataNode) and self.graph.in_degree(node) == 0
+            if isinstance(node, DataNode) and (self.graph.in_degree(node) == 0 or node.is_state)
         ]
 
         # Produites = DataNodes avec in_degree > 0
@@ -289,6 +335,18 @@ class Blueprint:
         for node in self.graph.nodes:
             if isinstance(node, DataNode) and node.is_tendency_of:
                 tendency_map[node.is_tendency_of].append(node.name)
+
+        # 5. Validation stricte des tendances
+        # Toute variable cible d'une tendance DOIT être une variable d'état déclarée
+        declared_states = self.get_state_variables()
+        tendency_targets = set(tendency_map.keys())
+
+        invalid_targets = tendency_targets - declared_states
+        if invalid_targets:
+            raise ConfigurationError(
+                f"The following variables are tendency targets but not declared as state variables: {invalid_targets}. "
+                f"Declare them in register_group(..., state_variables={{...}})"
+            )
 
         return ExecutionPlan(
             task_groups=task_groups,
@@ -448,3 +506,7 @@ class Blueprint:
                 pos[node] = (x, y)
 
         return pos
+
+    def get_state_variables(self) -> set[str]:
+        """Return the set of all declared state variable names."""
+        return {name for name, node in self._data_nodes.items() if node.is_state}

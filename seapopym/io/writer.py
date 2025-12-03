@@ -45,11 +45,15 @@ class BaseOutputWriter(ABC):
         """Finalize writing and return the complete dataset."""
         ...
 
-    def append(self, state: xr.Dataset) -> None:
+    def append(self, state: xr.Dataset, time: Any | None = None) -> None:
         """Append a simulation state to the output.
 
         Automatically initializes the writer on the first call.
         Filters variables if a list was provided.
+
+        Args:
+            state: The simulation state to append.
+            time: Optional time value to add as a coordinate if not present in state.
         """
         # Filter variables
         if self.variables is not None:
@@ -63,6 +67,14 @@ class BaseOutputWriter(ABC):
             # It selects data_vars and keeps associated coords.
             # If a variable in 'variables' is not in state, it raises KeyError.
             state = state[self.variables]
+
+        # Add time coordinate if provided and not already present
+        if time is not None:
+            from seapopym.standard.coordinates import Coordinates
+
+            time_coord = Coordinates.T.value
+            if time_coord not in state.coords:
+                state = state.assign_coords({time_coord: time})
 
         if not self._is_initialized:
             self._initialize(state)
@@ -197,11 +209,24 @@ class ZarrWriter(BaseOutputWriter):
         # Append to existing store
         ds_to_write.to_zarr(self.path, append_dim=time_dim, safe_chunks=False)
 
-    def append(self, state: xr.Dataset) -> None:
-        """Overridden to handle the specific init/write logic for Zarr."""
+    def append(self, state: xr.Dataset, time: Any | None = None) -> None:
+        """Overridden to handle the specific init/write logic for Zarr.
+
+        Args:
+            state: The simulation state to append.
+            time: Optional time value to add as a coordinate if not present in state.
+        """
         # Filter variables
         if self.variables is not None:
             state = state[self.variables]
+
+        # Add time coordinate if provided and not already present
+        if time is not None:
+            from seapopym.standard.coordinates import Coordinates
+
+            time_coord = Coordinates.T.value
+            if time_coord not in state.coords:
+                state = state.assign_coords({time_coord: time})
 
         if not self._is_initialized:
             # For Zarr, initialization IS writing the first step
