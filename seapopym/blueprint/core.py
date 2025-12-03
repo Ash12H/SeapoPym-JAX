@@ -507,6 +507,86 @@ class Blueprint:
 
         return pos
 
+    def export_mermaid(self, direction: str = "TD") -> str:
+        """Export the graph to Mermaid format.
+
+        Args:
+            direction: 'TD' (Top-Down) or 'LR' (Left-Right).
+
+        Returns:
+            str: Mermaid graph definition.
+        """
+        lines = [f"graph {direction}"]
+
+        # Styles
+        lines.append("    classDef data fill:#e1f5fe,stroke:#01579b,stroke-width:2px,rx:5,ry:5;")
+        lines.append("    classDef state fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,rx:5,ry:5;")
+        lines.append("    classDef compute fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;")
+        lines.append("    classDef forcing fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,rx:5,ry:5;")
+        lines.append(
+            "    classDef tendency fill:#fff3e0,stroke:#e65100,stroke-width:2px,rx:5,ry:5;"
+        )
+
+        # Helper to generate safe IDs
+        def get_id(node: Any) -> str:
+            return f"n{abs(hash(node))}"
+
+        # Group nodes
+        groups: dict[str, list[Any]] = {}
+        global_nodes: list[Any] = []
+
+        for node in self.graph.nodes:
+            group = None
+            if isinstance(node, ComputeNode):
+                group = node.group
+            elif isinstance(node, DataNode) and "/" in node.name:
+                # Heuristic: if the name contains '/', the first part is the group
+                parts = node.name.split("/")
+                group = parts[0]
+
+            if group:
+                if group not in groups:
+                    groups[group] = []
+                groups[group].append(node)
+            else:
+                global_nodes.append(node)
+
+        # Helper to write node definition
+        def write_node(node: Any) -> str:
+            node_id = get_id(node)
+            label = node.name.split("/")[-1]  # Short name for display
+
+            if isinstance(node, DataNode):
+                if node.is_state:
+                    # Database shape for state variables
+                    return f'    {node_id}[("{label}")]:::state'
+                elif node.is_tendency_of:
+                    return f'    {node_id}(["{label}"]):::tendency'
+                elif self.graph.in_degree(node) == 0:
+                    return f'    {node_id}(["{label}"]):::forcing'
+                else:
+                    return f'    {node_id}(["{label}"]):::data'
+            elif isinstance(node, ComputeNode):
+                return f'    {node_id}["{label}"]:::compute'
+            return ""
+
+        # Write Global Nodes
+        for node in global_nodes:
+            lines.append(write_node(node))
+
+        # Write Subgraphs
+        for group_name, nodes in groups.items():
+            lines.append(f"    subgraph {group_name}")
+            for node in nodes:
+                lines.append("    " + write_node(node))
+            lines.append("    end")
+
+        # Write Edges
+        for u, v in self.graph.edges:
+            lines.append(f"    {get_id(u)} --> {get_id(v)}")
+
+        return "\n".join(lines)
+
     def get_state_variables(self) -> set[str]:
         """Return the set of all declared state variable names."""
         return {name for name, node in self._data_nodes.items() if node.is_state}
