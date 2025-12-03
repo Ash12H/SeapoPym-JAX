@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Callable, Hashable
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any
 
 import pint
@@ -13,6 +14,7 @@ from seapopym.backend import ComputeBackend, DaskBackend, SequentialBackend
 from seapopym.blueprint import Blueprint, ExecutionPlan
 from seapopym.forcing import ForcingManager
 from seapopym.gsm import StateManager
+from seapopym.io.writer import BaseOutputWriter, MemoryWriter, ZarrWriter
 from seapopym.time_integrator import TimeIntegrator
 
 from .configuration import SimulationConfig
@@ -44,6 +46,7 @@ class SimulationController:
         self.execution_plan: ExecutionPlan | None = None
         self.time_integrator: TimeIntegrator | None = None
         self.forcing_manager: ForcingManager | None = None
+        self.writer: BaseOutputWriter | None = None
         self.backend: ComputeBackend
 
         if isinstance(backend, str):
@@ -66,6 +69,9 @@ class SimulationController:
         initial_state: xr.Dataset,
         forcings: xr.Dataset | None = None,
         parameters: Any | None = None,
+        output_path: str | Path | None = None,
+        output_variables: list[str] | None = None,
+        output_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Configure et initialise la simulation.
 
@@ -76,6 +82,9 @@ class SimulationController:
                      Doit contenir une dimension temporelle (Coordinates.T) et ne doit pas avoir
                      de variables en commun avec initial_state.
             parameters: Paramètres du modèle (Dataclass ou Dict).
+            output_path: Path to save the output. If None, results are stored in memory.
+            output_variables: List of variables to save. If None, all variables are saved.
+            output_metadata: Metadata to add to the output dataset.
         """
         # 1. Configuration du modèle (Blueprint)
         model_configuration_func(self.blueprint)
@@ -142,6 +151,14 @@ class SimulationController:
         if forcings is not None:
             self.forcing_manager = ForcingManager(forcings)
 
+        # 8. Setup Output Writer
+        if output_path is None:
+            self.writer = MemoryWriter(variables=output_variables, metadata=output_metadata)
+        else:
+            self.writer = ZarrWriter(
+                path=output_path, variables=output_variables, metadata=output_metadata
+            )
+
     def run(self) -> None:
         """Exécute la boucle de simulation complète."""
         if self.state is None:
@@ -150,9 +167,22 @@ class SimulationController:
         logger.info(f"Starting simulation from {self.config.start_date} to {self.config.end_date}")
 
         try:
+            # Save initial state
+            if self.writer:
+                self.writer.append(self.state)
+
             while self._current_time < self.config.end_date:
                 self.step()
                 self._current_time += self.config.timestep
+
+                # Save state after step
+                if self.writer:
+                    self.writer.append(self.state)
+
+            # Finalize writing
+            if self.writer:
+                self.writer.finalize()
+
             logger.info("Simulation completed.")
         except Exception as e:
             logger.error(f"Simulation failed at {self._current_time}: {e}")
@@ -271,3 +301,10 @@ class SimulationController:
                 ) from e
 
         return ds
+
+    @property
+    def results(self) -> xr.Dataset:
+        """Return the simulation results."""
+        if self.writer is None:
+            raise RuntimeError("Simulation not set up. Call setup() first.")
+        return self.writer.finalize()
