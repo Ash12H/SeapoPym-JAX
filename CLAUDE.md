@@ -1,2 +1,0 @@
--   Lorsque tu fais des tests tu ne peux lancer qu'un test à la fois.
--   Si tu veux lancer la commande "make test" ou une autre commande qui lance tous les tests en même temps tu dois me demander.

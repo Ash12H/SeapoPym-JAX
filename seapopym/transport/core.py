@@ -1,0 +1,407 @@
+"""Transport processes (Advection and Diffusion) adapted for the Blueprint architecture.
+
+These functions compute tendencies (rates of change) for advection and diffusion
+using flux-based finite volume methods that conserve mass on spherical grids.
+
+Key features:
+- Upwind advection scheme for stability
+- Explicit diffusion with varying dx(lat)
+- Proper handling of boundary conditions
+- Land/ocean masking support
+- Mass conservation through flux-based approach
+
+References:
+    - Original implementation: IA/transport/advection.py, IA/transport/diffusion.py
+    - Flux conservation: IA/TRANSPORT_ANALYSIS.md (Section 8)
+    - Spherical geometry: IA/Diffusion-euler-explicite-description.md
+"""
+
+from typing import Any
+
+import xarray as xr
+
+from seapopym.standard.coordinates import Coordinates
+from seapopym.transport.boundary import BoundaryConditions, BoundaryType, get_neighbors_with_bc
+
+
+def compute_advection_tendency(
+    state: xr.DataArray,
+    u: xr.DataArray,
+    v: xr.DataArray,
+    cell_areas: xr.DataArray,
+    face_areas_ew: xr.DataArray,
+    face_areas_ns: xr.DataArray,
+    boundary_conditions: BoundaryConditions,
+    mask: xr.DataArray | None = None,
+) -> dict[str, Any]:
+    """Compute advection tendency using upwind flux scheme.
+
+    This function implements a finite volume advection scheme that conserves mass:
+        dC/dt = -∇·(u⃗C) = -(∂(uC)/∂x + ∂(vC)/∂y)
+
+    Discretized as:
+        tendency = -(flux_divergence)
+        flux_divergence = (flux_east - flux_west + flux_north - flux_south) / cell_area
+
+    where fluxes are computed using an upwind scheme:
+        flux_east = u_face_east × C_upwind × face_area_east
+
+    The upwind choice ensures stability by taking concentration from the upwind cell:
+        C_upwind = C_current if u > 0 else C_neighbor
+
+    Boundary conditions:
+    - CLOSED: No flux through boundary (face_mask = 0)
+    - PERIODIC: Wrap around (handled by get_neighbors_with_bc)
+    - OPEN: Allow flux through boundary
+
+    Land masking:
+    - Ocean-ocean faces: Normal flux
+    - Ocean-land faces: Zero flux (face_mask = 0)
+    - Land-land faces: Zero flux
+
+    Args:
+        state: Concentration field [Units], shape (..., lat, lon)
+        u: Zonal velocity (positive East) [m/s], shape (..., lat, lon)
+        v: Meridional velocity (positive North) [m/s], shape (..., lat, lon)
+        cell_areas: Cell areas [m²], shape (lat, lon)
+        face_areas_ew: East/West face areas [m], shape (lat, lon+1) or (lat, lon)
+        face_areas_ns: North/South face areas [m], shape (lat+1, lon) or (lat, lon)
+        boundary_conditions: BoundaryConditions object specifying edge behavior
+        mask: Optional ocean/land mask (1=ocean, 0=land), shape (lat, lon)
+
+    Returns:
+        Dictionary with:
+        - advection_rate: Advection tendency [Units/s], same shape as state
+
+    Example:
+        >>> from seapopym.transport import compute_advection_tendency
+        >>> from seapopym.transport.boundary import BoundaryConditions, BoundaryType
+        >>> from seapopym.transport.grid import compute_spherical_cell_areas, ...
+        >>>
+        >>> # Setup grid
+        >>> cell_areas = compute_spherical_cell_areas(lats, lons)
+        >>> face_areas_ew = compute_spherical_face_areas_ew(lats, lons)
+        >>> face_areas_ns = compute_spherical_face_areas_ns(lats, lons)
+        >>> bc = BoundaryConditions(
+        ...     north=BoundaryType.CLOSED,
+        ...     south=BoundaryType.CLOSED,
+        ...     east=BoundaryType.PERIODIC,
+        ...     west=BoundaryType.PERIODIC,
+        ... )
+        >>>
+        >>> # Compute tendency
+        >>> result = compute_advection_tendency(
+        ...     state=biomass,
+        ...     u=current_u,
+        ...     v=current_v,
+        ...     cell_areas=cell_areas,
+        ...     face_areas_ew=face_areas_ew,
+        ...     face_areas_ns=face_areas_ns,
+        ...     boundary_conditions=bc,
+        ...     mask=ocean_mask,
+        ... )
+        >>> tendency = result["advection_rate"]
+
+    Reference:
+        IA/transport/advection.py: advection_upwind_flux()
+    """
+    # Get neighbor values for state
+    state_west, state_east, state_south, state_north = get_neighbors_with_bc(
+        state, boundary_conditions
+    )
+
+    # Get neighbor values for velocities
+    u_west, u_east, u_south, u_north = get_neighbors_with_bc(u, boundary_conditions)
+    v_west, v_east, v_south, v_north = get_neighbors_with_bc(v, boundary_conditions)
+
+    # Clean velocities (replace NaN with 0)
+    u_clean = u.fillna(0.0)
+    v_clean = v.fillna(0.0)
+
+    # --- VELOCITY INTERPOLATION TO FACES ---
+    # Velocities are defined at cell centers, but we need them at faces
+    # Use simple averaging (can be improved with flux reconstruction)
+
+    # East face (i+1/2): average of current and east neighbor
+    u_face_east = 0.5 * (u_clean + u_east.fillna(0.0))
+    # West face (i-1/2): average of current and west neighbor
+    u_face_west = 0.5 * (u_clean + u_west.fillna(0.0))
+
+    # North face (j+1/2): average of current and north neighbor
+    v_face_north = 0.5 * (v_clean + v_north.fillna(0.0))
+    # South face (j-1/2): average of current and south neighbor
+    v_face_south = 0.5 * (v_clean + v_south.fillna(0.0))
+
+    # --- UPWIND CONCENTRATION SELECTION ---
+    # Choose concentration from upwind cell based on velocity direction
+
+    # East face: if u_face_east > 0, flow is West→East, take current cell
+    state_face_east = xr.where(u_face_east > 0, state, state_east)
+    # West face: if u_face_west > 0, flow is West→East, take west neighbor
+    state_face_west = xr.where(u_face_west > 0, state_west, state)
+
+    # North face: if v_face_north > 0, flow is South→North, take current cell
+    state_face_north = xr.where(v_face_north > 0, state, state_north)
+    # South face: if v_face_south > 0, flow is South→North, take south neighbor
+    state_face_south = xr.where(v_face_south > 0, state_south, state)
+
+    # --- FACE MASKING ---
+    # Create face masks to handle land boundaries and closed boundaries
+
+    # Start with all faces open (mask = 1)
+    face_mask_east = xr.ones_like(state)
+    face_mask_west = xr.ones_like(state)
+    face_mask_north = xr.ones_like(state)
+    face_mask_south = xr.ones_like(state)
+
+    # Apply land masking if provided
+    if mask is not None:
+        # Ocean mask: 1 = ocean, 0 = land
+        # A face is open only if both adjacent cells are ocean
+        mask_west, mask_east, mask_south, mask_north = get_neighbors_with_bc(
+            mask, boundary_conditions
+        )
+
+        # East face: open if current cell AND east neighbor are ocean
+        face_mask_east = face_mask_east * mask * mask_east
+        # West face: open if current cell AND west neighbor are ocean
+        face_mask_west = face_mask_west * mask * mask_west
+        # North face: open if current cell AND north neighbor are ocean
+        face_mask_north = face_mask_north * mask * mask_north
+        # South face: open if current cell AND south neighbor are ocean
+        face_mask_south = face_mask_south * mask * mask_south
+
+    # Apply CLOSED boundary conditions
+    # At closed boundaries, set face mask to 0 (no flux)
+
+    # Use standardized coordinate names from Coordinates enum
+    dim_y = Coordinates.Y.value  # "y"
+    dim_x = Coordinates.X.value  # "x"
+
+    if boundary_conditions.east == BoundaryType.CLOSED:
+        # Close east boundary (last column)
+        face_mask_east = face_mask_east.where(
+            face_mask_east[dim_x] != face_mask_east[dim_x][-1], 0.0
+        )
+
+    if boundary_conditions.west == BoundaryType.CLOSED:
+        # Close west boundary (first column)
+        face_mask_west = face_mask_west.where(
+            face_mask_west[dim_x] != face_mask_west[dim_x][0], 0.0
+        )
+
+    if boundary_conditions.north == BoundaryType.CLOSED:
+        # Close north boundary (last row)
+        face_mask_north = face_mask_north.where(
+            face_mask_north[dim_y] != face_mask_north[dim_y][-1], 0.0
+        )
+
+    if boundary_conditions.south == BoundaryType.CLOSED:
+        # Close south boundary (first row)
+        face_mask_south = face_mask_south.where(
+            face_mask_south[dim_y] != face_mask_south[dim_y][0], 0.0
+        )
+
+    # --- FLUX CALCULATION ---
+    # Flux = velocity × concentration × face_area × face_mask
+    # Units: [m/s] × [Units] × [m] × [1] = [Units×m²/s]
+
+    # Extract face areas from staggered arrays
+    # face_areas_ew: shape (lat, lon+1) - we need slices for east/west faces
+    # face_areas_ns: shape (lat+1, lon) - we need slices for north/south faces
+
+    # Convert to numpy arrays and slice to avoid xarray broadcasting issues
+    # East face of cell (i,j) is at face_areas_ew[..., i+1]
+    # West face of cell (i,j) is at face_areas_ew[..., i]
+    # North face of cell (i,j) is at face_areas_ns[j+1, ...]
+    # South face of cell (i,j) is at face_areas_ns[j, ...]
+
+    # For cell-centered data shape (nlat, nlon):
+    # - East faces: face_areas_ew.values[..., 1:] gives shape (nlat, nlon)
+    # - West faces: face_areas_ew.values[..., :-1] gives shape (nlat, nlon)
+    # - North faces: face_areas_ns.values[1:, ...] gives shape (nlat, nlon)
+    # - South faces: face_areas_ns.values[:-1, ...] gives shape (nlat, nlon)
+
+    area_east = face_areas_ew.values[..., 1:]  # East face areas
+    area_west = face_areas_ew.values[..., :-1]  # West face areas
+    area_north = face_areas_ns.values[1:, ...]  # North face areas
+    area_south = face_areas_ns.values[:-1, ...]  # South face areas
+
+    # Compute fluxes with proper face areas
+    # Note: Use .values to get numpy arrays and avoid broadcasting issues
+    flux_east = u_face_east * state_face_east * area_east * face_mask_east
+    flux_west = u_face_west * state_face_west * area_west * face_mask_west
+    flux_north = v_face_north * state_face_north * area_north * face_mask_north
+    flux_south = v_face_south * state_face_south * area_south * face_mask_south
+
+    # --- FLUX DIVERGENCE ---
+    # Divergence = (flux_in - flux_out) / cell_volume
+    # For 2D: divergence = (flux_east - flux_west + flux_north - flux_south) / cell_area
+
+    # Note: The sign convention is:
+    # - Positive flux_east = flow leaving through east face
+    # - Negative flux_west = flow entering through west face
+    # Net outflow = flux_east - flux_west + flux_north - flux_south
+
+    flux_divergence = (flux_east - flux_west + flux_north - flux_south) / cell_areas
+
+    # --- TENDENCY ---
+    # Advection tendency = -divergence(flux)
+    advection_rate = -flux_divergence
+
+    # Apply mask to final result (ensure land stays at zero)
+    if mask is not None:
+        advection_rate = advection_rate * mask
+
+    return {"advection_rate": advection_rate}
+
+
+def compute_diffusion_tendency(
+    state: xr.DataArray,
+    D: xr.DataArray | float,
+    dx: xr.DataArray | float,
+    dy: xr.DataArray | float,
+    boundary_conditions: BoundaryConditions,
+    mask: xr.DataArray | None = None,
+) -> dict[str, Any]:
+    """Compute diffusion tendency using explicit Laplacian with varying dx.
+
+    This function implements the diffusion equation:
+        dC/dt = D × ∇²C = D × (∂²C/∂x² + ∂²C/∂y²)
+
+    The Laplacian is approximated using centered finite differences:
+        ∂²C/∂x² ≈ (C_east - 2C + C_west) / dx²
+        ∂²C/∂y² ≈ (C_north - 2C + C_south) / dy²
+
+    For spherical grids, dx varies with latitude:
+        dx(lat) = R × cos(lat) × dλ
+
+    This variation must be accounted for in the discretization.
+
+    Boundary conditions:
+    - CLOSED/OPEN: Zero-gradient (Neumann BC: ∂C/∂n = 0)
+      Implemented by copying edge values to ghost cells
+    - PERIODIC: Wrap around (handled by get_neighbors_with_bc)
+
+    Land masking:
+    - Ocean cells: Normal diffusion
+    - Land cells: Set to zero
+    - Ocean-land boundaries: Zero-gradient BC (copy ocean value to land neighbor)
+      This prevents artificial gradients and mass loss
+
+    Stability constraint:
+        dt ≤ min(dx², dy²) / (4 × D)
+
+    Use check_diffusion_stability() from stability.py to verify before running.
+
+    Args:
+        state: Concentration field [Units], shape (..., lat, lon)
+        D: Diffusion coefficient [m²/s], scalar or DataArray
+        dx: Grid spacing in X direction [m], shape (lat, lon) or scalar
+        dy: Grid spacing in Y direction [m], shape (lat, lon) or scalar
+        boundary_conditions: BoundaryConditions object specifying edge behavior
+        mask: Optional ocean/land mask (1=ocean, 0=land), shape (lat, lon)
+
+    Returns:
+        Dictionary with:
+        - diffusion_rate: Diffusion tendency [Units/s], same shape as state
+
+    Example:
+        >>> from seapopym.transport import compute_diffusion_tendency
+        >>> from seapopym.transport.boundary import BoundaryConditions, BoundaryType
+        >>> from seapopym.transport.grid import compute_spherical_dx, compute_spherical_dy
+        >>> from seapopym.transport.stability import check_diffusion_stability
+        >>>
+        >>> # Setup grid
+        >>> dx = compute_spherical_dx(lats, lons)
+        >>> dy = compute_spherical_dy(lats, lons)
+        >>> bc = BoundaryConditions(
+        ...     north=BoundaryType.CLOSED,
+        ...     south=BoundaryType.CLOSED,
+        ...     east=BoundaryType.PERIODIC,
+        ...     west=BoundaryType.PERIODIC,
+        ... )
+        >>>
+        >>> # Check stability
+        >>> stability = check_diffusion_stability(D=1000.0, dx=dx, dy=dy, dt=3600.0)
+        >>> if not stability["is_stable"]:
+        ...     raise ValueError(f"Unstable! Reduce dt to {stability['dt_max']:.1f} s")
+        >>>
+        >>> # Compute tendency
+        >>> result = compute_diffusion_tendency(
+        ...     state=biomass,
+        ...     D=1000.0,
+        ...     dx=dx,
+        ...     dy=dy,
+        ...     boundary_conditions=bc,
+        ...     mask=ocean_mask,
+        ... )
+        >>> tendency = result["diffusion_rate"]
+
+    Reference:
+        IA/transport/diffusion.py: diffusion_explicit_spherical()
+    """
+    # Get neighbor values for state
+    state_west, state_east, state_south, state_north = get_neighbors_with_bc(
+        state, boundary_conditions
+    )
+
+    # Apply land masking to state and neighbors (Neumann BC at ocean-land boundaries)
+    if mask is not None:
+        # Ocean mask: 1 = ocean, 0 = land
+        # Apply mask to current state (set land to zero)
+        state_clean = state * mask
+
+        # Get neighbor masks
+        mask_west, mask_east, mask_south, mask_north = get_neighbors_with_bc(
+            mask, boundary_conditions
+        )
+
+        # For ocean-land boundaries, use zero-gradient BC:
+        # If neighbor is land (mask=0), replace neighbor value with current cell value
+        # This ensures ∂C/∂n = 0 at the boundary
+
+        # East neighbor: if land, use current value
+        state_east = xr.where(mask_east == 0, state_clean, state_east)
+        # West neighbor: if land, use current value
+        state_west = xr.where(mask_west == 0, state_clean, state_west)
+        # North neighbor: if land, use current value
+        state_north = xr.where(mask_north == 0, state_clean, state_north)
+        # South neighbor: if land, use current value
+        state_south = xr.where(mask_south == 0, state_clean, state_south)
+
+        # Use masked state for computation
+        state = state_clean
+    else:
+        # No masking needed
+        pass
+
+    # --- LAPLACIAN CALCULATION ---
+    # Compute second derivatives using centered differences
+
+    # Handle dx as DataArray or scalar
+    dx_sq = dx**2 if isinstance(dx, int | float) else dx**2
+
+    # Handle dy as DataArray or scalar
+    dy_sq = dy**2 if isinstance(dy, int | float) else dy**2
+
+    # Second derivative in x direction (longitude)
+    # ∂²C/∂x² ≈ (C_east - 2C + C_west) / dx²
+    d2C_dx2 = (state_east - 2 * state + state_west) / dx_sq
+
+    # Second derivative in y direction (latitude)
+    # ∂²C/∂y² ≈ (C_north - 2C + C_south) / dy²
+    d2C_dy2 = (state_north - 2 * state + state_south) / dy_sq
+
+    # Laplacian: ∇²C = ∂²C/∂x² + ∂²C/∂y²
+    laplacian = d2C_dx2 + d2C_dy2
+
+    # --- DIFFUSION TENDENCY ---
+    # dC/dt = D × ∇²C
+    diffusion_rate = D * laplacian
+
+    # Apply mask to final result (ensure land stays at zero)
+    if mask is not None:
+        diffusion_rate = diffusion_rate * mask
+
+    return {"diffusion_rate": diffusion_rate}
