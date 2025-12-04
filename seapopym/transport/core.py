@@ -224,19 +224,66 @@ def compute_advection_tendency(
     x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)  # "x_left"
     y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)  # "y_left"
 
-    # Use dimensional slicing with .isel() to handle extra dimensions automatically
-    # Extract as numpy arrays after slicing to avoid xarray broadcasting issues
-    area_east = face_areas_ew.isel({x_face_dim: slice(1, None)}).values  # East face areas
-    area_west = face_areas_ew.isel({x_face_dim: slice(None, -1)}).values  # West face areas
-    area_north = face_areas_ns.isel({y_face_dim: slice(1, None)}).values  # North face areas
-    area_south = face_areas_ns.isel({y_face_dim: slice(None, -1)}).values  # South face areas
+    # Extract face areas using dimensional slicing
+    area_east = face_areas_ew.isel({x_face_dim: slice(1, None)}).values
+    area_west = face_areas_ew.isel({x_face_dim: slice(None, -1)}).values
+    area_north = face_areas_ns.isel({y_face_dim: slice(1, None)}).values
+    area_south = face_areas_ns.isel({y_face_dim: slice(None, -1)}).values
 
-    # Compute fluxes with proper face areas
-    # Note: Use .values to get numpy arrays and avoid broadcasting issues
-    flux_east = u_face_east * state_face_east * area_east * face_mask_east
-    flux_west = u_face_west * state_face_west * area_west * face_mask_west
-    flux_north = v_face_north * state_face_north * area_north * face_mask_north
-    flux_south = v_face_south * state_face_south * area_south * face_mask_south
+    # Identify extra dimensions beyond (y, x) to loop over them
+    dim_y = Coordinates.Y.value
+    dim_x = Coordinates.X.value
+    core_dims = [dim_y, dim_x]
+
+    # Define inner function that computes flux for 2D slices
+    def compute_flux_2d(
+        u_face_val: float, state_face_val: float, area_val: float, mask_val: float
+    ) -> float:
+        """Compute flux for a 2D (y, x) slice."""
+        return u_face_val * state_face_val * area_val * mask_val
+
+    # Use apply_ufunc to loop over extra dimensions automatically
+    # This applies the 2D flux computation to each slice along extra dims
+    flux_east = xr.apply_ufunc(
+        compute_flux_2d,
+        u_face_east,
+        state_face_east,
+        xr.DataArray(area_east, dims=core_dims),
+        face_mask_east,
+        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
+        output_core_dims=[core_dims],
+        vectorize=True,
+    )
+    flux_west = xr.apply_ufunc(
+        compute_flux_2d,
+        u_face_west,
+        state_face_west,
+        xr.DataArray(area_west, dims=core_dims),
+        face_mask_west,
+        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
+        output_core_dims=[core_dims],
+        vectorize=True,
+    )
+    flux_north = xr.apply_ufunc(
+        compute_flux_2d,
+        v_face_north,
+        state_face_north,
+        xr.DataArray(area_north, dims=core_dims),
+        face_mask_north,
+        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
+        output_core_dims=[core_dims],
+        vectorize=True,
+    )
+    flux_south = xr.apply_ufunc(
+        compute_flux_2d,
+        v_face_south,
+        state_face_south,
+        xr.DataArray(area_south, dims=core_dims),
+        face_mask_south,
+        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
+        output_core_dims=[core_dims],
+        vectorize=True,
+    )
 
     # --- FLUX DIVERGENCE ---
     # Divergence = (flux_in - flux_out) / cell_volume
@@ -256,6 +303,9 @@ def compute_advection_tendency(
     # Apply mask to final result (ensure land stays at zero)
     if mask is not None:
         advection_rate = advection_rate * mask
+
+    # Restore original dimension order (apply_ufunc may reorder them)
+    advection_rate = advection_rate.transpose(*state.dims)
 
     return {"advection_rate": advection_rate}
 

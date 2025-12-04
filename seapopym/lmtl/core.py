@@ -60,20 +60,20 @@ def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> dict[str, 
     return {"output": day_length_hours / 24.0}
 
 
-def compute_mean_temperature(
-    temperature: xr.DataArray,
+def compute_layer_weighted_mean(
+    forcing: xr.DataArray,
     day_length: xr.DataArray,
     day_layer: float,
     night_layer: float,
 ) -> dict[str, xr.DataArray]:
-    """Compute mean temperature experienced by vertically migrating organisms.
+    """Compute mean forcing experienced by vertically migrating organisms.
 
-    T_mean = T_day * day_length + T_night * (1 - day_length)
+    Mean = Forcing_day * day_length + Forcing_night * (1 - day_length)
 
     Parameters
     ----------
-    temperature : xr.DataArray
-        Temperature field [degC] with depth dimension.
+    forcing : xr.DataArray
+        Forcing field (e.g. temperature, current) with depth dimension.
     day_length : xr.DataArray
         Day length fraction [dimensionless, 0-1].
     day_layer : float
@@ -84,14 +84,14 @@ def compute_mean_temperature(
     Returns
     -------
     dict
-        {"output": mean_temperature} in [degC].
+        {"output": mean_forcing} with same units as input forcing.
     """
-    # Select temperature at specific layers
+    # Select forcing at specific layers
     # We assume 'depth' coordinate exists or we use method='nearest'
-    t_day = temperature.sel({Coordinates.Z: day_layer}, method="nearest")
-    t_night = temperature.sel({Coordinates.Z: night_layer}, method="nearest")
+    val_day = forcing.sel({Coordinates.Z: day_layer}, method="nearest")
+    val_night = forcing.sel({Coordinates.Z: night_layer}, method="nearest")
 
-    return {"output": t_day * day_length + t_night * (1.0 - day_length)}
+    return {"output": val_day * day_length + val_night * (1.0 - day_length)}
 
 
 def compute_threshold_temperature(
