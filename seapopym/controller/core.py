@@ -295,7 +295,10 @@ class SimulationController:
 
             # Si pas d'unité sur la variable, on assume qu'elle est bonne (ou on pourrait warning)
             if current_unit is None:
-                # TODO: Log warning ?
+                logger.warning(
+                    f"Variable '{name}' has no unit metadata, but Blueprint expects '{target_unit}'. "
+                    "No conversion performed."
+                )
                 continue
 
             # Conversion avec pint-xarray
@@ -306,6 +309,9 @@ class SimulationController:
                 converted = quantified.pint.to(target_unit)
                 # On déquantifie pour revenir à des données brutes (float) avec l'unité mise à jour
                 ds[name] = converted.pint.dequantify()
+                logger.info(
+                    f"Converted variable '{name}' from '{current_unit}' to '{target_unit}'."
+                )
             except Exception as e:
                 raise ValueError(
                     f"Unit conversion failed for variable '{name}': {current_unit} -> {target_unit}. Error: {e}"
