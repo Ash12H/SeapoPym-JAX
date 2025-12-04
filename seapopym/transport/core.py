@@ -20,7 +20,7 @@ from typing import Any
 
 import xarray as xr
 
-from seapopym.standard.coordinates import Coordinates
+from seapopym.standard.coordinates import Coordinates, GridPosition
 from seapopym.transport.boundary import BoundaryConditions, BoundaryType, get_neighbors_with_bc
 
 
@@ -206,26 +206,30 @@ def compute_advection_tendency(
     # Flux = velocity × concentration × face_area × face_mask
     # Units: [m/s] × [Units] × [m] × [1] = [Units×m²/s]
 
-    # Extract face areas from staggered arrays
-    # face_areas_ew: shape (lat, lon+1) - we need slices for east/west faces
-    # face_areas_ns: shape (lat+1, lon) - we need slices for north/south faces
+    # Extract face areas from staggered arrays using dimensional slicing
+    # face_areas_ew: dims (y, x_left) - shape (nlat, nlon+1)
+    # face_areas_ns: dims (y_left, x) - shape (nlat+1, nlon)
+    #
+    # Staggered grid layout (Xgcm convention):
+    # - x_left: face positions at west edges (nlon+1 faces for nlon cells)
+    # - y_left: face positions at south edges (nlat+1 faces for nlat cells)
+    #
+    # For each cell, we need:
+    # - East face: x_left[i+1] (index 1:)
+    # - West face: x_left[i] (index :-1)
+    # - North face: y_left[j+1] (index 1:)
+    # - South face: y_left[j] (index :-1)
 
-    # Convert to numpy arrays and slice to avoid xarray broadcasting issues
-    # East face of cell (i,j) is at face_areas_ew[..., i+1]
-    # West face of cell (i,j) is at face_areas_ew[..., i]
-    # North face of cell (i,j) is at face_areas_ns[j+1, ...]
-    # South face of cell (i,j) is at face_areas_ns[j, ...]
+    # Get dimension names following Xgcm convention
+    x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)  # "x_left"
+    y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)  # "y_left"
 
-    # For cell-centered data shape (nlat, nlon):
-    # - East faces: face_areas_ew.values[..., 1:] gives shape (nlat, nlon)
-    # - West faces: face_areas_ew.values[..., :-1] gives shape (nlat, nlon)
-    # - North faces: face_areas_ns.values[1:, ...] gives shape (nlat, nlon)
-    # - South faces: face_areas_ns.values[:-1, ...] gives shape (nlat, nlon)
-
-    area_east = face_areas_ew.values[..., 1:]  # East face areas
-    area_west = face_areas_ew.values[..., :-1]  # West face areas
-    area_north = face_areas_ns.values[1:, ...]  # North face areas
-    area_south = face_areas_ns.values[:-1, ...]  # South face areas
+    # Use dimensional slicing with .isel() to handle extra dimensions automatically
+    # Extract as numpy arrays after slicing to avoid xarray broadcasting issues
+    area_east = face_areas_ew.isel({x_face_dim: slice(1, None)}).values  # East face areas
+    area_west = face_areas_ew.isel({x_face_dim: slice(None, -1)}).values  # West face areas
+    area_north = face_areas_ns.isel({y_face_dim: slice(1, None)}).values  # North face areas
+    area_south = face_areas_ns.isel({y_face_dim: slice(None, -1)}).values  # South face areas
 
     # Compute fluxes with proper face areas
     # Note: Use .values to get numpy arrays and avoid broadcasting issues

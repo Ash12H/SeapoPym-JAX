@@ -94,8 +94,62 @@ def compute_mean_temperature(
     return {"output": t_day * day_length + t_night * (1.0 - day_length)}
 
 
+def compute_threshold_temperature(
+    temperature: xr.DataArray,
+    min_temperature: float = 0.0,
+) -> dict[str, xr.DataArray]:
+    """Threshold temperature values below a minimum value.
+
+    Parameters
+    ----------
+    temperature : xr.DataArray
+        Input temperature [degC].
+    min_temperature : float, optional
+        Minimum allowed temperature [degC], by default 0.0.
+
+    Returns
+    -------
+    dict
+        {"output": thresholded_temperature}
+    """
+    return {"output": temperature.where(temperature >= min_temperature, min_temperature)}
+
+
+def compute_gillooly_temperature(
+    temperature: xr.DataArray,
+) -> dict[str, xr.DataArray]:
+    """Apply Gillooly temperature normalization.
+
+    This transformation is used in metabolic scaling models based on the
+    Arrhenius equation. It normalizes temperature from Celsius to a form
+    suitable for metabolic rate calculations.
+
+    T_normalized = T / (1 + T/273)
+
+    where 273 represents the approximate conversion factor related to
+    absolute zero.
+
+    Parameters
+    ----------
+    temperature : xr.DataArray
+        Input temperature [degC].
+
+    Returns
+    -------
+    dict
+        {"output": normalized_temperature} in [degC] (dimensionally same,
+        but normalized for metabolic equations).
+
+    Reference
+    -------
+    Gillooly et al. (2001) "Effects of size and temperature on metabolic rate"
+    """
+    normalized_temp = temperature / (1.0 + temperature / 273.0)
+    return {"output": normalized_temp}
+
+
 def compute_recruitment_age(
-    mean_temperature: xr.DataArray,
+    temperature: xr.DataArray,
     tau_r_0: float,
     gamma_tau_r: float,
     T_ref: float,
@@ -106,8 +160,8 @@ def compute_recruitment_age(
 
     Parameters
     ----------
-    mean_temperature : xr.DataArray
-        Mean temperature [degC].
+    temperature : xr.DataArray
+        Temperature [degC] (should be Gillooly-normalized in practice).
     tau_r_0 : float
         Base recruitment age [s] at reference temperature.
     gamma_tau_r : float
@@ -120,7 +174,7 @@ def compute_recruitment_age(
     dict
         {"output": recruitment_age} in [s].
     """
-    return {"output": tau_r_0 * np.exp(-gamma_tau_r * (mean_temperature - T_ref))}
+    return {"output": tau_r_0 * np.exp(-gamma_tau_r * (temperature - T_ref))}
 
 
 # -------------------------------------------------------------------------
@@ -314,7 +368,7 @@ def compute_production_dynamics(
 
 def compute_mortality_tendency(
     biomass: xr.DataArray,
-    mean_temperature: xr.DataArray,
+    temperature: xr.DataArray,
     lambda_0: float,
     gamma_lambda: float,
     T_ref: float,
@@ -328,8 +382,8 @@ def compute_mortality_tendency(
     ----------
     biomass : xr.DataArray
         Biomass [g/m²].
-    mean_temperature : xr.DataArray
-        Mean temperature [degC].
+    temperature : xr.DataArray
+        Temperature [degC] (should be Gillooly-normalized in practice).
     lambda_0 : float
         Base mortality rate [s^-1] at reference temperature.
     gamma_lambda : float
@@ -343,7 +397,7 @@ def compute_mortality_tendency(
         {"mortality_loss": tendency} in [g/m²/s].
         Negative tendency representing biomass loss.
     """
-    rate = lambda_0 * np.exp(gamma_lambda * (mean_temperature - T_ref))
+    rate = lambda_0 * np.exp(gamma_lambda * (temperature - T_ref))
     tendency = -rate * biomass
 
     return {"mortality_loss": tendency}

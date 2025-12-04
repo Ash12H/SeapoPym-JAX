@@ -20,7 +20,7 @@ References:
 import numpy as np
 import xarray as xr
 
-from seapopym.standard.coordinates import Coordinates
+from seapopym.standard.coordinates import Coordinates, GridPosition
 
 # Earth radius in meters
 EARTH_RADIUS = 6371e3
@@ -145,12 +145,19 @@ def compute_spherical_face_areas_ew(
     nlon = len(lons_np)
     face_areas = np.full((nlat, nlon + 1), face_area_ew)
 
-    # Return as DataArray
-    # Note: We don't add a longitude coordinate for faces since they're between cells
+    # Compute face coordinates (at west edges of cells, plus one extra at east boundary)
+    # For cell centers at [lon0, lon1, lon2, ...], faces are at [lon0-dlon/2, lon0+dlon/2, lon1+dlon/2, ...]
+    dlon = np.abs(lons_np[1] - lons_np[0])
+    lon_faces = np.linspace(lons_np[0] - dlon / 2, lons_np[-1] + dlon / 2, nlon + 1)
+
+    # Get dimension name following Xgcm convention: "x_left"
+    x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)
+
+    # Return as DataArray with face coordinates
     return xr.DataArray(
         face_areas,
-        dims=[Coordinates.Y.value, "lon_face"],
-        coords={Coordinates.Y.value: lats},
+        dims=[Coordinates.Y.value, x_face_dim],
+        coords={Coordinates.Y.value: lats, x_face_dim: lon_faces},
         attrs={"units": "m", "long_name": "East/West face areas"},
     )
 
@@ -200,8 +207,8 @@ def compute_spherical_face_areas_ns(
     dlon = np.abs(lons_np[1] - lons_np[0])
     dlon_rad = np.radians(dlon)
 
-    # Compute face latitudes (at boundaries)
-    # If cell centers are at lats[i], faces are at lats[i] ± dlat/2
+    # Compute face latitudes (at south edges of cells, plus one extra at north boundary)
+    # For cell centers at [lat0, lat1, lat2, ...], faces are at [lat0-dlat/2, lat0+dlat/2, lat1+dlat/2, ...]
     lat_min = lats_np[0] - dlat / 2
     lat_max = lats_np[-1] + dlat / 2
     lat_faces = np.linspace(lat_min, lat_max, len(lats_np) + 1)
@@ -215,11 +222,14 @@ def compute_spherical_face_areas_ns(
     nlon = len(lons_np)
     face_areas = np.broadcast_to(face_area_by_lat[:, None], (nlat + 1, nlon))
 
-    # Return as DataArray
+    # Get dimension name following Xgcm convention: "y_left"
+    y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)
+
+    # Return as DataArray with face coordinates
     return xr.DataArray(
         face_areas,
-        dims=["lat_face", Coordinates.X.value],
-        coords={Coordinates.X.value: lons},
+        dims=[y_face_dim, Coordinates.X.value],
+        coords={y_face_dim: lat_faces, Coordinates.X.value: lons},
         attrs={"units": "m", "long_name": "North/South face areas"},
     )
 

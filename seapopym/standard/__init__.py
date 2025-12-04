@@ -1,5 +1,5 @@
 """Standard definitions for Seapopym."""
 
-from .coordinates import Coordinates
+from .coordinates import Coordinates, GridPosition
 
-__all__ = ["Coordinates"]
+__all__ = ["Coordinates", "GridPosition"]
