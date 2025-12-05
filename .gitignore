@@ -93,3 +93,4 @@ results/
 # Environment variables
 .env
 .env.local
+data/
