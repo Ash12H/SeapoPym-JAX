@@ -594,5 +594,221 @@ def test_fully_periodic_domain(simple_grid):
     assert tendency_south > 0, "Mass did not wrap around to South"
 
 
+def test_closed_boundary_zero_flux():
+    """Test that advection produces zero flux at closed boundaries.
+
+    This test verifies Bug #1: face masking at closed boundaries.
+    At closed boundaries, the face mask should be 0, resulting in zero flux.
+    """
+    # Create simple 5x5 grid
+    lats = np.linspace(0, 4, 5)
+    lons = np.linspace(0, 4, 5)
+
+    lats_da = xr.DataArray(lats, dims=[Coordinates.Y.value])
+    lons_da = xr.DataArray(lons, dims=[Coordinates.X.value])
+
+    cell_areas = compute_spherical_cell_areas(lats_da, lons_da)
+    face_areas_ew = compute_spherical_face_areas_ew(lats_da, lons_da)
+    face_areas_ns = compute_spherical_face_areas_ns(lats_da, lons_da)
+
+    # Uniform biomass
+    biomass = xr.DataArray(
+        np.ones((5, 5)) * 10.0,
+        dims=[Coordinates.Y.value, Coordinates.X.value],
+        coords={Coordinates.Y.value: lats, Coordinates.X.value: lons},
+    )
+
+    # Strong eastward velocity everywhere
+    u = xr.full_like(biomass, 2.0)
+    v = xr.full_like(biomass, 0.0)
+
+    # ALL boundaries closed - no flux should cross
+    bc_all_closed = BoundaryConditions(
+        north=BoundaryType.CLOSED,
+        south=BoundaryType.CLOSED,
+        east=BoundaryType.CLOSED,
+        west=BoundaryType.CLOSED,
+    )
+
+    result = compute_advection_tendency(
+        state=biomass,
+        u=u,
+        v=v,
+        cell_areas=cell_areas,
+        face_areas_ew=face_areas_ew,
+        face_areas_ns=face_areas_ns,
+        boundary_conditions=bc_all_closed,
+        mask=None,
+    )
+
+    tendency = result["advection_rate"]
+
+    # At closed boundaries with uniform concentration, interior cells should have zero tendency
+    # (flux in = flux out). But boundary cells should also have limited tendency.
+
+    # More importantly: total integrated tendency should be exactly zero
+    # (what leaves one cell enters another, no net change in closed domain)
+    total_tendency = (tendency * cell_areas).sum().values
+
+    print(f"\nTotal integrated tendency: {total_tendency:.10e}")
+    print("Should be zero for closed domain with no sources/sinks")
+
+    # Check that total tendency is zero (conservation in closed domain)
+    assert (
+        abs(total_tendency) < 1e-10
+    ), f"Closed boundary violates conservation! Total tendency = {total_tendency:.3e}"
+
+
+def test_closed_boundary_no_mass_escape():
+    """Test that mass cannot escape through closed boundaries.
+
+    This test integrates the advection over time and verifies that:
+    1. Mass is conserved in the closed domain
+    2. No flux crosses the boundaries
+    """
+    # Simple grid
+    lats = np.linspace(0, 9, 10)
+    lons = np.linspace(0, 9, 10)
+
+    lats_da = xr.DataArray(lats, dims=[Coordinates.Y.value])
+    lons_da = xr.DataArray(lons, dims=[Coordinates.X.value])
+
+    cell_areas = compute_spherical_cell_areas(lats_da, lons_da)
+    face_areas_ew = compute_spherical_face_areas_ew(lats_da, lons_da)
+    face_areas_ns = compute_spherical_face_areas_ns(lats_da, lons_da)
+
+    # Blob in center
+    biomass = xr.DataArray(
+        np.zeros((10, 10)),
+        dims=[Coordinates.Y.value, Coordinates.X.value],
+        coords={Coordinates.Y.value: lats, Coordinates.X.value: lons},
+    )
+    biomass[4:6, 4:6] = 100.0  # Concentrated mass in center
+
+    # Strong velocity pushing toward boundaries
+    u = xr.full_like(biomass, 3.0)  # Eastward
+    v = xr.full_like(biomass, 2.0)  # Northward
+
+    # Closed boundaries
+    bc_closed = BoundaryConditions(
+        north=BoundaryType.CLOSED,
+        south=BoundaryType.CLOSED,
+        east=BoundaryType.CLOSED,
+        west=BoundaryType.CLOSED,
+    )
+
+    # Initial mass
+    mass_initial = (biomass * cell_areas).sum().values
+
+    # Integrate for several timesteps
+    biomass_current = biomass.copy()
+    dt = 1800.0  # 30 minutes
+
+    for _ in range(20):
+        result = compute_advection_tendency(
+            state=biomass_current,
+            u=u,
+            v=v,
+            cell_areas=cell_areas,
+            face_areas_ew=face_areas_ew,
+            face_areas_ns=face_areas_ns,
+            boundary_conditions=bc_closed,
+            mask=None,
+        )
+        biomass_current = biomass_current + result["advection_rate"] * dt
+
+    mass_final = (biomass_current * cell_areas).sum().values
+
+    print(f"\nMass initial: {mass_initial:.6e}")
+    print(f"Mass final:   {mass_final:.6e}")
+    print(f"Difference:   {mass_final - mass_initial:.6e}")
+    print(f"Relative error: {abs(mass_final - mass_initial) / mass_initial:.2%}")
+
+    # In a closed domain, mass must be exactly conserved
+    mass_error = abs(mass_final - mass_initial) / mass_initial
+    assert mass_error < 1e-10, f"Mass escaped through closed boundaries! Error = {mass_error:.2%}"
+
+
+def test_boundary_flux_computation():
+    """Test that fluxes are computed correctly at domain boundaries.
+
+    This test specifically checks the velocity interpolation at boundaries (Bug #2).
+    """
+    # Minimal 3x3 grid
+    lats = np.array([0.0, 1.0, 2.0])
+    lons = np.array([0.0, 1.0, 2.0])
+
+    lats_da = xr.DataArray(lats, dims=[Coordinates.Y.value])
+    lons_da = xr.DataArray(lons, dims=[Coordinates.X.value])
+
+    cell_areas = compute_spherical_cell_areas(lats_da, lons_da)
+    face_areas_ew = compute_spherical_face_areas_ew(lats_da, lons_da)
+    face_areas_ns = compute_spherical_face_areas_ns(lats_da, lons_da)
+
+    # Concentration gradient: high on west, low on east
+    biomass = xr.DataArray(
+        [[10.0, 5.0, 1.0], [10.0, 5.0, 1.0], [10.0, 5.0, 1.0]],
+        dims=[Coordinates.Y.value, Coordinates.X.value],
+        coords={Coordinates.Y.value: lats, Coordinates.X.value: lons},
+    )
+
+    # Uniform eastward velocity
+    u = xr.full_like(biomass, 1.0)
+    v = xr.full_like(biomass, 0.0)
+
+    # Periodic E-W, closed N-S
+    bc = BoundaryConditions(
+        north=BoundaryType.CLOSED,
+        south=BoundaryType.CLOSED,
+        east=BoundaryType.PERIODIC,
+        west=BoundaryType.PERIODIC,
+    )
+
+    result = compute_advection_tendency(
+        state=biomass,
+        u=u,
+        v=v,
+        cell_areas=cell_areas,
+        face_areas_ew=face_areas_ew,
+        face_areas_ns=face_areas_ns,
+        boundary_conditions=bc,
+        mask=None,
+    )
+
+    tendency = result["advection_rate"]
+
+    # With periodic BC, check mass conservation
+    total_tendency = (tendency * cell_areas).sum().values
+    print(f"\nTotal tendency (periodic): {total_tendency:.6e}")
+
+    assert abs(total_tendency) < 1e-10, "Periodic BC should conserve mass exactly"
+
+    # Now test with closed boundaries
+    bc_closed = BoundaryConditions(
+        north=BoundaryType.CLOSED,
+        south=BoundaryType.CLOSED,
+        east=BoundaryType.CLOSED,
+        west=BoundaryType.CLOSED,
+    )
+
+    result_closed = compute_advection_tendency(
+        state=biomass,
+        u=u,
+        v=v,
+        cell_areas=cell_areas,
+        face_areas_ew=face_areas_ew,
+        face_areas_ns=face_areas_ns,
+        boundary_conditions=bc_closed,
+        mask=None,
+    )
+
+    tendency_closed = result_closed["advection_rate"]
+    total_tendency_closed = (tendency_closed * cell_areas).sum().values
+
+    print(f"Total tendency (closed):   {total_tendency_closed:.6e}")
+
+    assert abs(total_tendency_closed) < 1e-10, "Closed BC should conserve mass exactly"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

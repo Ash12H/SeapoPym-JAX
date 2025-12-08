@@ -179,25 +179,26 @@ def compute_advection_tendency(
     dim_x = Coordinates.X.value  # "x"
 
     if boundary_conditions.east == BoundaryType.CLOSED:
-        # Close east boundary (last column)
+        # Close east boundary: mask cells at last column (no flux through east face)
+        # Using where() with coordinate comparison to set boundary values to 0
         face_mask_east = face_mask_east.where(
             face_mask_east[dim_x] != face_mask_east[dim_x][-1], 0.0
         )
 
     if boundary_conditions.west == BoundaryType.CLOSED:
-        # Close west boundary (first column)
+        # Close west boundary: mask cells at first column (no flux through west face)
         face_mask_west = face_mask_west.where(
             face_mask_west[dim_x] != face_mask_west[dim_x][0], 0.0
         )
 
     if boundary_conditions.north == BoundaryType.CLOSED:
-        # Close north boundary (last row)
+        # Close north boundary: mask cells at last row (no flux through north face)
         face_mask_north = face_mask_north.where(
             face_mask_north[dim_y] != face_mask_north[dim_y][-1], 0.0
         )
 
     if boundary_conditions.south == BoundaryType.CLOSED:
-        # Close south boundary (first row)
+        # Close south boundary: mask cells at first row (no flux through south face)
         face_mask_south = face_mask_south.where(
             face_mask_south[dim_y] != face_mask_south[dim_y][0], 0.0
         )
@@ -433,11 +434,9 @@ def compute_diffusion_tendency(
     # --- LAPLACIAN CALCULATION ---
     # Compute second derivatives using centered differences
 
-    # Handle dx as DataArray or scalar
-    dx_sq = dx**2 if isinstance(dx, int | float) else dx**2
-
-    # Handle dy as DataArray or scalar
-    dy_sq = dy**2 if isinstance(dy, int | float) else dy**2
+    # Compute squared grid spacings (works for both scalar and DataArray)
+    dx_sq = dx**2
+    dy_sq = dy**2
 
     # Second derivative in x direction (longitude)
     # ∂²C/∂x² ≈ (C_east - 2C + C_west) / dx²
