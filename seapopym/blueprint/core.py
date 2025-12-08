@@ -178,6 +178,98 @@ class Blueprint:
             self.registered_variables.add(var_name)
             self._data_nodes[var_name] = output_node
 
+    def register_diagnostic(
+        self,
+        func: Callable[..., Any],
+        input_mapping: dict[str, str] | None = None,
+        name: str | None = None,
+    ) -> None:
+        """Enregistre une fonction de diagnostic (effet de bord uniquement, pas de sortie).
+
+        Les diagnostics sont des "sink nodes" : ils consomment des données mais ne produisent
+        rien dans le graphe. Utilisations typiques :
+        - Vérification d'invariants (CFL, positivité, bornes)
+        - Logging d'informations pour debugging
+        - Export d'états intermédiaires
+
+        Timing:
+            Les diagnostics s'exécutent pendant Blueprint.execute(), après le calcul des
+            tendances mais AVANT l'intégration temporelle par le TimeIntegrator.
+
+        Garanties:
+            - Ordre topologique respecté (dépendances entre diagnostics)
+            - Ordre entre diagnostics au même niveau : NON GARANTI
+            - Peuvent raise des exceptions pour arrêter la simulation
+
+        Contraintes:
+            - NE DOIVENT PAS modifier le state (convention, non appliquée)
+            - La valeur de retour est ignorée
+
+        Args:
+            func: La fonction à exécuter. Signature : func(arg1, arg2, ...) -> None ou Any.
+                 La valeur de retour est ignorée.
+            input_mapping: Mapping {arg_name: graph_var_name}. Si None, résolution automatique
+                          par nom d'argument.
+            name: Nom unique de l'étape (optionnel). Si None, utilise le nom de la fonction.
+
+        Raises:
+            MissingInputError: Si un argument requis ne peut pas être résolu.
+
+        Example:
+            >>> bp = Blueprint()
+            >>> bp.register_forcing("biomass")
+            >>>
+            >>> def check_positive(biomass):
+            ...     if (biomass < 0).any():
+            ...         raise ValueError("Negative biomass detected!")
+            >>>
+            >>> bp.register_diagnostic(check_positive)
+        """
+        input_mapping = input_mapping or {}
+
+        if isinstance(func, partial):
+            func_name = func.func.__name__
+        elif hasattr(func, "__name__"):
+            func_name = func.__name__
+        else:
+            func_name = str(func)
+
+        step_name = name or func_name
+
+        if self._group_context:
+            step_name = f"{self._group_context}/{step_name}"
+
+        # Création du noeud de calcul (Sink Node, pas de sortie)
+        compute_node = ComputeNode(
+            func=func,
+            name=step_name,
+            output_mapping={},
+            input_mapping={},
+            scope="local",  # Required by ComputeNode signature, not used for diagnostics
+            group=self._group_context,
+        )
+
+        sig = inspect.signature(func)
+        resolved_mapping = {}
+
+        for arg_name, param in sig.parameters.items():
+            if param.default != inspect.Parameter.empty:
+                continue
+
+            source_var = self._resolve_input(arg_name, input_mapping)
+
+            if source_var and source_var in self.registered_variables:
+                resolved_mapping[arg_name] = source_var
+                source_node = self._data_nodes[source_var]
+                self.graph.add_edge(source_node, compute_node)
+            else:
+                raise MissingInputError(
+                    f"Argument '{arg_name}' for diagnostic '{step_name}' could not be resolved (Source: '{source_var}')."
+                )
+
+        compute_node.input_mapping = resolved_mapping
+        self.graph.add_node(compute_node)
+
     def _resolve_input(self, arg_name: str, explicit_mapping: dict[str, str]) -> str | None:
         """Résout le nom de la variable dans le graphe selon la priorité.
 

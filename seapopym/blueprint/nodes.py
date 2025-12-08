@@ -35,7 +35,7 @@ class ComputeNode:
 
     func: Callable[..., Any]
     name: str  # Identifiant unique de l'étape (ex: 'compute_mortality_tuna')
-    output_mapping: dict[str, str]  # key_retour -> graph_var_name
+    output_mapping: dict[str, str] = field(default_factory=dict)  # key_retour -> graph_var_name
     input_mapping: dict[str, str] = field(default_factory=dict)  # arg_name -> graph_var_name
     scope: str = "local"  # 'local' ou 'global'
     group: str | None = None  # Nom du groupe fonctionnel (ex: 'Tuna')
