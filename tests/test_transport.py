@@ -16,6 +16,7 @@ from seapopym.transport import (
     BoundaryConditions,
     BoundaryType,
     check_diffusion_stability,
+    compute_advection_cfl,
     compute_advection_tendency,
     compute_diffusion_tendency,
     compute_spherical_cell_areas,
@@ -286,12 +287,12 @@ def test_diffusion_stability_check(simple_grid):
         dt=dt_unstable,
     )
 
-    print(f"\ndt_max (theory): {dt_max_theory:.1f}s ({dt_max_theory/3600:.1f} hours)")
+    print(f"\ndt_max (theory): {dt_max_theory:.1f}s ({dt_max_theory / 3600:.1f} hours)")
     print(
-        f"Stable dt: {dt_stable:.1f}s ({dt_stable/3600:.2f}h), CFL = {stability_stable['cfl_diffusion']:.3f}"
+        f"Stable dt: {dt_stable:.1f}s ({dt_stable / 3600:.2f}h), CFL = {stability_stable['cfl_diffusion']:.3f}"
     )
     print(
-        f"Unstable dt: {dt_unstable:.1f}s ({dt_unstable/3600:.2f}h), CFL = {stability_unstable['cfl_diffusion']:.3f}"
+        f"Unstable dt: {dt_unstable:.1f}s ({dt_unstable / 3600:.2f}h), CFL = {stability_unstable['cfl_diffusion']:.3f}"
     )
 
     assert stability_stable["is_stable"], "Small timestep should be stable"
@@ -379,6 +380,218 @@ def test_combined_advection_diffusion(simple_grid, boundary_closed_periodic):
     print(f"Peak: initial = {peak_initial:.2f}, final = {peak_final:.2f}")
 
     assert peak_final < peak_initial, "Diffusion did not reduce peak!"
+
+
+def test_advection_with_mask(simple_grid, boundary_closed_periodic):
+    """Test advection with land masking (island)."""
+    # Create an island in the middle (mask=0)
+    mask = xr.ones_like(simple_grid["lats"] * simple_grid["lons"])
+    # Set center 2x2 cells as land
+    mask[4:6, 4:6] = 0.0
+
+    # Initialize biomass west of the island
+    biomass = create_blob(simple_grid, center=(5, 2), radius=1.0)
+    biomass = biomass * mask  # Ensure start is clean
+
+    # Uniform eastward velocity
+    u = xr.full_like(biomass, 1.0)
+    v = xr.full_like(biomass, 0.0)
+
+    # Compute tendency
+    result = compute_advection_tendency(
+        state=biomass,
+        u=u,
+        v=v,
+        cell_areas=simple_grid["cell_areas"],
+        face_areas_ew=simple_grid["face_areas_ew"],
+        face_areas_ns=simple_grid["face_areas_ns"],
+        boundary_conditions=boundary_closed_periodic,
+        mask=mask,
+    )
+
+    tendency = result["advection_rate"]
+
+    # Check that tendency is zero on land
+    assert np.all(tendency.where(mask == 0, drop=True) == 0.0), "Advection calculated on land!"
+
+    # Integrate for a bit
+    dt = 3600.0
+    biomass_new = biomass + tendency * dt
+
+    # Biomass shouldn't enter land
+    assert np.all(biomass_new.where(mask == 0, drop=True) == 0.0), "Biomass moved onto land!"
+
+    # Check mass conservation (masked domain)
+    total_before = (biomass * simple_grid["cell_areas"] * mask).sum().values
+    total_after = (biomass_new * simple_grid["cell_areas"] * mask).sum().values
+
+    # Mass should pile up against the island or flow around (if flow allowed around)
+    # But strictly speaking, standard upwind into a wall stops flux.
+    # The divergence at the face entering land will be:
+    # Flux_in (from west) - Flux_out (to east, which is 0 because face is closed)
+    # So mass accumulates in the cell just west of the island.
+
+    # Total mass should still be conserved in the system (what enters the cell stays there)
+    mass_error = abs(total_after - total_before) / total_before
+    assert mass_error < 0.01, f"Mass not conserved with mask: {mass_error:.2%} error"
+
+
+def test_diffusion_with_mask(simple_grid, boundary_closed_periodic):
+    """Test diffusion with land masking (zero-gradient BC)."""
+    # Create an island
+    mask = xr.ones_like(simple_grid["lats"] * simple_grid["lons"])
+    mask[4:6, 4:6] = 0.0
+
+    # Initialize biomass near the island
+    biomass = create_blob(simple_grid, center=(5, 3), radius=1.0)
+    # Ensure zero on land initially
+    biomass = biomass * mask
+
+    D = 2000.0
+
+    result = compute_diffusion_tendency(
+        state=biomass,
+        D=D,
+        dx=simple_grid["dx"],
+        dy=simple_grid["dy"],
+        boundary_conditions=boundary_closed_periodic,
+        mask=mask,
+    )
+
+    tendency = result["diffusion_rate"]
+
+    # Check tendencies on land are zero
+    assert np.all(tendency.where(mask == 0, drop=True) == 0.0), "Diffusion calculated on land!"
+
+    dt = 1800.0
+    biomass_new = biomass + tendency * dt
+
+    # Check mass conservation
+    total_before = (biomass * simple_grid["cell_areas"] * mask).sum().values
+    total_after = (biomass_new * simple_grid["cell_areas"] * mask).sum().values
+
+    mass_error = abs(total_after - total_before) / total_before
+    assert mass_error < 0.01, f"Mass not conserved with mask: {mass_error:.2%} error"
+
+
+def test_advection_stability_check(simple_grid):
+    """Test advection CFL condition check."""
+    u = 1.0  # m/s
+    v = 1.0  # m/s
+
+    dx_min = simple_grid["dx"].min().values
+    dy_min = simple_grid["dy"].min().values
+
+    # Calculate dt that exactly hits CFL=1 for the worst case (smallest cell)
+    # CFL = |u|dt/dx + |v|dt/dy = dt * (|u|/dx + |v|/dy)
+    # dt_limit = 1 / (|u|/dx + |v|/dy)
+    metric = (abs(u) / dx_min) + (abs(v) / dy_min)
+    dt_limit = 1.0 / metric
+
+    # Test stable case (CFL = 0.5)
+    dt_stable = 0.5 * dt_limit
+    stability_stable = compute_advection_cfl(
+        u=u, v=v, dx=simple_grid["dx"], dy=simple_grid["dy"], dt=dt_stable
+    )
+    assert stability_stable["is_stable"], "Should be stable"
+    assert stability_stable["cfl_max"] < 0.6
+
+    # Test unstable case (CFL = 1.5)
+    dt_unstable = 1.5 * dt_limit
+    stability_unstable = compute_advection_cfl(
+        u=u, v=v, dx=simple_grid["dx"], dy=simple_grid["dy"], dt=dt_unstable
+    )
+    assert not stability_unstable["is_stable"], "Should be unstable"
+    assert stability_unstable["cfl_max"] > 1.0
+
+
+def test_high_latitude_stability(simple_grid):
+    """Test stability check at high latitudes where dx is small."""
+    # Create high latitude grid (85°N to 89°N)
+    lats = np.linspace(85, 89, 5)
+    lons = np.linspace(0, 10, 5)
+
+    lats_da = xr.DataArray(lats, dims=[Coordinates.Y.value])
+    lons_da = xr.DataArray(lons, dims=[Coordinates.X.value])
+
+    dx = compute_spherical_dx(lats_da, lons_da)
+    dy = compute_spherical_dy(lats_da, lons_da)
+
+    D = 1000.0
+
+    # Check stability at equator for comparison
+    # Need at least 2 points to compute dlats/dlons if using compute functions
+    lats_eq = np.array([0.0, 1.0])
+    lats_eq_da = xr.DataArray(lats_eq, dims=[Coordinates.Y.value])
+
+    dx_eq = compute_spherical_dx(lats_eq_da, lons_da)
+    dy_eq = compute_spherical_dy(lats_eq_da, lons_da)
+
+    stability_eq = check_diffusion_stability(D, dx_eq, dy_eq, dt=1.0)
+    stability_high = check_diffusion_stability(D, dx, dy, dt=1.0)
+
+    print(f"\ndt_max (Equator): {stability_eq['dt_max']:.1f} s")
+    print(f"dt_max (85°N):    {stability_high['dt_max']:.1f} s")
+    print(f"Ratio: {stability_eq['dt_max'] / stability_high['dt_max']:.1f}")
+
+    # Verify significant reduction in time step
+    assert (
+        stability_high["dt_max"] < stability_eq["dt_max"] / 50.0
+    ), "dt_max should be much smaller at high latitude"
+
+
+def test_fully_periodic_domain(simple_grid):
+    """Test advection across North/South boundaries in a fully periodic domain."""
+    # For N/S periodicity to conserve mass, we need a Torus geometry (constant areas).
+    # Spherical geometry has varying face areas (A_north != A_south), so raw periodicity
+    # would create/destroy mass at the boundary.
+
+    # We override the grid geometry to be constant (Cylindrical/Torus)
+    grid = simple_grid.copy()
+    grid["cell_areas"] = xr.full_like(simple_grid["cell_areas"], 1000.0)
+    grid["face_areas_ew"] = xr.full_like(simple_grid["face_areas_ew"], 10.0)
+    grid["face_areas_ns"] = xr.full_like(simple_grid["face_areas_ns"], 10.0)
+
+    # Custom boundary conditions: Periodic everywhere
+    bc_torus = BoundaryConditions(
+        north=BoundaryType.PERIODIC,
+        south=BoundaryType.PERIODIC,
+        east=BoundaryType.PERIODIC,
+        west=BoundaryType.PERIODIC,
+    )
+
+    # Create blob at North edge (y=9)
+    biomass = create_blob(grid, center=(9, 5), radius=1.0)
+
+    # Velocity strictly North
+    u = xr.full_like(biomass, 0.0)
+    v = xr.full_like(biomass, 1.0)
+
+    # Compute tendency
+    result = compute_advection_tendency(
+        state=biomass,
+        u=u,
+        v=v,
+        cell_areas=grid["cell_areas"],
+        face_areas_ew=grid["face_areas_ew"],
+        face_areas_ns=grid["face_areas_ns"],
+        boundary_conditions=bc_torus,
+        mask=None,
+    )
+
+    tendency = result["advection_rate"]
+
+    # Check mass conservation
+    total_tendency = (tendency * grid["cell_areas"]).sum().values
+
+    # The sum of tendencies * area should be zero (what leaves one side enters the other)
+    assert abs(total_tendency) < 1e-10, "Mass not conserved in periodic torus"
+
+    # Check flux crossover
+    # Mass leaving top (North) should result in positive tendency at bottom (South)
+    tendency_south = tendency.isel({Coordinates.Y.value: 0}).sum()
+
+    assert tendency_south > 0, "Mass did not wrap around to South"
 
 
 if __name__ == "__main__":
