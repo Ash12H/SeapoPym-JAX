@@ -113,7 +113,11 @@ def advection_upwind_numba(state, u, v, ew_area, ns_area, cell_area, mask, bc, o
             # --- EAST FLUX (at i+1/2) ---
             # Velocity at face: Avg(u[i], u[i+1])
             # If Boundary is closed (ip1=-1), u at face is 0.
-            if ip1 == -1:
+            # Also check if current cell or neighbor is land (mask check)
+            if ip1 == -1 or mask[j, i] == 0:
+                flux_east = 0.0
+            elif mask[j, ip1] == 0:
+                # Neighbor is land: zero flux
                 flux_east = 0.0
             else:
                 u_east = u[j, ip1]
@@ -131,7 +135,10 @@ def advection_upwind_numba(state, u, v, ew_area, ns_area, cell_area, mask, bc, o
 
             # --- WEST FLUX (at i-1/2) ---
             # Velocity at face: Avg(u[i-1], u[i])
-            if im1 == -1:
+            if im1 == -1 or mask[j, i] == 0:
+                flux_west = 0.0
+            elif mask[j, im1] == 0:
+                # Neighbor is land: zero flux
                 flux_west = 0.0
             else:
                 u_west = u[j, im1]
@@ -149,7 +156,10 @@ def advection_upwind_numba(state, u, v, ew_area, ns_area, cell_area, mask, bc, o
                 flux_west = u_face_west * c_up * area_w
 
             # --- NORTH FLUX (at j+1/2) ---
-            if jp1 == -1:
+            if jp1 == -1 or mask[j, i] == 0:
+                flux_north = 0.0
+            elif mask[jp1, i] == 0:
+                # Neighbor is land: zero flux
                 flux_north = 0.0
             else:
                 v_north = v[jp1, i]
@@ -164,7 +174,10 @@ def advection_upwind_numba(state, u, v, ew_area, ns_area, cell_area, mask, bc, o
                 flux_north = v_face_north * c_up * area_n
 
             # --- SOUTH FLUX (at j-1/2) ---
-            if jm1 == -1:
+            if jm1 == -1 or mask[j, i] == 0:
+                flux_south = 0.0
+            elif mask[jm1, i] == 0:
+                # Neighbor is land: zero flux
                 flux_south = 0.0
             else:
                 v_south = v[jm1, i]
@@ -181,13 +194,8 @@ def advection_upwind_numba(state, u, v, ew_area, ns_area, cell_area, mask, bc, o
             # --- DIVERGENCE ---
             # Div = (East - West + North - South) / Volume
             # Volume = Cell Area
+            # Note: Fluxes are already zeroed for land cells via mask checks above
             div = (flux_east - flux_west + flux_north - flux_south) / cell_area[j, i]
 
             # Tendency = -Divergence
-            val = -div
-
-            # Apply Mask
-            if mask[j, i] == 0:
-                val = 0.0
-
-            out[j, i] = val
+            out[j, i] = -div
