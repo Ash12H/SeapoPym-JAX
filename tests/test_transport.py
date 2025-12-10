@@ -810,5 +810,103 @@ def test_boundary_flux_computation():
     assert abs(total_tendency_closed) < 1e-10, "Closed BC should conserve mass exactly"
 
 
+def test_numba_xarray_equivalence(simple_grid, boundary_closed_periodic):
+    """Test that Numba and Xarray implementations produce identical results."""
+    pytest.importorskip("numba", reason="Numba not available")
+
+    try:
+        from seapopym.transport.core import compute_advection_numba
+    except ImportError:
+        pytest.skip("Numba implementation not available")
+
+    # Create test data with multiple dimensions to test broadcasting
+    ny, nx = len(simple_grid["lats"]), len(simple_grid["lons"])
+    ncohort = 3
+    ntime = 2
+
+    # State with extra dimensions (time, cohort, y, x)
+    state = xr.DataArray(
+        np.random.rand(ntime, ncohort, ny, nx),
+        dims=["time", "cohort", Coordinates.Y.value, Coordinates.X.value],
+        coords={
+            "time": np.arange(ntime),
+            "cohort": np.arange(ncohort),
+            Coordinates.Y.value: simple_grid["lats"],
+            Coordinates.X.value: simple_grid["lons"],
+        },
+    )
+
+    # Velocity without cohort dimension (tests broadcasting)
+    u = xr.DataArray(
+        np.random.rand(ntime, ny, nx) * 0.1,
+        dims=["time", Coordinates.Y.value, Coordinates.X.value],
+        coords={
+            "time": np.arange(ntime),
+            Coordinates.Y.value: simple_grid["lats"],
+            Coordinates.X.value: simple_grid["lons"],
+        },
+    )
+    v = xr.DataArray(
+        np.random.rand(ntime, ny, nx) * 0.1,
+        dims=["time", Coordinates.Y.value, Coordinates.X.value],
+        coords={
+            "time": np.arange(ntime),
+            Coordinates.Y.value: simple_grid["lats"],
+            Coordinates.X.value: simple_grid["lons"],
+        },
+    )
+
+    # Compute with both implementations
+    result_xarray = compute_advection_tendency(
+        state=state,
+        u=u,
+        v=v,
+        cell_areas=simple_grid["cell_areas"],
+        face_areas_ew=simple_grid["face_areas_ew"],
+        face_areas_ns=simple_grid["face_areas_ns"],
+        boundary_conditions=boundary_closed_periodic,
+    )
+
+    result_numba = compute_advection_numba(
+        state=state,
+        u=u,
+        v=v,
+        cell_areas=simple_grid["cell_areas"],
+        face_areas_ew=simple_grid["face_areas_ew"],
+        face_areas_ns=simple_grid["face_areas_ns"],
+        boundary_conditions=boundary_closed_periodic,
+    )
+
+    # Compare results
+    xarray_vals = result_xarray["advection_rate"].values
+    numba_vals = result_numba["advection_rate"].values
+
+    # Check shapes match
+    assert xarray_vals.shape == numba_vals.shape, "Shape mismatch between implementations"
+
+    # Check dimension order is preserved
+    assert (
+        result_xarray["advection_rate"].dims == state.dims
+    ), "Xarray: dimension order not preserved"
+    assert result_numba["advection_rate"].dims == state.dims, "Numba: dimension order not preserved"
+
+    # Check numerical equivalence
+    rtol, atol = 1e-5, 1e-8
+    assert np.allclose(
+        xarray_vals, numba_vals, rtol=rtol, atol=atol
+    ), f"Results differ beyond tolerance (rtol={rtol}, atol={atol})"
+
+    # Report statistics
+    abs_diff = np.abs(xarray_vals - numba_vals)
+    max_diff = abs_diff.max()
+    mean_diff = abs_diff.mean()
+
+    print("\nNumba vs Xarray comparison:")
+    print(f"  Mean absolute difference: {mean_diff:.6e}")
+    print(f"  Max absolute difference:  {max_diff:.6e}")
+    print(f"  Xarray mean: {xarray_vals.mean():.6e}")
+    print(f"  Numba mean:  {numba_vals.mean():.6e}")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

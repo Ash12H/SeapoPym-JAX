@@ -36,6 +36,7 @@ dependencies = [
     "distributed>=2025.11.0",
     "pint>=0.24.4",
     "pint-xarray>=0.5.1",
+    "numba>=0.63.1",
 ]
 
 [project.optional-dependencies]

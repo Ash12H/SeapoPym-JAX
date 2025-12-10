@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import traceback
 import tracemalloc
 
 # Add current directory to path
@@ -104,16 +105,17 @@ def benchmark() -> None:
 
     # Force computation
     # The output should have same dims as state
-    _ = res["advection_rate"].values
+    val_advection = res["advection_rate"].values
 
     end_time = time.time()
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
     duration = end_time - start_time
+    throughput_xarray = np.prod(shape) / duration / 1e6
     print(f"Advection Execution Time: {duration:.4f} s")
     print(f"Memory Peak: {peak / 1024 / 1024:.2f} MB")
-    print(f"Throughput: {np.prod(shape) / duration / 1e6:.2f} M_elements/s")
+    print(f"Throughput: {throughput_xarray:.2f} M_elements/s")
 
     print("\n--- Benchmarking Diffusion ---")
     # Diffusion needs dx, dy, D
@@ -168,6 +170,98 @@ def benchmark() -> None:
     duration = end_time - start_time
     print(f"Biology Execution Time: {duration:.4f} s")
     print(f"Memory Peak: {peak / 1024 / 1024:.2f} MB")
+
+    print("\n--- Benchmarking Numba Advection (Wrapper) ---")
+    try:
+        from seapopym.transport.core import compute_advection_numba
+
+        # Warmup (trigger compilation if needed)
+        _ = compute_advection_numba(
+            state=state,
+            u=u,
+            v=v,
+            cell_areas=cell_areas,
+            face_areas_ew=face_areas_ew,
+            face_areas_ns=face_areas_ns,
+            boundary_conditions=bc,
+        )
+
+        tracemalloc.start()
+        start_time = time.time()
+
+        # Use wrapper function directly with DataArrays
+        # This tests implicit broadcasting (u/v don't have cohort dim)
+        res_numba_dict = compute_advection_numba(
+            state=state,
+            u=u,
+            v=v,
+            cell_areas=cell_areas,
+            face_areas_ew=face_areas_ew,
+            face_areas_ns=face_areas_ns,
+            boundary_conditions=bc,
+        )
+        res_numba = res_numba_dict["advection_rate"].values
+
+        end_time = time.time()
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        duration = end_time - start_time
+        throughput_numba = np.prod(shape) / duration / 1e6
+        print(f"Numba Advection Execution Time: {duration:.4f} s")
+        print(f"Memory Peak: {peak / 1024 / 1024:.2f} MB")
+        print(f"Throughput: {throughput_numba:.2f} M_elements/s")
+        print(f"Speedup vs Xarray: {throughput_numba / throughput_xarray:.2f}x")
+
+        # Verify Correctness (Compare with Xarray result)
+        xarray_res = val_advection
+
+        print("\n--- Validation ---")
+        print(f"Shapes: Numba={res_numba.shape}, Xarray={xarray_res.shape}")
+
+        if res_numba.shape != xarray_res.shape:
+            print("❌ Shapes mismatch! Skipping validation.")
+        else:
+            # Compute errors
+            abs_diff = np.abs(res_numba - xarray_res)
+            mean_diff = abs_diff.mean()
+            max_diff = abs_diff.max()
+
+            # Relative error (avoid division by zero)
+            denominator = np.maximum(np.abs(xarray_res), 1e-10)
+            rel_diff = abs_diff / denominator
+            mean_rel_diff = rel_diff.mean()
+            max_rel_diff = rel_diff.max()
+
+            print(
+                f"Xarray Stats: Mean={xarray_res.mean():.4e}, Min={xarray_res.min():.4e}, Max={xarray_res.max():.4e}"
+            )
+            print(
+                f"Numba Stats:  Mean={np.mean(res_numba):.4e}, Min={np.min(res_numba):.4e}, Max={np.max(res_numba):.4e}"
+            )
+            print("\nAbsolute Error:")
+            print(f"  Mean: {mean_diff:.6e}")
+            print(f"  Max:  {max_diff:.6e}")
+            print("Relative Error:")
+            print(f"  Mean: {mean_rel_diff:.6e}")
+            print(f"  Max:  {max_rel_diff:.6e}")
+
+            # Use np.allclose for validation
+            rtol, atol = 1e-5, 1e-8
+            is_close = np.allclose(res_numba, xarray_res, rtol=rtol, atol=atol)
+            if is_close:
+                print(f"✓ Results match within tolerance (rtol={rtol}, atol={atol})")
+            else:
+                print(f"✗ Results differ beyond tolerance (rtol={rtol}, atol={atol})")
+                print(
+                    f"  {np.sum(~np.isclose(res_numba, xarray_res, rtol=rtol, atol=atol))} / {res_numba.size} elements differ"
+                )
+
+    except ImportError as e:
+        print(f"Numba benchmark skipped: {e}")
+    except Exception as e:
+        print(f"Numba execution failed: {e}")
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
