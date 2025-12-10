@@ -214,77 +214,35 @@ def compute_advection_tendency(
     # Staggered grid layout (Xgcm convention):
     # - x_left: face positions at west edges (nlon+1 faces for nlon cells)
     # - y_left: face positions at south edges (nlat+1 faces for nlat cells)
-    #
-    # For each cell, we need:
-    # - East face: x_left[i+1] (index 1:)
-    # - West face: x_left[i] (index :-1)
-    # - North face: y_left[j+1] (index 1:)
-    # - South face: y_left[j] (index :-1)
 
     # Get dimension names following Xgcm convention
     x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)  # "x_left"
     y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)  # "y_left"
 
     # Extract face areas using dimensional slicing
-    area_east = face_areas_ew.isel({x_face_dim: slice(1, None)}).values
-    area_west = face_areas_ew.isel({x_face_dim: slice(None, -1)}).values
-    area_north = face_areas_ns.isel({y_face_dim: slice(1, None)}).values
-    area_south = face_areas_ns.isel({y_face_dim: slice(None, -1)}).values
+    # We rename the face dimensions to standard (y, x) for broadcasting with state/u/v
+    # This aligns the faces with the cell centers for calculation
+    # Note: We must be careful about which face corresponds to which cell flux
 
-    # Identify extra dimensions beyond (y, x) to loop over them
-    dim_y = Coordinates.Y.value
-    dim_x = Coordinates.X.value
-    core_dims = [dim_y, dim_x]
+    # 1. East Flux (at i+1/2) depends on u_face_east, state_face_east, area_east
+    # Area East corresponds to index 1: in face_areas_ew
+    area_east = face_areas_ew.isel({x_face_dim: slice(1, None)}).rename({x_face_dim: dim_x})
+    flux_east = u_face_east * state_face_east * area_east * face_mask_east
 
-    # Define inner function that computes flux for 2D slices
-    def compute_flux_2d(
-        u_face_val: float, state_face_val: float, area_val: float, mask_val: float
-    ) -> float:
-        """Compute flux for a 2D (y, x) slice."""
-        return u_face_val * state_face_val * area_val * mask_val
+    # 2. West Flux (at i-1/2) depends on u_face_west, state_face_west, area_west
+    # Area West corresponds to index :-1 in face_areas_ew
+    area_west = face_areas_ew.isel({x_face_dim: slice(None, -1)}).rename({x_face_dim: dim_x})
+    flux_west = u_face_west * state_face_west * area_west * face_mask_west
 
-    # Use apply_ufunc to loop over extra dimensions automatically
-    # This applies the 2D flux computation to each slice along extra dims
-    flux_east = xr.apply_ufunc(
-        compute_flux_2d,
-        u_face_east,
-        state_face_east,
-        xr.DataArray(area_east, dims=core_dims),
-        face_mask_east,
-        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
-        output_core_dims=[core_dims],
-        vectorize=True,
-    )
-    flux_west = xr.apply_ufunc(
-        compute_flux_2d,
-        u_face_west,
-        state_face_west,
-        xr.DataArray(area_west, dims=core_dims),
-        face_mask_west,
-        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
-        output_core_dims=[core_dims],
-        vectorize=True,
-    )
-    flux_north = xr.apply_ufunc(
-        compute_flux_2d,
-        v_face_north,
-        state_face_north,
-        xr.DataArray(area_north, dims=core_dims),
-        face_mask_north,
-        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
-        output_core_dims=[core_dims],
-        vectorize=True,
-    )
-    flux_south = xr.apply_ufunc(
-        compute_flux_2d,
-        v_face_south,
-        state_face_south,
-        xr.DataArray(area_south, dims=core_dims),
-        face_mask_south,
-        input_core_dims=[core_dims, core_dims, core_dims, core_dims],
-        output_core_dims=[core_dims],
-        vectorize=True,
-    )
+    # 3. North Flux (at j+1/2) depends on v_face_north, state_face_north, area_north
+    # Area North corresponds to index 1: in face_areas_ns
+    area_north = face_areas_ns.isel({y_face_dim: slice(1, None)}).rename({y_face_dim: dim_y})
+    flux_north = v_face_north * state_face_north * area_north * face_mask_north
+
+    # 4. South Flux (at j-1/2) depends on v_face_south, state_face_south, area_south
+    # Area South corresponds to index :-1 in face_areas_ns
+    area_south = face_areas_ns.isel({y_face_dim: slice(None, -1)}).rename({y_face_dim: dim_y})
+    flux_south = v_face_south * state_face_south * area_south * face_mask_south
 
     # --- FLUX DIVERGENCE ---
     # Divergence = (flux_in - flux_out) / cell_volume
@@ -304,9 +262,6 @@ def compute_advection_tendency(
     # Apply mask to final result (ensure land stays at zero)
     if mask is not None:
         advection_rate = advection_rate * mask
-
-    # Restore original dimension order (apply_ufunc may reorder them)
-    advection_rate = advection_rate.transpose(*state.dims)
 
     return {"advection_rate": advection_rate}
 
