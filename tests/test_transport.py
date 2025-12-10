@@ -908,5 +908,101 @@ def test_numba_xarray_equivalence(simple_grid, boundary_closed_periodic):
     print(f"  Numba mean:  {numba_vals.mean():.6e}")
 
 
+def test_nan_handling_with_land_mask(simple_grid, boundary_closed_periodic):
+    """Test that NaN values in land cells don't propagate to ocean cells."""
+    ny, nx = len(simple_grid["lats"]), len(simple_grid["lons"])
+
+    # Create a state with some ocean values and NaN in "land" cells (islands)
+    # Pattern: ocean cells have values, land cells (center island) have NaN
+    state_data = np.ones((ny, nx)) * 10.0  # Ocean baseline
+
+    # Create an island in the center (rows 4-6, cols 4-6)
+    state_data[4:7, 4:7] = np.nan
+
+    state = xr.DataArray(
+        state_data,
+        dims=[Coordinates.Y.value, Coordinates.X.value],
+        coords={
+            Coordinates.Y.value: simple_grid["lats"],
+            Coordinates.X.value: simple_grid["lons"],
+        },
+    )
+
+    # Create a mask: 1 = ocean, 0 = land (island)
+    mask_data = np.ones((ny, nx))
+    mask_data[4:7, 4:7] = 0.0
+    mask = xr.DataArray(
+        mask_data,
+        dims=[Coordinates.Y.value, Coordinates.X.value],
+        coords={
+            Coordinates.Y.value: simple_grid["lats"],
+            Coordinates.X.value: simple_grid["lons"],
+        },
+    )
+
+    # Uniform eastward velocity
+    u = xr.full_like(state, 1.0)
+    v = xr.full_like(state, 0.0)
+
+    # Compute advection with xarray version
+    result_xarray = compute_advection_tendency(
+        state=state,
+        u=u,
+        v=v,
+        cell_areas=simple_grid["cell_areas"],
+        face_areas_ew=simple_grid["face_areas_ew"],
+        face_areas_ns=simple_grid["face_areas_ns"],
+        boundary_conditions=boundary_closed_periodic,
+        mask=mask,
+    )
+
+    tendency = result_xarray["advection_rate"]
+
+    # Check that there are NO NaN values in ocean cells
+    ocean_cells = mask == 1
+    ocean_tendency = tendency.where(ocean_cells, drop=False)
+
+    # Count NaN in ocean cells
+    nan_count_ocean = np.isnan(ocean_tendency.values[mask_data == 1]).sum()
+
+    print("\nNaN propagation test:")
+    print(f"  Initial NaN count (land): {np.isnan(state_data[mask_data == 0]).sum()}")
+    print(f"  NaN count in ocean after advection: {nan_count_ocean}")
+    print(
+        f"  Ocean cells with valid values: {(~np.isnan(ocean_tendency.values[mask_data == 1])).sum()}"
+    )
+
+    # Assert no NaN propagation to ocean cells
+    assert nan_count_ocean == 0, f"NaN propagated to {nan_count_ocean} ocean cells!"
+
+    # Also test with Numba version if available
+    try:
+        from seapopym.transport.core import compute_advection_numba
+
+        result_numba = compute_advection_numba(
+            state=state,
+            u=u,
+            v=v,
+            cell_areas=simple_grid["cell_areas"],
+            face_areas_ew=simple_grid["face_areas_ew"],
+            face_areas_ns=simple_grid["face_areas_ns"],
+            boundary_conditions=boundary_closed_periodic,
+            mask=mask,
+        )
+
+        tendency_numba = result_numba["advection_rate"]
+        ocean_tendency_numba = tendency_numba.where(ocean_cells, drop=False)
+        nan_count_ocean_numba = np.isnan(ocean_tendency_numba.values[mask_data == 1]).sum()
+
+        print(f"  NaN count in ocean after advection (Numba): {nan_count_ocean_numba}")
+
+        assert (
+            nan_count_ocean_numba == 0
+        ), f"Numba: NaN propagated to {nan_count_ocean_numba} ocean cells!"
+
+    except ImportError:
+        print("  Numba test skipped (not available)")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

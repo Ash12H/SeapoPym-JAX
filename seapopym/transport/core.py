@@ -106,45 +106,47 @@ def compute_advection_tendency(
     Reference:
         IA/transport/advection.py: advection_upwind_flux()
     """
-    # Get neighbor values for state
-    state_west, state_east, state_south, state_north = get_neighbors_with_bc(
-        state, boundary_conditions
-    )
-
-    # Get neighbor values for velocities
-    u_west, u_east, u_south, u_north = get_neighbors_with_bc(u, boundary_conditions)
-    v_west, v_east, v_south, v_north = get_neighbors_with_bc(v, boundary_conditions)
-
-    # Clean velocities (replace NaN with 0)
+    # Clean state and velocities (replace NaN with 0 to prevent propagation)
+    # NaN values typically occur in land cells and should not affect ocean calculations
+    state_clean = state.fillna(0.0)
     u_clean = u.fillna(0.0)
     v_clean = v.fillna(0.0)
+
+    # Get neighbor values for cleaned state
+    state_west, state_east, state_south, state_north = get_neighbors_with_bc(
+        state_clean, boundary_conditions
+    )
+
+    # Get neighbor values for cleaned velocities
+    u_west, u_east, u_south, u_north = get_neighbors_with_bc(u_clean, boundary_conditions)
+    v_west, v_east, v_south, v_north = get_neighbors_with_bc(v_clean, boundary_conditions)
 
     # --- VELOCITY INTERPOLATION TO FACES ---
     # Velocities are defined at cell centers, but we need them at faces
     # Use simple averaging (can be improved with flux reconstruction)
 
     # East face (i+1/2): average of current and east neighbor
-    u_face_east = 0.5 * (u_clean + u_east.fillna(0.0))
+    u_face_east = 0.5 * (u_clean + u_east)
     # West face (i-1/2): average of current and west neighbor
-    u_face_west = 0.5 * (u_clean + u_west.fillna(0.0))
+    u_face_west = 0.5 * (u_clean + u_west)
 
     # North face (j+1/2): average of current and north neighbor
-    v_face_north = 0.5 * (v_clean + v_north.fillna(0.0))
+    v_face_north = 0.5 * (v_clean + v_north)
     # South face (j-1/2): average of current and south neighbor
-    v_face_south = 0.5 * (v_clean + v_south.fillna(0.0))
+    v_face_south = 0.5 * (v_clean + v_south)
 
     # --- UPWIND CONCENTRATION SELECTION ---
     # Choose concentration from upwind cell based on velocity direction
 
     # East face: if u_face_east > 0, flow is West→East, take current cell
-    state_face_east = xr.where(u_face_east > 0, state, state_east)
+    state_face_east = xr.where(u_face_east > 0, state_clean, state_east)
     # West face: if u_face_west > 0, flow is West→East, take west neighbor
-    state_face_west = xr.where(u_face_west > 0, state_west, state)
+    state_face_west = xr.where(u_face_west > 0, state_west, state_clean)
 
     # North face: if v_face_north > 0, flow is South→North, take current cell
-    state_face_north = xr.where(v_face_north > 0, state, state_north)
+    state_face_north = xr.where(v_face_north > 0, state_clean, state_north)
     # South face: if v_face_south > 0, flow is South→North, take south neighbor
-    state_face_south = xr.where(v_face_south > 0, state_south, state)
+    state_face_south = xr.where(v_face_south > 0, state_south, state_clean)
 
     # --- FACE MASKING ---
     # Create face masks to handle land boundaries and closed boundaries
@@ -314,6 +316,12 @@ def compute_advection_numba(
     dim_y = Coordinates.Y.value
     dim_x = Coordinates.X.value
 
+    # Clean state and velocities (replace NaN with 0 to prevent propagation)
+    # NaN values typically occur in land cells and should not affect ocean calculations
+    state = state.fillna(0.0)
+    u = u.fillna(0.0)
+    v = v.fillna(0.0)
+
     # 1. Prepare Mask
     # Ensure mask is float type for consistency with kernel signature
     mask = xr.ones_like(cell_areas) if mask is None else mask.astype(cell_areas.dtype)
@@ -462,6 +470,10 @@ def compute_diffusion_tendency(
     Reference:
         IA/transport/diffusion.py: diffusion_explicit_spherical()
     """
+    # Clean state (replace NaN with 0 to prevent propagation)
+    # NaN values typically occur in land cells and should not affect ocean calculations
+    state = state.fillna(0.0)
+
     # Get neighbor values for state
     state_west, state_east, state_south, state_north = get_neighbors_with_bc(
         state, boundary_conditions
