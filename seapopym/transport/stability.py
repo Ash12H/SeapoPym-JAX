@@ -21,7 +21,7 @@ def check_diffusion_stability(
     D: float | xr.DataArray,
     dx: xr.DataArray | float,
     dy: xr.DataArray | float,
-    dt: float,
+    dt: float | xr.DataArray,
 ) -> dict[str, Any]:
     """Check stability criterion for explicit diffusion scheme.
 
@@ -71,11 +71,15 @@ def check_diffusion_stability(
          dt ≤ min(dx², dy²) / (4·D)"
     """
     # Extract scalar values from DataArrays if needed
-    D_max = float(D.max().values) if isinstance(D, xr.DataArray) else float(D)
+    # Skip NaN values to handle masked data
+    D_max = float(D.max(skipna=True).values) if isinstance(D, xr.DataArray) else float(D)
 
-    dx_min = float(dx.min().values) if isinstance(dx, xr.DataArray) else float(dx)
+    dx_min = float(dx.min(skipna=True).values) if isinstance(dx, xr.DataArray) else float(dx)
 
-    dy_min = float(dy.min().values) if isinstance(dy, xr.DataArray) else float(dy)
+    dy_min = float(dy.min(skipna=True).values) if isinstance(dy, xr.DataArray) else float(dy)
+
+    # Extract scalar value from dt if it's a DataArray
+    dt_val = float(dt.values) if isinstance(dt, xr.DataArray) else float(dt)
 
     # Handle D=0 case (no diffusion, always stable)
     if D_max == 0.0:
@@ -95,19 +99,19 @@ def check_diffusion_stability(
 
     # CFL number for diffusion: (D × dt) / dx²
     # Should be ≤ 0.25 for stability
-    cfl = (D_max * dt) / min_spacing_sq
+    cfl = (D_max * dt_val) / min_spacing_sq
 
     # Check stability
-    is_stable = dt <= dt_max
+    is_stable = dt_val <= dt_max
 
     # Safety margin
-    margin = dt_max / dt if dt > 0 else float("inf")
+    margin = dt_max / dt_val if dt_val > 0 else float("inf")
 
     # Log warnings if unstable
     if not is_stable:
         logger.warning(
             f"Diffusion scheme is UNSTABLE!\n"
-            f"  Current dt = {dt:.2f} s\n"
+            f"  Current dt = {dt_val:.2f} s\n"
             f"  Maximum stable dt = {dt_max:.2f} s\n"
             f"  CFL number = {cfl:.4f} (should be ≤ 0.25)\n"
             f"  D = {D_max:.2e} m²/s\n"
@@ -140,7 +144,7 @@ def compute_advection_cfl(
     v: xr.DataArray | float,
     dx: xr.DataArray | float,
     dy: xr.DataArray | float,
-    dt: float,
+    dt: float | xr.DataArray,
 ) -> dict[str, Any]:
     """Compute CFL number for advection scheme.
 
@@ -180,19 +184,22 @@ def compute_advection_cfl(
 
     dy_vals = dy.values if isinstance(dy, xr.DataArray) else dy
 
-    # CFL components
-    cfl_x = u_abs * dt / dx_vals
-    cfl_y = v_abs * dt / dy_vals
+    # Extract scalar value from dt if it's a DataArray
+    dt_val = float(dt.values) if isinstance(dt, xr.DataArray) else float(dt)
 
-    # Maximum values
-    cfl_x_max = float(np.max(cfl_x))
-    cfl_y_max = float(np.max(cfl_y))
+    # CFL components
+    cfl_x = u_abs * dt_val / dx_vals
+    cfl_y = v_abs * dt_val / dy_vals
+
+    # Maximum values (skip NaN values to handle masked data)
+    cfl_x_max = float(np.nanmax(cfl_x))
+    cfl_y_max = float(np.nanmax(cfl_y))
     cfl_max = cfl_x_max + cfl_y_max
 
     is_stable = cfl_max <= 1.0
 
-    u_max = float(np.max(u_abs))
-    v_max = float(np.max(v_abs))
+    u_max = float(np.nanmax(u_abs))
+    v_max = float(np.nanmax(v_abs))
 
     # Log warnings
     if not is_stable:
@@ -201,7 +208,7 @@ def compute_advection_cfl(
             f"  CFL = {cfl_max:.3f} > 1.0\n"
             f"  CFL_x = {cfl_x_max:.3f}, CFL_y = {cfl_y_max:.3f}\n"
             f"  max|u| = {u_max:.3f} m/s, max|v| = {v_max:.3f} m/s\n"
-            f"  dt = {dt:.2f} s\n"
+            f"  dt = {dt_val:.2f} s\n"
             f"Recommendation: Reduce timestep by factor of {1/cfl_max:.2f}"
         )
     elif cfl_max > 0.8:
