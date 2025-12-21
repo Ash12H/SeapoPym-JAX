@@ -1,19 +1,9 @@
-"""Transport processes (Advection and Diffusion) adapted for the Blueprint architecture.
+"""New unified transport architecture using finite volume method.
 
-These functions compute tendencies (rates of change) for advection and diffusion
-using flux-based finite volume methods that conserve mass on spherical grids.
-
-Key features:
-- Upwind advection scheme for stability
-- Explicit diffusion with varying dx(lat)
-- Proper handling of boundary conditions
-- Land/ocean masking support
-- Mass conservation through flux-based approach
-
-References:
-    - Original implementation: IA/transport/advection.py, IA/transport/diffusion.py
-    - Flux conservation: IA/TRANSPORT_ANALYSIS.md (Section 8)
-    - Spherical geometry: IA/Diffusion-euler-explicite-description.md
+This module implements the refactored transport functions with:
+- Shared data preparation
+- Separate flux computation (advection and diffusion)
+- Unified orchestrators for Xarray and Numba
 """
 
 from typing import Any
@@ -24,515 +14,655 @@ import xarray as xr
 from seapopym.standard.coordinates import Coordinates, GridPosition
 from seapopym.transport.boundary import BoundaryConditions, BoundaryType, get_neighbors_with_bc
 
+# =============================================================================
+# SHARED HELPERS
+# =============================================================================
 
-def compute_advection_tendency(
+
+def _prepare_transport_data(
     state: xr.DataArray,
     u: xr.DataArray,
     v: xr.DataArray,
+    D: xr.DataArray | float,
+    dx: xr.DataArray | float,
+    dy: xr.DataArray | float,
     cell_areas: xr.DataArray,
     face_areas_ew: xr.DataArray,
     face_areas_ns: xr.DataArray,
     boundary_conditions: BoundaryConditions,
     mask: xr.DataArray | None = None,
 ) -> dict[str, Any]:
-    """Compute advection tendency using upwind flux scheme.
+    """Prepare all shared data for transport computation.
 
-    This function implements a finite volume advection scheme that conserves mass:
-        dC/dt = -∇·(u⃗C) = -(∂(uC)/∂x + ∂(vC)/∂y)
-
-    Discretized as:
-        tendency = -(flux_divergence)
-        flux_divergence = (flux_east - flux_west + flux_north - flux_south) / cell_area
-
-    where fluxes are computed using an upwind scheme:
-        flux_east = u_face_east × C_upwind × face_area_east
-
-    The upwind choice ensures stability by taking concentration from the upwind cell:
-        C_upwind = C_current if u > 0 else C_neighbor
-
-    Boundary conditions:
-    - CLOSED: No flux through boundary (face_mask = 0)
-    - PERIODIC: Wrap around (handled by get_neighbors_with_bc)
-    - OPEN: Allow flux through boundary
-
-    Land masking:
-    - Ocean-ocean faces: Normal flux
-    - Ocean-land faces: Zero flux (face_mask = 0)
-    - Land-land faces: Zero flux
+    This function performs all data preparation steps that are common to both
+    advection and diffusion calculations:
+    - Clean inputs (replace NaN with 0)
+    - Get neighbor values
+    - Interpolate velocities and diffusivity to faces
+    - Compute face masks
+    - Extract face areas
 
     Args:
-        state: Concentration field [Units], shape (..., lat, lon)
-        u: Zonal velocity (positive East) [m/s], shape (..., lat, lon)
-        v: Meridional velocity (positive North) [m/s], shape (..., lat, lon)
-        cell_areas: Cell areas [m²], shape (lat, lon)
-        face_areas_ew: East/West face areas [m], shape (lat, lon+1) or (lat, lon)
-        face_areas_ns: North/South face areas [m], shape (lat+1, lon) or (lat, lon)
-        boundary_conditions: BoundaryConditions object specifying edge behavior
-        mask: Optional ocean/land mask (1=ocean, 0=land), shape (lat, lon)
+        state: Concentration field
+        u: Zonal velocity
+        v: Meridional velocity
+        D: Diffusion coefficient
+        dx: Grid spacing in x
+        dy: Grid spacing in y
+        cell_areas: Cell areas
+        face_areas_ew: East-West face areas
+        face_areas_ns: North-South face areas
+        boundary_conditions: Boundary conditions
+        mask: Ocean/land mask (1=ocean, 0=land)
 
     Returns:
-        Dictionary with:
-        - advection_rate: Advection tendency [Units/s], same shape as state
-
-    Example:
-        >>> from seapopym.transport import compute_advection_tendency
-        >>> from seapopym.transport.boundary import BoundaryConditions, BoundaryType
-        >>> from seapopym.transport.grid import compute_spherical_cell_areas, ...
-        >>>
-        >>> # Setup grid
-        >>> cell_areas = compute_spherical_cell_areas(lats, lons)
-        >>> face_areas_ew = compute_spherical_face_areas_ew(lats, lons)
-        >>> face_areas_ns = compute_spherical_face_areas_ns(lats, lons)
-        >>> bc = BoundaryConditions(
-        ...     north=BoundaryType.CLOSED,
-        ...     south=BoundaryType.CLOSED,
-        ...     east=BoundaryType.PERIODIC,
-        ...     west=BoundaryType.PERIODIC,
-        ... )
-        >>>
-        >>> # Compute tendency
-        >>> result = compute_advection_tendency(
-        ...     state=biomass,
-        ...     u=current_u,
-        ...     v=current_v,
-        ...     cell_areas=cell_areas,
-        ...     face_areas_ew=face_areas_ew,
-        ...     face_areas_ns=face_areas_ns,
-        ...     boundary_conditions=bc,
-        ...     mask=ocean_mask,
-        ... )
-        >>> tendency = result["advection_rate"]
-
-    Reference:
-        IA/transport/advection.py: advection_upwind_flux()
+        Dictionary with all prepared data:
+        - state_clean: Cleaned state
+        - state_neighbors: {'east', 'west', 'north', 'south'}
+        - u_face: {'east', 'west', 'north', 'south'}
+        - v_face: {'east', 'west', 'north', 'south'}
+        - D_face: {'east', 'west', 'north', 'south'}
+        - dx_face: {'east', 'west', 'north', 'south'}
+        - dy_face: {'east', 'west', 'north', 'south'}
+        - face_areas: {'east', 'west', 'north', 'south'}
+        - face_masks: {'east', 'west', 'north', 'south'}
+        - cell_areas: Cell areas
+        - mask: Ocean/land mask
     """
-    # Clean state and velocities (replace NaN with 0 to prevent propagation)
-    # NaN values typically occur in land cells and should not affect ocean calculations
+    dim_y = Coordinates.Y.value
+    dim_x = Coordinates.X.value
+
+    # 1. CLEAN INPUTS (replace NaN with 0 to prevent propagation)
     state_clean = state.fillna(0.0)
     u_clean = u.fillna(0.0)
     v_clean = v.fillna(0.0)
 
-    # Get neighbor values for cleaned state
+    # 2. GET NEIGHBORS
     state_west, state_east, state_south, state_north = get_neighbors_with_bc(
         state_clean, boundary_conditions
     )
-
-    # Get neighbor values for cleaned velocities
     u_west, u_east, u_south, u_north = get_neighbors_with_bc(u_clean, boundary_conditions)
     v_west, v_east, v_south, v_north = get_neighbors_with_bc(v_clean, boundary_conditions)
 
-    # --- VELOCITY INTERPOLATION TO FACES ---
-    # Velocities are defined at cell centers, but we need them at faces
-    # Use simple averaging (can be improved with flux reconstruction)
-
-    # East face (i+1/2): average of current and east neighbor
+    # 3. INTERPOLATE TO FACES
+    # Velocities (always DataArrays)
     u_face_east = 0.5 * (u_clean + u_east)
-    # West face (i-1/2): average of current and west neighbor
     u_face_west = 0.5 * (u_clean + u_west)
-
-    # North face (j+1/2): average of current and north neighbor
     v_face_north = 0.5 * (v_clean + v_north)
-    # South face (j-1/2): average of current and south neighbor
     v_face_south = 0.5 * (v_clean + v_south)
 
-    # --- UPWIND CONCENTRATION SELECTION ---
-    # Choose concentration from upwind cell based on velocity direction
+    # Diffusivity (can be scalar or DataArray)
+    if isinstance(D, xr.DataArray):
+        D_west, D_east, D_south, D_north = get_neighbors_with_bc(D, boundary_conditions)
+        D_face_east = 0.5 * (D + D_east)
+        D_face_west = 0.5 * (D + D_west)
+        D_face_north = 0.5 * (D + D_north)
+        D_face_south = 0.5 * (D + D_south)
+    else:
+        D_face_east = D
+        D_face_west = D
+        D_face_north = D
+        D_face_south = D
 
-    # East face: if u_face_east > 0, flow is West→East, take current cell
-    state_face_east = xr.where(u_face_east > 0, state_clean, state_east)
-    # West face: if u_face_west > 0, flow is West→East, take west neighbor
-    state_face_west = xr.where(u_face_west > 0, state_west, state_clean)
+    # Grid spacing (can be scalar or DataArray)
+    if isinstance(dx, xr.DataArray):
+        dx_west, dx_east, _, _ = get_neighbors_with_bc(dx, boundary_conditions)
+        dx_face_east = 0.5 * (dx + dx_east)
+        dx_face_west = 0.5 * (dx + dx_west)
+    else:
+        dx_face_east = dx
+        dx_face_west = dx
 
-    # North face: if v_face_north > 0, flow is South→North, take current cell
-    state_face_north = xr.where(v_face_north > 0, state_clean, state_north)
-    # South face: if v_face_south > 0, flow is South→North, take south neighbor
-    state_face_south = xr.where(v_face_south > 0, state_south, state_clean)
+    if isinstance(dy, xr.DataArray):
+        _, _, dy_south, dy_north = get_neighbors_with_bc(dy, boundary_conditions)
+        dy_face_north = 0.5 * (dy + dy_north)
+        dy_face_south = 0.5 * (dy + dy_south)
+    else:
+        dy_face_north = dy
+        dy_face_south = dy
 
-    # --- FACE MASKING ---
-    # Create face masks to handle land boundaries and closed boundaries
-
-    # Start with all faces open (mask = 1)
-    face_mask_east = xr.ones_like(state)
-    face_mask_west = xr.ones_like(state)
-    face_mask_north = xr.ones_like(state)
-    face_mask_south = xr.ones_like(state)
+    # 4. FACE MASKS
+    # Start with all faces open
+    face_mask_east = xr.ones_like(state_clean)
+    face_mask_west = xr.ones_like(state_clean)
+    face_mask_north = xr.ones_like(state_clean)
+    face_mask_south = xr.ones_like(state_clean)
 
     # Apply land masking if provided
     if mask is not None:
-        # Ocean mask: 1 = ocean, 0 = land
-        # A face is open only if both adjacent cells are ocean
         mask_west, mask_east, mask_south, mask_north = get_neighbors_with_bc(
             mask, boundary_conditions
         )
-
-        # East face: open if current cell AND east neighbor are ocean
+        # Face is open only if both adjacent cells are ocean
         face_mask_east = face_mask_east * mask * mask_east
-        # West face: open if current cell AND west neighbor are ocean
         face_mask_west = face_mask_west * mask * mask_west
-        # North face: open if current cell AND north neighbor are ocean
         face_mask_north = face_mask_north * mask * mask_north
-        # South face: open if current cell AND south neighbor are ocean
         face_mask_south = face_mask_south * mask * mask_south
 
     # Apply CLOSED boundary conditions
-    # At closed boundaries, set face mask to 0 (no flux)
-
-    # Use standardized coordinate names from Coordinates enum
-    dim_y = Coordinates.Y.value  # "y"
-    dim_x = Coordinates.X.value  # "x"
-
     if boundary_conditions.east == BoundaryType.CLOSED:
-        # Close east boundary: mask cells at last column (no flux through east face)
-        # Using where() with coordinate comparison to set boundary values to 0
         face_mask_east = face_mask_east.where(
             face_mask_east[dim_x] != face_mask_east[dim_x][-1], 0.0
         )
-
     if boundary_conditions.west == BoundaryType.CLOSED:
-        # Close west boundary: mask cells at first column (no flux through west face)
         face_mask_west = face_mask_west.where(
             face_mask_west[dim_x] != face_mask_west[dim_x][0], 0.0
         )
-
     if boundary_conditions.north == BoundaryType.CLOSED:
-        # Close north boundary: mask cells at last row (no flux through north face)
         face_mask_north = face_mask_north.where(
             face_mask_north[dim_y] != face_mask_north[dim_y][-1], 0.0
         )
-
     if boundary_conditions.south == BoundaryType.CLOSED:
-        # Close south boundary: mask cells at first row (no flux through south face)
         face_mask_south = face_mask_south.where(
             face_mask_south[dim_y] != face_mask_south[dim_y][0], 0.0
         )
 
-    # --- FLUX CALCULATION ---
-    # Flux = velocity × concentration × face_area × face_mask
-    # Units: [m/s] × [Units] × [m] × [1] = [Units×m²/s]
+    # 5. EXTRACT FACE AREAS
+    x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)
+    y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)
 
-    # Extract face areas from staggered arrays using dimensional slicing
-    # face_areas_ew: dims (y, x_left) - shape (nlat, nlon+1)
-    # face_areas_ns: dims (y_left, x) - shape (nlat+1, nlon)
-    #
-    # Staggered grid layout (Xgcm convention):
-    # - x_left: face positions at west edges (nlon+1 faces for nlon cells)
-    # - y_left: face positions at south edges (nlat+1 faces for nlat cells)
-
-    # Get dimension names following Xgcm convention
-    x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)  # "x_left"
-    y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)  # "y_left"
-
-    # Extract face areas using dimensional slicing
-    # We extract .values and create fresh DataArrays to avoid coordinate conflicts
-    # during broadcasting (rename() can preserve incompatible coordinates)
-
-    # East flux: uses east face (index 1:) of east-west face areas
     area_east = xr.DataArray(
         face_areas_ew.isel({x_face_dim: slice(1, None)}).values, dims=(dim_y, dim_x)
     )
-    flux_east = u_face_east * state_face_east * area_east * face_mask_east
-
-    # West flux: uses west face (index :-1) of east-west face areas
     area_west = xr.DataArray(
         face_areas_ew.isel({x_face_dim: slice(None, -1)}).values, dims=(dim_y, dim_x)
     )
-    flux_west = u_face_west * state_face_west * area_west * face_mask_west
-
-    # North flux: uses north face (index 1:) of north-south face areas
     area_north = xr.DataArray(
         face_areas_ns.isel({y_face_dim: slice(1, None)}).values, dims=(dim_y, dim_x)
     )
-    flux_north = v_face_north * state_face_north * area_north * face_mask_north
-
-    # South flux: uses south face (index :-1) of north-south face areas
     area_south = xr.DataArray(
         face_areas_ns.isel({y_face_dim: slice(None, -1)}).values, dims=(dim_y, dim_x)
     )
-    flux_south = v_face_south * state_face_south * area_south * face_mask_south
 
-    # --- FLUX DIVERGENCE ---
-    # Divergence = (flux_in - flux_out) / cell_volume
-    # For 2D: divergence = (flux_east - flux_west + flux_north - flux_south) / cell_area
+    return {
+        "state_clean": state_clean,
+        "state_neighbors": {
+            "east": state_east,
+            "west": state_west,
+            "north": state_north,
+            "south": state_south,
+        },
+        "u_face": {
+            "east": u_face_east,
+            "west": u_face_west,
+        },
+        "v_face": {
+            "north": v_face_north,
+            "south": v_face_south,
+        },
+        "D_face": {
+            "east": D_face_east,
+            "west": D_face_west,
+            "north": D_face_north,
+            "south": D_face_south,
+        },
+        "dx_face": {
+            "east": dx_face_east,
+            "west": dx_face_west,
+        },
+        "dy_face": {
+            "north": dy_face_north,
+            "south": dy_face_south,
+        },
+        "face_areas": {
+            "east": area_east,
+            "west": area_west,
+            "north": area_north,
+            "south": area_south,
+        },
+        "face_masks": {
+            "east": face_mask_east,
+            "west": face_mask_west,
+            "north": face_mask_north,
+            "south": face_mask_south,
+        },
+        "cell_areas": cell_areas,
+        "mask": mask,
+    }
 
-    # Note: The sign convention is:
-    # - Positive flux_east = flow leaving through east face
-    # - Negative flux_west = flow entering through west face
-    # Net outflow = flux_east - flux_west + flux_north - flux_south
 
-    flux_divergence = (flux_east - flux_west + flux_north - flux_south) / cell_areas
+def _compute_divergence(
+    fluxes: dict[str, xr.DataArray],
+    cell_areas: xr.DataArray,
+) -> xr.DataArray:
+    """Compute flux divergence.
 
-    # --- TENDENCY ---
-    # Advection tendency = -divergence(flux)
-    advection_rate = -flux_divergence
+    Args:
+        fluxes: Dictionary with 'flux_east', 'flux_west', 'flux_north', 'flux_south'
+        cell_areas: Cell areas
 
-    # Apply mask to final result (ensure land stays at zero)
-    if mask is not None:
-        advection_rate = advection_rate * mask
-
-    # Restore original dimension order
-    advection_rate = advection_rate.transpose(*state.dims)
-
-    return {"advection_rate": advection_rate}
+    Returns:
+        Flux divergence
+    """
+    return (
+        fluxes["flux_east"] - fluxes["flux_west"] + fluxes["flux_north"] - fluxes["flux_south"]
+    ) / cell_areas
 
 
-def compute_advection_numba(
+# =============================================================================
+# FLUX COMPUTATION (XARRAY)
+# =============================================================================
+
+
+def _compute_advection_flux_xarray(
+    state_center: xr.DataArray,
+    state_neighbors: dict[str, xr.DataArray],
+    u_face: dict[str, xr.DataArray],
+    v_face: dict[str, xr.DataArray],
+    face_areas: dict[str, xr.DataArray],
+    face_masks: dict[str, xr.DataArray],
+) -> dict[str, xr.DataArray]:
+    """Compute advection fluxes using upwind scheme (Xarray implementation).
+
+    Args:
+        state_center: Concentration at cell centers
+        state_neighbors: Neighbor concentrations {'east', 'west', 'north', 'south'}
+        u_face: Zonal velocities at faces
+        v_face: Meridional velocities at faces
+        face_areas: Face areas
+        face_masks: Face masks
+
+    Returns:
+        Dictionary with 'flux_east', 'flux_west', 'flux_north', 'flux_south'
+    """
+    # UPWIND SELECTION
+    # East face: if u > 0, flow is West→East, take current cell
+    state_face_east = xr.where(u_face["east"] > 0, state_center, state_neighbors["east"])
+    # West face: if u > 0, flow is West→East, take west neighbor
+    state_face_west = xr.where(u_face["west"] > 0, state_neighbors["west"], state_center)
+
+    # North face: if v > 0, flow is South→North, take current cell
+    state_face_north = xr.where(v_face["north"] > 0, state_center, state_neighbors["north"])
+    # South face: if v > 0, flow is South→North, take south neighbor
+    state_face_south = xr.where(v_face["south"] > 0, state_neighbors["south"], state_center)
+
+    # FLUXES: velocity × concentration × face_area × face_mask
+    flux_east = u_face["east"] * state_face_east * face_areas["east"] * face_masks["east"]
+    flux_west = u_face["west"] * state_face_west * face_areas["west"] * face_masks["west"]
+    flux_north = v_face["north"] * state_face_north * face_areas["north"] * face_masks["north"]
+    flux_south = v_face["south"] * state_face_south * face_areas["south"] * face_masks["south"]
+
+    return {
+        "flux_east": flux_east,
+        "flux_west": flux_west,
+        "flux_north": flux_north,
+        "flux_south": flux_south,
+    }
+
+
+def _compute_diffusion_flux_xarray(
+    state_center: xr.DataArray,
+    state_neighbors: dict[str, xr.DataArray],
+    D_face: dict[str, xr.DataArray | float],
+    dx_face: dict[str, xr.DataArray | float],
+    dy_face: dict[str, xr.DataArray | float],
+    face_areas: dict[str, xr.DataArray],
+    face_masks: dict[str, xr.DataArray],
+) -> dict[str, xr.DataArray]:
+    """Compute diffusion fluxes using gradient method (Xarray implementation).
+
+    Args:
+        state_center: Concentration at cell centers
+        state_neighbors: Neighbor concentrations
+        D_face: Diffusivity at faces
+        dx_face: Grid spacing x at faces
+        dy_face: Grid spacing y at faces
+        face_areas: Face areas
+        face_masks: Face masks
+
+    Returns:
+        Dictionary with 'flux_east', 'flux_west', 'flux_north', 'flux_south'
+    """
+    # GRADIENTS
+    grad_x_east = (state_neighbors["east"] - state_center) / dx_face["east"]
+    grad_x_west = (state_center - state_neighbors["west"]) / dx_face["west"]
+    grad_y_north = (state_neighbors["north"] - state_center) / dy_face["north"]
+    grad_y_south = (state_center - state_neighbors["south"]) / dy_face["south"]
+
+    # FLUXES: -D × gradient × face_area × face_mask
+    flux_east = -D_face["east"] * grad_x_east * face_areas["east"] * face_masks["east"]
+    flux_west = -D_face["west"] * grad_x_west * face_areas["west"] * face_masks["west"]
+    flux_north = -D_face["north"] * grad_y_north * face_areas["north"] * face_masks["north"]
+    flux_south = -D_face["south"] * grad_y_south * face_areas["south"] * face_masks["south"]
+
+    return {
+        "flux_east": flux_east,
+        "flux_west": flux_west,
+        "flux_north": flux_north,
+        "flux_south": flux_south,
+    }
+
+
+# =============================================================================
+# ORCHESTRATORS
+# =============================================================================
+
+
+def compute_transport_xarray(
     state: xr.DataArray,
     u: xr.DataArray,
     v: xr.DataArray,
+    D: xr.DataArray | float,
+    dx: xr.DataArray | float,
+    dy: xr.DataArray | float,
     cell_areas: xr.DataArray,
     face_areas_ew: xr.DataArray,
     face_areas_ns: xr.DataArray,
     boundary_conditions: BoundaryConditions,
     mask: xr.DataArray | None = None,
-) -> dict[str, Any]:
-    """Compute advection tendency using Numba-accelerated kernel.
+) -> dict[str, xr.DataArray]:
+    """Compute transport tendencies using Xarray implementation.
 
-    This function wraps the JIT-compiled `advection_upwind_numba` kernel using `xr.apply_ufunc`.
-    It provides significant performance improvements (10x-50x) over the pure Python version
-    and handles automatic broadcasting and Dask parallelization.
+    This function computes both advection and diffusion tendencies using a unified
+    finite volume approach that guarantees mass conservation.
 
     Args:
-        state: Concentration field (..., lat, lon)
-        u: Zonal velocity (..., lat, lon)
-        v: Meridional velocity (..., lat, lon)
-        cell_areas: Cell areas (lat, lon)
-        face_areas_ew: East/West face areas (lat, lon+1)
-        face_areas_ns: North/South face areas (lat+1, lon)
-        boundary_conditions: Boundary configuration
-        mask: Optional mask (lat, lon)
+        state: Concentration field [Units], shape (..., lat, lon)
+        u: Zonal velocity [m/s], shape (..., lat, lon)
+        v: Meridional velocity [m/s], shape (..., lat, lon)
+        D: Diffusion coefficient [m²/s], scalar or DataArray
+        dx: Grid spacing in X [m], scalar or DataArray
+        dy: Grid spacing in Y [m], scalar or DataArray
+        cell_areas: Cell areas [m²], shape (lat, lon)
+        face_areas_ew: East/West face areas [m], shape (lat, lon+1)
+        face_areas_ns: North/South face areas [m], shape (lat+1, lon)
+        boundary_conditions: Boundary conditions
+        mask: Ocean/land mask (1=ocean, 0=land), shape (lat, lon)
 
     Returns:
-        Dictionary with "advection_rate".
+        Dictionary with:
+        - advection_rate: Advection tendency [Units/s]
+        - diffusion_rate: Diffusion tendency [Units/s]
+
+    Example:
+        >>> result = compute_transport_xarray(...)
+        >>> total_tendency = result['advection_rate'] + result['diffusion_rate']
+        >>> biomass_new = biomass + total_tendency * dt
+    """
+    # 1. PREPARE (shared data preparation)
+    prepared = _prepare_transport_data(
+        state, u, v, D, dx, dy, cell_areas, face_areas_ew, face_areas_ns, boundary_conditions, mask
+    )
+
+    # 2. COMPUTE FLUXES (Xarray)
+    flux_adv = _compute_advection_flux_xarray(
+        prepared["state_clean"],
+        prepared["state_neighbors"],
+        prepared["u_face"],
+        prepared["v_face"],
+        prepared["face_areas"],
+        prepared["face_masks"],
+    )
+
+    flux_diff = _compute_diffusion_flux_xarray(
+        prepared["state_clean"],
+        prepared["state_neighbors"],
+        prepared["D_face"],
+        prepared["dx_face"],
+        prepared["dy_face"],
+        prepared["face_areas"],
+        prepared["face_masks"],
+    )
+
+    # 3. DIVERGENCES (shared)
+    div_adv = _compute_divergence(flux_adv, prepared["cell_areas"])
+    div_diff = _compute_divergence(flux_diff, prepared["cell_areas"])
+
+    # 4. TENDENCIES
+    advection_rate = -div_adv
+    diffusion_rate = -div_diff
+
+    # Apply mask to final results
+    if mask is not None:
+        advection_rate = advection_rate * mask
+        diffusion_rate = diffusion_rate * mask
+
+    # Restore original dimension order
+    advection_rate = advection_rate.transpose(*state.dims)
+    diffusion_rate = diffusion_rate.transpose(*state.dims)
+
+    return {
+        "advection_rate": advection_rate,
+        "diffusion_rate": diffusion_rate,
+    }
+
+
+# =============================================================================
+# FLUX COMPUTATION (NUMBA)
+# =============================================================================
+
+
+def _compute_advection_flux_numba(prepared: dict) -> dict[str, xr.DataArray]:
+    """Compute advection fluxes using Numba-accelerated kernel.
+
+    Args:
+        prepared: Prepared data dictionary from _prepare_transport_data()
+
+    Returns:
+        Dictionary with 'flux_east', 'flux_west', 'flux_north', 'flux_south'
     """
     try:
-        from seapopym.transport.numba_kernels import advection_upwind_numba
+        from seapopym.transport.numba_kernels import advection_flux_numba
     except ImportError as err:
-        raise ImportError(
-            "Numba is required for `compute_advection_numba`. "
-            "Please install it or use specific pip extras."
-        ) from err
+        raise ImportError("Numba is required for Numba implementation.") from err
 
-    # Use standardized coordinate names
     dim_y = Coordinates.Y.value
     dim_x = Coordinates.X.value
 
-    # Clean state and velocities (replace NaN with 0 to prevent propagation)
-    # NaN values typically occur in land cells and should not affect ocean calculations
-    state = state.fillna(0.0)
-    u = u.fillna(0.0)
-    v = v.fillna(0.0)
-
-    # 1. Prepare Mask
-    # Ensure mask is float type for consistency with kernel signature
-    mask = xr.ones_like(cell_areas) if mask is None else mask.astype(cell_areas.dtype)
-
-    # 2. Prepare Face Areas
-    x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)
-    y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)
-
-    # Extract East and North face areas (for cell i, j)
-    # For apply_ufunc with Numba, we need to create clean DataArrays without coordinate conflicts
-    # Using .values and reconstructing ensures proper alignment in apply_ufunc
-    area_east = xr.DataArray(
-        face_areas_ew.isel({x_face_dim: slice(1, None)}).values, dims=(dim_y, dim_x)
-    )
-    area_north = xr.DataArray(
-        face_areas_ns.isel({y_face_dim: slice(1, None)}).values, dims=(dim_y, dim_x)
-    )
-
-    # 3. Prepare BC encoding
-    # 0: Closed, 1: Periodic
+    # Prepare boundary conditions encoding
     bc_vals = np.array(
         [
-            0 if boundary_conditions.north == BoundaryType.CLOSED else 1,
-            0 if boundary_conditions.south == BoundaryType.CLOSED else 1,
-            0 if boundary_conditions.east == BoundaryType.CLOSED else 1,
-            0 if boundary_conditions.west == BoundaryType.CLOSED else 1,
+            0 if prepared["boundary_conditions"].north == BoundaryType.CLOSED else 1,
+            0 if prepared["boundary_conditions"].south == BoundaryType.CLOSED else 1,
+            0 if prepared["boundary_conditions"].east == BoundaryType.CLOSED else 1,
+            0 if prepared["boundary_conditions"].west == BoundaryType.CLOSED else 1,
         ],
         dtype=np.int32,
     )
-
     bc_da = xr.DataArray(bc_vals, dims="boundary_params")
 
-    # 4. Call Kernel via apply_ufunc
-    # This handles broadcasting of u/v against state (e.g. if u misses 'cohort' dim)
-    # and Dask parallelization if inputs are dask arrays.
-    res = xr.apply_ufunc(
-        advection_upwind_numba,
-        state,
-        u,
-        v,
-        area_east,
-        area_north,
-        cell_areas,
+    # Get mask (create if None)
+    mask = prepared["mask"]
+    if mask is None:
+        mask = xr.ones_like(prepared["state_clean"])
+
+    # Call kernel via apply_ufunc
+    flux_e, flux_w, flux_n, flux_s = xr.apply_ufunc(
+        advection_flux_numba,
+        prepared["state_clean"],
+        prepared["u_clean"],
+        prepared["v_clean"],
+        prepared["face_areas"]["east"],  # ew_area
+        prepared["face_areas"]["north"],  # ns_area
         mask,
         bc_da,
         input_core_dims=[
             [dim_y, dim_x],  # state
             [dim_y, dim_x],  # u
             [dim_y, dim_x],  # v
-            [dim_y, dim_x],  # ew
-            [dim_y, dim_x],  # ns
-            [dim_y, dim_x],  # cell
+            [dim_y, dim_x],  # ew_area
+            [dim_y, dim_x],  # ns_area
             [dim_y, dim_x],  # mask
             ["boundary_params"],  # bc
         ],
-        output_core_dims=[[dim_y, dim_x]],
-        dask="parallelizable",
-        output_dtypes=[state.dtype],
+        output_core_dims=[
+            [dim_y, dim_x],  # flux_east
+            [dim_y, dim_x],  # flux_west
+            [dim_y, dim_x],  # flux_north
+            [dim_y, dim_x],  # flux_south
+        ],
+        dask="parallelized",
+        output_dtypes=[prepared["state_clean"].dtype] * 4,
     )
 
-    return {"advection_rate": res}
+    return {
+        "flux_east": flux_e,
+        "flux_west": flux_w,
+        "flux_north": flux_n,
+        "flux_south": flux_s,
+    }
 
 
-def compute_diffusion_tendency(
+def _compute_diffusion_flux_numba(prepared: dict) -> dict[str, xr.DataArray]:
+    """Compute diffusion fluxes using Numba-accelerated kernel.
+
+    Args:
+        prepared: Prepared data dictionary from _prepare_transport_data()
+
+    Returns:
+        Dictionary with 'flux_east', 'flux_west', 'flux_north', 'flux_south'
+    """
+    try:
+        from seapopym.transport.numba_kernels import diffusion_flux_numba
+    except ImportError as err:
+        raise ImportError("Numba is required for Numba implementation.") from err
+
+    dim_y = Coordinates.Y.value
+    dim_x = Coordinates.X.value
+
+    # Ensure D, dx, dy are DataArrays
+    def _ensure_da(val: xr.DataArray | float, template: xr.DataArray) -> xr.DataArray:
+        if isinstance(val, int | float):
+            return xr.full_like(template, val)
+        return val
+
+    state = prepared["state_clean"]
+    D_da = _ensure_da(prepared["D"], state)
+    dx_da = _ensure_da(prepared["dx"], state)
+    dy_da = _ensure_da(prepared["dy"], state)
+
+    # Prepare boundary conditions
+    bc_vals = np.array(
+        [
+            0 if prepared["boundary_conditions"].north == BoundaryType.CLOSED else 1,
+            0 if prepared["boundary_conditions"].south == BoundaryType.CLOSED else 1,
+            0 if prepared["boundary_conditions"].east == BoundaryType.CLOSED else 1,
+            0 if prepared["boundary_conditions"].west == BoundaryType.CLOSED else 1,
+        ],
+        dtype=np.int32,
+    )
+    bc_da = xr.DataArray(bc_vals, dims="boundary_params")
+
+    # Get mask
+    mask = prepared["mask"]
+    if mask is None:
+        mask = xr.ones_like(state)
+
+    # Call kernel
+    flux_e, flux_w, flux_n, flux_s = xr.apply_ufunc(
+        diffusion_flux_numba,
+        state,
+        D_da,
+        dx_da,
+        dy_da,
+        prepared["face_areas"]["east"],  # ew_area
+        prepared["face_areas"]["north"],  # ns_area
+        mask,
+        bc_da,
+        input_core_dims=[
+            [dim_y, dim_x],  # state
+            [dim_y, dim_x],  # D
+            [dim_y, dim_x],  # dx
+            [dim_y, dim_x],  # dy
+            [dim_y, dim_x],  # ew_area
+            [dim_y, dim_x],  # ns_area
+            [dim_y, dim_x],  # mask
+            ["boundary_params"],  # bc
+        ],
+        output_core_dims=[
+            [dim_y, dim_x],  # flux_east
+            [dim_y, dim_x],  # flux_west
+            [dim_y, dim_x],  # flux_north
+            [dim_y, dim_x],  # flux_south
+        ],
+        dask="parallelized",
+        output_dtypes=[state.dtype] * 4,
+    )
+
+    return {
+        "flux_east": flux_e,
+        "flux_west": flux_w,
+        "flux_north": flux_n,
+        "flux_south": flux_s,
+    }
+
+
+def compute_transport_numba(
     state: xr.DataArray,
+    u: xr.DataArray,
+    v: xr.DataArray,
     D: xr.DataArray | float,
     dx: xr.DataArray | float,
     dy: xr.DataArray | float,
+    cell_areas: xr.DataArray,
+    face_areas_ew: xr.DataArray,
+    face_areas_ns: xr.DataArray,
     boundary_conditions: BoundaryConditions,
     mask: xr.DataArray | None = None,
-) -> dict[str, Any]:
-    """Compute diffusion tendency using explicit Laplacian with varying dx.
+) -> dict[str, xr.DataArray]:
+    """Compute transport tendencies using Numba-accelerated implementation.
 
-    This function implements the diffusion equation:
-        dC/dt = D × ∇²C = D × (∂²C/∂x² + ∂²C/∂y²)
-
-    The Laplacian is approximated using centered finite differences:
-        ∂²C/∂x² ≈ (C_east - 2C + C_west) / dx²
-        ∂²C/∂y² ≈ (C_north - 2C + C_south) / dy²
-
-    For spherical grids, dx varies with latitude:
-        dx(lat) = R × cos(lat) × dλ
-
-    This variation must be accounted for in the discretization.
-
-    Boundary conditions:
-    - CLOSED/OPEN: Zero-gradient (Neumann BC: ∂C/∂n = 0)
-      Implemented by copying edge values to ghost cells
-    - PERIODIC: Wrap around (handled by get_neighbors_with_bc)
-
-    Land masking:
-    - Ocean cells: Normal diffusion
-    - Land cells: Set to zero
-    - Ocean-land boundaries: Zero-gradient BC (copy ocean value to land neighbor)
-      This prevents artificial gradients and mass loss
-
-    Stability constraint:
-        dt ≤ min(dx², dy²) / (4 × D)
-
-    Use check_diffusion_stability() from stability.py to verify before running.
+    This function computes both advection and diffusion tendencies using Numba-accelerated
+    kernels for optimal performance while maintaining mass conservation.
 
     Args:
         state: Concentration field [Units], shape (..., lat, lon)
+        u: Zonal velocity [m/s], shape (..., lat, lon)
+        v: Meridional velocity [m/s], shape (..., lat, lon)
         D: Diffusion coefficient [m²/s], scalar or DataArray
-        dx: Grid spacing in X direction [m], shape (lat, lon) or scalar
-        dy: Grid spacing in Y direction [m], shape (lat, lon) or scalar
-        boundary_conditions: BoundaryConditions object specifying edge behavior
-        mask: Optional ocean/land mask (1=ocean, 0=land), shape (lat, lon)
+        dx: Grid spacing in X [m], scalar or DataArray
+        dy: Grid spacing in Y [m], scalar or DataArray
+        cell_areas: Cell areas [m²], shape (lat, lon)
+        face_areas_ew: East/West face areas [m], shape (lat, lon+1)
+        face_areas_ns: North/South face areas [m], shape (lat+1, lon)
+        boundary_conditions: Boundary conditions
+        mask: Ocean/land mask (1=ocean, 0=land), shape (lat, lon)
 
     Returns:
         Dictionary with:
-        - diffusion_rate: Diffusion tendency [Units/s], same shape as state
+        - advection_rate: Advection tendency [Units/s]
+        - diffusion_rate: Diffusion tendency [Units/s]
 
     Example:
-        >>> from seapopym.transport import compute_diffusion_tendency
-        >>> from seapopym.transport.boundary import BoundaryConditions, BoundaryType
-        >>> from seapopym.transport.grid import compute_spherical_dx, compute_spherical_dy
-        >>> from seapopym.transport.stability import check_diffusion_stability
-        >>>
-        >>> # Setup grid
-        >>> dx = compute_spherical_dx(lats, lons)
-        >>> dy = compute_spherical_dy(lats, lons)
-        >>> bc = BoundaryConditions(
-        ...     north=BoundaryType.CLOSED,
-        ...     south=BoundaryType.CLOSED,
-        ...     east=BoundaryType.PERIODIC,
-        ...     west=BoundaryType.PERIODIC,
-        ... )
-        >>>
-        >>> # Check stability
-        >>> stability = check_diffusion_stability(D=1000.0, dx=dx, dy=dy, dt=3600.0)
-        >>> if not stability["is_stable"]:
-        ...     raise ValueError(f"Unstable! Reduce dt to {stability['dt_max']:.1f} s")
-        >>>
-        >>> # Compute tendency
-        >>> result = compute_diffusion_tendency(
-        ...     state=biomass,
-        ...     D=1000.0,
-        ...     dx=dx,
-        ...     dy=dy,
-        ...     boundary_conditions=bc,
-        ...     mask=ocean_mask,
-        ... )
-        >>> tendency = result["diffusion_rate"]
-
-    Reference:
-        IA/transport/diffusion.py: diffusion_explicit_spherical()
+        >>> result = compute_transport_numba(...)
+        >>> total_tendency = result['advection_rate'] + result['diffusion_rate']
+        >>> biomass_new = biomass + total_tendency * dt
     """
-    # Clean state (replace NaN with 0 to prevent propagation)
-    # NaN values typically occur in land cells and should not affect ocean calculations
-    state = state.fillna(0.0)
-
-    # Get neighbor values for state
-    state_west, state_east, state_south, state_north = get_neighbors_with_bc(
-        state, boundary_conditions
+    # 1. PREPARE (shared data preparation)
+    prepared = _prepare_transport_data(
+        state, u, v, D, dx, dy, cell_areas, face_areas_ew, face_areas_ns, boundary_conditions, mask
     )
 
-    # Apply land masking to state and neighbors (Neumann BC at ocean-land boundaries)
+    # Store additional info needed by Numba wrappers
+    prepared["boundary_conditions"] = boundary_conditions
+    prepared["D"] = D
+    prepared["dx"] = dx
+    prepared["dy"] = dy
+    prepared["u_clean"] = u.fillna(0.0)
+    prepared["v_clean"] = v.fillna(0.0)
+
+    # 2. COMPUTE FLUXES (Numba)
+    flux_adv = _compute_advection_flux_numba(prepared)
+    flux_diff = _compute_diffusion_flux_numba(prepared)
+
+    # 3. DIVERGENCES (shared)
+    div_adv = _compute_divergence(flux_adv, prepared["cell_areas"])
+    div_diff = _compute_divergence(flux_diff, prepared["cell_areas"])
+
+    # 4. TENDENCIES
+    advection_rate = -div_adv
+    diffusion_rate = -div_diff
+
+    # Apply mask to final results
     if mask is not None:
-        # Ocean mask: 1 = ocean, 0 = land
-        # Apply mask to current state (set land to zero)
-        state_clean = state * mask
-
-        # Get neighbor masks
-        mask_west, mask_east, mask_south, mask_north = get_neighbors_with_bc(
-            mask, boundary_conditions
-        )
-
-        # For ocean-land boundaries, use zero-gradient BC:
-        # If neighbor is land (mask=0), replace neighbor value with current cell value
-        # This ensures ∂C/∂n = 0 at the boundary
-
-        # East neighbor: if land, use current value
-        state_east = xr.where(mask_east == 0, state_clean, state_east)
-        # West neighbor: if land, use current value
-        state_west = xr.where(mask_west == 0, state_clean, state_west)
-        # North neighbor: if land, use current value
-        state_north = xr.where(mask_north == 0, state_clean, state_north)
-        # South neighbor: if land, use current value
-        state_south = xr.where(mask_south == 0, state_clean, state_south)
-
-        # Use masked state for computation
-        state = state_clean
-    else:
-        # No masking needed
-        pass
-
-    # --- LAPLACIAN CALCULATION ---
-    # Compute second derivatives using centered differences
-
-    # Compute squared grid spacings (works for both scalar and DataArray)
-    dx_sq = dx**2
-    dy_sq = dy**2
-
-    # Second derivative in x direction (longitude)
-    # ∂²C/∂x² ≈ (C_east - 2C + C_west) / dx²
-    d2C_dx2 = (state_east - 2 * state + state_west) / dx_sq
-
-    # Second derivative in y direction (latitude)
-    # ∂²C/∂y² ≈ (C_north - 2C + C_south) / dy²
-    d2C_dy2 = (state_north - 2 * state + state_south) / dy_sq
-
-    # Laplacian: ∇²C = ∂²C/∂x² + ∂²C/∂y²
-    laplacian = d2C_dx2 + d2C_dy2
-
-    # --- DIFFUSION TENDENCY ---
-    # dC/dt = D × ∇²C
-    diffusion_rate = D * laplacian
-
-    # Apply mask to final result (ensure land stays at zero)
-    if mask is not None:
+        advection_rate = advection_rate * mask
         diffusion_rate = diffusion_rate * mask
 
-    return {"diffusion_rate": diffusion_rate}
+    # Restore original dimension order
+    advection_rate = advection_rate.transpose(*state.dims)
+    diffusion_rate = diffusion_rate.transpose(*state.dims)
+
+    return {
+        "advection_rate": advection_rate,
+        "diffusion_rate": diffusion_rate,
+    }
