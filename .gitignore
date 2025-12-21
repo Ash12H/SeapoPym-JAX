@@ -4,6 +4,8 @@
 *.hdf5
 *.h5
 *.csv
+*.xml
+*.gif
 
 # Python
 __pycache__/
@@ -82,22 +84,9 @@ dmypy.json
 docs/_build/
 site/
 
-# Ray
-/tmp/ray/
-
-# Data files (large)
-*.nc
-*.zarr
-*.hdf5
-*.h5
-data/
-outputs/
-results/
-
 # Logs
 *.log
 
 # Environment variables
 .env
 .env.local
-data/
