@@ -20,17 +20,30 @@ from seapopym.transport.boundary import BoundaryConditions, BoundaryType, get_ne
 
 
 def _ensure_dataarray(value: xr.DataArray | float, template: xr.DataArray) -> xr.DataArray:
-    """Convert scalar to DataArray if needed.
+    """Convert scalar and non-spatial DataArrays to DataArray with spatial dimensions.
 
     Args:
-        value: Scalar or DataArray to ensure is a DataArray
-        template: Template DataArray for shape/dims if value is scalar
+        value: Scalar or DataArray to ensure has correct spatial dimensions
+        template: Template DataArray for spatial shape/dims
 
     Returns:
-        DataArray with same shape as template
+        DataArray with at least the same spatial dimensions as template
     """
-    if isinstance(value, int | float):
+    dim_y = Coordinates.Y.value
+    dim_x = Coordinates.X.value
+
+    if not isinstance(value, xr.DataArray):
+        # Bare float/int
         return xr.full_like(template, value)
+
+    # It's a DataArray. Check if it has the required spatial dimensions.
+    if dim_y not in value.dims or dim_x not in value.dims:
+        # 0D DataArray or DataArray with other dims (e.g. time) but no space.
+        # Broadcast to template's spatial grid.
+        # We use a simple addition with zeros to handle broadcasting.
+        # This preserves 'value' attributes and extra dimensions (like time).
+        return value + xr.zeros_like(template)
+
     return value
 
 
@@ -43,10 +56,10 @@ def _encode_boundary_conditions(
     """Encode boundary conditions as integer array for Numba kernels.
 
     Args:
-        boundary_north: Northern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_south: Southern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_east: Eastern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_west: Western boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
 
     Returns:
         DataArray with shape (4,) encoding [north, south, east, west] as 0=CLOSED, 1=PERIODIC
@@ -115,24 +128,12 @@ def _prepare_transport_data(
         - mask: Ocean/land mask
     """  # noqa: D202
 
-    # Reconstruct BoundaryConditions object for internal use
-    # Mapping: 0=CLOSED, 1=PERIODIC
-    def _int_to_boundary_type(val: int | float) -> BoundaryType:
-        val_int = int(val)
-        if val_int == 0:
-            return BoundaryType.CLOSED
-        elif val_int == 1:
-            return BoundaryType.PERIODIC
-        else:
-            raise ValueError(
-                f"Invalid boundary condition value: {val}. Must be 0 (CLOSED) or 1 (PERIODIC)"
-            )
-
+    # Reconstruct BoundaryConditions object for internal use from integers
     boundary_conditions = BoundaryConditions(
-        north=_int_to_boundary_type(boundary_north),
-        south=_int_to_boundary_type(boundary_south),
-        east=_int_to_boundary_type(boundary_east),
-        west=_int_to_boundary_type(boundary_west),
+        north=BoundaryType(int(boundary_north)),
+        south=BoundaryType(int(boundary_south)),
+        east=BoundaryType(int(boundary_east)),
+        west=BoundaryType(int(boundary_west)),
     )
 
     dim_y = Coordinates.Y.value
@@ -157,35 +158,24 @@ def _prepare_transport_data(
     v_face_north = 0.5 * (v_clean + v_north)
     v_face_south = 0.5 * (v_clean + v_south)
 
-    # Diffusivity (can be scalar or DataArray)
-    if isinstance(D, xr.DataArray):
-        D_west, D_east, D_south, D_north = get_neighbors_with_bc(D, boundary_conditions)
-        D_face_east = 0.5 * (D + D_east)
-        D_face_west = 0.5 * (D + D_west)
-        D_face_north = 0.5 * (D + D_north)
-        D_face_south = 0.5 * (D + D_south)
-    else:
-        D_face_east = D
-        D_face_west = D
-        D_face_north = D
-        D_face_south = D
+    # Diffusivity (now always spatial DataArray)
+    D_spatial = _ensure_dataarray(D, state_clean)
+    D_west, D_east, D_south, D_north = get_neighbors_with_bc(D_spatial, boundary_conditions)
+    D_face_east = 0.5 * (D_spatial + D_east)
+    D_face_west = 0.5 * (D_spatial + D_west)
+    D_face_north = 0.5 * (D_spatial + D_north)
+    D_face_south = 0.5 * (D_spatial + D_south)
 
-    # Grid spacing (can be scalar or DataArray)
-    if isinstance(dx, xr.DataArray):
-        dx_west, dx_east, _, _ = get_neighbors_with_bc(dx, boundary_conditions)
-        dx_face_east = 0.5 * (dx + dx_east)
-        dx_face_west = 0.5 * (dx + dx_west)
-    else:
-        dx_face_east = dx
-        dx_face_west = dx
+    # Grid spacing (now always spatial DataArray)
+    dx_spatial = _ensure_dataarray(dx, state_clean)
+    dx_west, dx_east, _, _ = get_neighbors_with_bc(dx_spatial, boundary_conditions)
+    dx_face_east = 0.5 * (dx_spatial + dx_east)
+    dx_face_west = 0.5 * (dx_spatial + dx_west)
 
-    if isinstance(dy, xr.DataArray):
-        _, _, dy_south, dy_north = get_neighbors_with_bc(dy, boundary_conditions)
-        dy_face_north = 0.5 * (dy + dy_north)
-        dy_face_south = 0.5 * (dy + dy_south)
-    else:
-        dy_face_north = dy
-        dy_face_south = dy
+    dy_spatial = _ensure_dataarray(dy, state_clean)
+    _, _, dy_south, dy_north = get_neighbors_with_bc(dy_spatial, boundary_conditions)
+    dy_face_north = 0.5 * (dy_spatial + dy_north)
+    dy_face_south = 0.5 * (dy_spatial + dy_south)
 
     # 4. FACE MASKS
     # Start with all faces open
@@ -442,10 +432,10 @@ def compute_transport_xarray(
         face_areas_ew: East/West face areas [m], shape (lat, lon+1)
         face_areas_ns: North/South face areas [m], shape (lat+1, lon)
         mask: Ocean/land mask (1=ocean, 0=land), shape (lat, lon)
-        boundary_north: Northern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_south: Southern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_east: Eastern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_west: Western boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
 
     Returns:
         Dictionary with:
@@ -564,10 +554,10 @@ def compute_transport_numba(
         face_areas_ew: East/West face areas [m], shape (lat, lon+1)
         face_areas_ns: North/South face areas [m], shape (lat+1, lon)
         mask: Ocean/land mask (1=ocean, 0=land), shape (lat, lon)
-        boundary_north: Northern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_south: Southern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_east: Eastern boundary condition (0=CLOSED, 1=PERIODIC)
-        boundary_west: Western boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
 
     Returns:
         Dictionary with:

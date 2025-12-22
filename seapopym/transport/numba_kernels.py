@@ -80,32 +80,40 @@ def advection_flux_numba(state, u, v, ew_area, ns_area, mask, bc, flux_e, flux_w
             # East (i+1)
             ip1 = i + 1
             if ip1 >= nx:
-                if bc_east == 1:  # noqa: SIM108
+                if bc_east == 2:  # PERIODIC
                     ip1 = 0
+                elif bc_east == 1:  # OPEN
+                    ip1 = i
                 else:
-                    ip1 = -1  # Closed
+                    ip1 = -1  # CLOSED
 
             # West (i-1)
             im1 = i - 1
             if im1 < 0:
-                if bc_west == 1:  # noqa: SIM108
+                if bc_west == 2:  # PERIODIC
                     im1 = nx - 1
+                elif bc_west == 1:  # OPEN
+                    im1 = i
                 else:
                     im1 = -1
 
             # North (j+1)
             jp1 = j + 1
             if jp1 >= ny:
-                if bc_north == 1:  # noqa: SIM108
+                if bc_north == 2:  # PERIODIC
                     jp1 = 0
+                elif bc_north == 1:  # OPEN
+                    jp1 = j
                 else:
                     jp1 = -1
 
             # South (j-1)
             jm1 = j - 1
             if jm1 < 0:
-                if bc_south == 1:  # noqa: SIM108
+                if bc_south == 2:  # PERIODIC
                     jm1 = ny - 1
+                elif bc_south == 1:  # OPEN
+                    jm1 = j
                 else:
                     jm1 = -1
 
@@ -195,7 +203,9 @@ def advection_flux_numba(state, u, v, ew_area, ns_area, mask, bc, flux_e, flux_w
     nopython=True,
     cache=True,
 )
-def diffusion_flux_numba(state, D, dx, dy, ew_area, ns_area, mask, bc, flux_e, flux_w, flux_n, flux_s):  # type: ignore[no-untyped-def]
+def diffusion_flux_numba(  # type: ignore[no-untyped-def]
+    state, D, dx, dy, ew_area, ns_area, mask, bc, flux_e, flux_w, flux_n, flux_s
+):
     """Compute diffusion fluxes at all cell faces.
 
     Args:
@@ -238,29 +248,37 @@ def diffusion_flux_numba(state, D, dx, dy, ew_area, ns_area, mask, bc, flux_e, f
             # --- INDICES ---
             ip1 = i + 1
             if ip1 >= nx:
-                if bc_east == 1:  # noqa: SIM108
+                if bc_east == 2:  # PERIODIC
                     ip1 = 0
+                elif bc_east == 1:  # OPEN
+                    ip1 = i
                 else:
                     ip1 = -1
 
             im1 = i - 1
             if im1 < 0:
-                if bc_west == 1:  # noqa: SIM108
+                if bc_west == 2:  # PERIODIC
                     im1 = nx - 1
+                elif bc_west == 1:  # OPEN
+                    im1 = i
                 else:
                     im1 = -1
 
             jp1 = j + 1
             if jp1 >= ny:
-                if bc_north == 1:  # noqa: SIM108
+                if bc_north == 2:  # PERIODIC
                     jp1 = 0
+                elif bc_north == 1:  # OPEN
+                    jp1 = j
                 else:
                     jp1 = -1
 
             jm1 = j - 1
             if jm1 < 0:
-                if bc_south == 1:  # noqa: SIM108
+                if bc_south == 2:  # PERIODIC
                     jm1 = ny - 1
+                elif bc_south == 1:  # OPEN
+                    jm1 = j
                 else:
                     jm1 = -1
 

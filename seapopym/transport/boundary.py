@@ -10,35 +10,35 @@ References:
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import IntEnum
 
 import xarray as xr
 
 from seapopym.standard.coordinates import Coordinates
 
 
-class BoundaryType(Enum):
+class BoundaryType(IntEnum):
     """Types of boundary conditions for transport schemes.
 
-    CLOSED: No-flux boundary (Neumann BC: ∂C/∂n = 0)
+    CLOSED (0): No-flux boundary (Neumann BC: ∂C/∂n = 0)
         - Used at solid boundaries (coastlines, domain edges)
-        - Neighbor value = current cell value
+        - Flux is explicitly blocked at the face
         - Prevents mass loss/gain at boundary
 
-    PERIODIC: Wrap-around boundary
+    OPEN (1): Zero-gradient boundary
+        - Used at open ocean boundaries (regional models)
+        - Neighbor value = current cell value
+        - Allows advective flux (exit/entry) but zero diffusive flux
+
+    PERIODIC (2): Wrap-around boundary
         - Used for longitude in global models (0° = 360°)
         - West neighbor of first cell = last cell
         - East neighbor of last cell = first cell
-
-    OPEN: Zero-gradient boundary
-        - Used at open ocean boundaries
-        - Similar to CLOSED but conceptually different
-        - Allows advective flux but not diffusive flux
     """
 
-    CLOSED = "closed"
-    PERIODIC = "periodic"
-    OPEN = "open"
+    CLOSED = 0
+    OPEN = 1
+    PERIODIC = 2
 
 
 @dataclass(frozen=True)

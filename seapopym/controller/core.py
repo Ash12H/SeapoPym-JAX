@@ -66,24 +66,26 @@ class SimulationController:
     def setup(
         self,
         model_configuration_func: Callable[[Blueprint], None],
-        initial_state: xr.Dataset,
         forcings: xr.Dataset | None = None,
+        initial_state: xr.Dataset | dict[str, xr.Dataset] | None = None,
         parameters: Any | None = None,
         output_path: str | Path | None = None,
-        output_variables: list[str] | None = None,
+        output_variables: list[str] | dict[str, list[str]] | None = None,
         output_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Configure et initialise la simulation.
 
         Args:
             model_configuration_func: Fonction utilisateur qui enregistre les unités dans le Blueprint.
-            initial_state: État initial du monde (physique, biologie).
             forcings: Dataset optionnel contenant les variables de forçage temporel.
                      Doit contenir une dimension temporelle (Coordinates.T) et ne doit pas avoir
                      de variables en commun avec initial_state.
+            initial_state: État initial du monde (physique, biologie).
+                          Peut être un xr.Dataset unique (global) ou un dictionnaire {groupe: Dataset}.
             parameters: Paramètres du modèle (Dataclass ou Dict).
             output_path: Path to save the output. If None, results are stored in memory.
             output_variables: List of variables to save. If None, all variables are saved.
+                            Peut être une liste simple ou un dictionnaire {groupe: [vars]}.
             output_metadata: Metadata to add to the output dataset.
         """
         # 1. Configuration du modèle (Blueprint)
@@ -94,13 +96,19 @@ class SimulationController:
         if parameters is not None:
             param_ds = self._ingest_parameters(parameters)
 
-        # 3. Compilation du plan d'exécution
+        # 3. Ingestion de l'état initial
+        state_ds = self._ingest_initial_state(initial_state)
+
+        # 4. Ingestion des variables de sortie
+        output_vars_list = self._ingest_output_variables(output_variables)
+
+        # 5. Compilation du plan d'exécution
         self.execution_plan = self.blueprint.build()
 
-        # 4. Validation et stockage de l'état initial
+        # 6. Validation et stockage de l'état initial
         # On vérifie d'abord les conflits
         if forcings is not None:
-            common_vars = set(initial_state.data_vars) & set(forcings.data_vars)
+            common_vars = set(state_ds.data_vars) & set(forcings.data_vars)
             if common_vars:
                 raise ValueError(
                     f"Ambiguous definition: variables {common_vars} are defined in both initial state and forcings."
@@ -109,8 +117,8 @@ class SimulationController:
         # On vérifie la couverture
         # On inclut les data_vars ET les coords car les fonctions peuvent demander des coordonnées (ex: latitude)
         provided_vars = (
-            set(map(str, initial_state.data_vars))
-            | set(map(str, initial_state.coords))
+            set(map(str, state_ds.data_vars))
+            | set(map(str, state_ds.coords))
             | set(map(str, param_ds.data_vars))
         )
 
@@ -139,7 +147,7 @@ class SimulationController:
 
         # Fusion de l'état initial et des paramètres
         # Note: Les paramètres sont ajoutés à l'état initial
-        self.state = xr.merge([initial_state, param_ds])
+        self.state = xr.merge([state_ds, param_ds])
 
         # 5. Standardisation des unités
         # On valide et convertit les unités selon le Blueprint
@@ -164,10 +172,10 @@ class SimulationController:
 
         # 8. Setup Output Writer
         if output_path is None:
-            self.writer = MemoryWriter(variables=output_variables, metadata=output_metadata)
+            self.writer = MemoryWriter(variables=output_vars_list, metadata=output_metadata)
         else:
             self.writer = ZarrWriter(
-                path=output_path, variables=output_variables, metadata=output_metadata
+                path=output_path, variables=output_vars_list, metadata=output_metadata
             )
 
     def run(self) -> None:
@@ -318,6 +326,37 @@ class SimulationController:
                 ) from e
 
         return ds
+
+    def _ingest_initial_state(self, state: xr.Dataset | dict[str, xr.Dataset]) -> xr.Dataset:
+        """Prépare l'état initial en fusionnant les datasets si nécessaire."""
+        if isinstance(state, xr.Dataset):
+            return state
+
+        # Si c'est un dict, on renomme les variables et on merge
+        datasets_to_merge = []
+        for prefix, ds in state.items():
+            # Renommer uniquement les variables de données, pas les coordonnées
+            # sauf si elles sont spécifiques au dataset
+            renamed_vars = {var: f"{prefix}/{var}" for var in ds.data_vars}
+            renamed_ds = ds.rename(renamed_vars)
+            datasets_to_merge.append(renamed_ds)
+
+        return xr.merge(datasets_to_merge)
+
+    def _ingest_output_variables(
+        self, outputs: list[str] | dict[str, list[str]] | None
+    ) -> list[str] | None:
+        """Prépare la liste des variables de sortie."""
+        if outputs is None:
+            return None
+        if isinstance(outputs, list):
+            return outputs
+
+        flat_list = []
+        for prefix, vars_list in outputs.items():
+            for var in vars_list:
+                flat_list.append(f"{prefix}/{var}")
+        return flat_list
 
     @property
     def results(self) -> xr.Dataset:
