@@ -34,22 +34,25 @@ def _ensure_dataarray(value: xr.DataArray | float, template: xr.DataArray) -> xr
     return value
 
 
-def _encode_boundary_conditions(boundary_conditions: BoundaryConditions) -> xr.DataArray:
+def _encode_boundary_conditions(
+    boundary_north: int | float,
+    boundary_south: int | float,
+    boundary_east: int | float,
+    boundary_west: int | float,
+) -> xr.DataArray:
     """Encode boundary conditions as integer array for Numba kernels.
 
     Args:
-        boundary_conditions: Boundary conditions object
+        boundary_north: Northern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=PERIODIC)
 
     Returns:
         DataArray with shape (4,) encoding [north, south, east, west] as 0=CLOSED, 1=PERIODIC
     """
     bc_vals = np.array(
-        [
-            0 if boundary_conditions.north == BoundaryType.CLOSED else 1,
-            0 if boundary_conditions.south == BoundaryType.CLOSED else 1,
-            0 if boundary_conditions.east == BoundaryType.CLOSED else 1,
-            0 if boundary_conditions.west == BoundaryType.CLOSED else 1,
-        ],
+        [int(boundary_north), int(boundary_south), int(boundary_east), int(boundary_west)],
         dtype=np.int32,
     )
     return xr.DataArray(bc_vals, dims="boundary_params")
@@ -65,7 +68,10 @@ def _prepare_transport_data(
     cell_areas: xr.DataArray,
     face_areas_ew: xr.DataArray,
     face_areas_ns: xr.DataArray,
-    boundary_conditions: BoundaryConditions,
+    boundary_north: int | float = 0,
+    boundary_south: int | float = 0,
+    boundary_east: int | float = 0,
+    boundary_west: int | float = 0,
     mask: xr.DataArray | None = None,
 ) -> dict[str, Any]:
     """Prepare all shared data for transport computation.
@@ -88,7 +94,10 @@ def _prepare_transport_data(
         cell_areas: Cell areas
         face_areas_ew: East-West face areas
         face_areas_ns: North-South face areas
-        boundary_conditions: Boundary conditions
+        boundary_north: Northern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=PERIODIC)
         mask: Ocean/land mask (1=ocean, 0=land)
 
     Returns:
@@ -104,7 +113,28 @@ def _prepare_transport_data(
         - face_masks: {'east', 'west', 'north', 'south'}
         - cell_areas: Cell areas
         - mask: Ocean/land mask
-    """
+    """  # noqa: D202
+
+    # Reconstruct BoundaryConditions object for internal use
+    # Mapping: 0=CLOSED, 1=PERIODIC
+    def _int_to_boundary_type(val: int | float) -> BoundaryType:
+        val_int = int(val)
+        if val_int == 0:
+            return BoundaryType.CLOSED
+        elif val_int == 1:
+            return BoundaryType.PERIODIC
+        else:
+            raise ValueError(
+                f"Invalid boundary condition value: {val}. Must be 0 (CLOSED) or 1 (PERIODIC)"
+            )
+
+    boundary_conditions = BoundaryConditions(
+        north=_int_to_boundary_type(boundary_north),
+        south=_int_to_boundary_type(boundary_south),
+        east=_int_to_boundary_type(boundary_east),
+        west=_int_to_boundary_type(boundary_west),
+    )
+
     dim_y = Coordinates.Y.value
     dim_x = Coordinates.X.value
 
@@ -384,8 +414,11 @@ def compute_transport_xarray(
     cell_areas: xr.DataArray,
     face_areas_ew: xr.DataArray,
     face_areas_ns: xr.DataArray,
-    boundary_conditions: BoundaryConditions,
     mask: xr.DataArray | None = None,
+    boundary_north: int | float = 0,
+    boundary_south: int | float = 0,
+    boundary_east: int | float = 0,
+    boundary_west: int | float = 0,
 ) -> dict[str, xr.DataArray]:
     """Compute transport tendencies using Xarray implementation.
 
@@ -408,8 +441,11 @@ def compute_transport_xarray(
         cell_areas: Cell areas [m²], shape (lat, lon)
         face_areas_ew: East/West face areas [m], shape (lat, lon+1)
         face_areas_ns: North/South face areas [m], shape (lat+1, lon)
-        boundary_conditions: Boundary conditions
         mask: Ocean/land mask (1=ocean, 0=land), shape (lat, lon)
+        boundary_north: Northern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=PERIODIC)
 
     Returns:
         Dictionary with:
@@ -417,13 +453,30 @@ def compute_transport_xarray(
         - diffusion_rate: Diffusion tendency [Units/s]
 
     Example:
-        >>> result = compute_transport_xarray(...)
+        >>> result = compute_transport_xarray(
+        ...     state=biomass, u=u, v=v, D=100.0,
+        ...     dx=dx, dy=dy, cell_areas=areas, face_areas_ew=ew, face_areas_ns=ns,
+        ...     boundary_north=0, boundary_south=0, boundary_east=0, boundary_west=0
+        ... )
         >>> total_tendency = result['advection_rate'] + result['diffusion_rate']
         >>> biomass_new = biomass + total_tendency * dt
     """
     # 1. PREPARE (shared data preparation)
     prepared = _prepare_transport_data(
-        state, u, v, D, dx, dy, cell_areas, face_areas_ew, face_areas_ns, boundary_conditions, mask
+        state,
+        u,
+        v,
+        D,
+        dx,
+        dy,
+        cell_areas,
+        face_areas_ew,
+        face_areas_ns,
+        boundary_north=boundary_north,
+        boundary_south=boundary_south,
+        boundary_east=boundary_east,
+        boundary_west=boundary_west,
+        mask=mask,
     )
 
     # 2. COMPUTE FLUXES (Xarray)
@@ -484,8 +537,11 @@ def compute_transport_numba(
     cell_areas: xr.DataArray,
     face_areas_ew: xr.DataArray,
     face_areas_ns: xr.DataArray,
-    boundary_conditions: BoundaryConditions,
     mask: xr.DataArray | None = None,
+    boundary_north: int | float = 0,
+    boundary_south: int | float = 0,
+    boundary_east: int | float = 0,
+    boundary_west: int | float = 0,
 ) -> dict[str, xr.DataArray]:
     """Compute transport tendencies using Numba-accelerated implementation.
 
@@ -507,8 +563,11 @@ def compute_transport_numba(
         cell_areas: Cell areas [m²], shape (lat, lon)
         face_areas_ew: East/West face areas [m], shape (lat, lon+1)
         face_areas_ns: North/South face areas [m], shape (lat+1, lon)
-        boundary_conditions: Boundary conditions
         mask: Ocean/land mask (1=ocean, 0=land), shape (lat, lon)
+        boundary_north: Northern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=PERIODIC)
 
     Returns:
         Dictionary with:
@@ -528,7 +587,9 @@ def compute_transport_numba(
     # --- 1. DATA PREPARATION ---
 
     # Encode boundary conditions for Numba kernels
-    bc_da = _encode_boundary_conditions(boundary_conditions)
+    bc_da = _encode_boundary_conditions(
+        boundary_north, boundary_south, boundary_east, boundary_west
+    )
 
     # Clean inputs (replace NaN with 0 to prevent propagation)
     state_clean = state.fillna(0.0)

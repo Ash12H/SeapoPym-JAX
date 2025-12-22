@@ -4,8 +4,6 @@ import xarray as xr
 
 from seapopym.standard.coordinates import Coordinates
 from seapopym.transport import (
-    BoundaryConditions,
-    BoundaryType,
     compute_spherical_cell_areas,
     compute_spherical_dx,
     compute_spherical_dy,
@@ -44,13 +42,13 @@ def simple_grid():
 
 @pytest.fixture
 def boundary_all_closed():
-    """Boundary conditions: all edges closed."""
-    return BoundaryConditions(
-        north=BoundaryType.CLOSED,
-        south=BoundaryType.CLOSED,
-        east=BoundaryType.CLOSED,
-        west=BoundaryType.CLOSED,
-    )
+    """Boundary conditions: all edges closed (as integers)."""
+    return {
+        "boundary_north": 0,  # 0 = CLOSED
+        "boundary_south": 0,
+        "boundary_east": 0,
+        "boundary_west": 0,
+    }
 
 
 def create_blob(grid, center=(10, 10), radius=2.0, amplitude=100.0):
@@ -96,8 +94,8 @@ def test_combined_transport_numba_vs_xarray(simple_grid, boundary_all_closed):
         cell_areas=simple_grid["cell_areas"],
         face_areas_ew=simple_grid["face_areas_ew"],
         face_areas_ns=simple_grid["face_areas_ns"],
-        boundary_conditions=boundary_all_closed,
         mask=mask,
+        **boundary_all_closed,
     )
 
     # Numba version
@@ -111,8 +109,8 @@ def test_combined_transport_numba_vs_xarray(simple_grid, boundary_all_closed):
         cell_areas=simple_grid["cell_areas"],
         face_areas_ew=simple_grid["face_areas_ew"],
         face_areas_ns=simple_grid["face_areas_ns"],
-        boundary_conditions=boundary_all_closed,
         mask=mask,
+        **boundary_all_closed,
     )
 
     # Check advection
@@ -154,8 +152,8 @@ def test_combined_transport_mass_conservation(simple_grid, boundary_all_closed):
         cell_areas=simple_grid["cell_areas"],
         face_areas_ew=simple_grid["face_areas_ew"],
         face_areas_ns=simple_grid["face_areas_ns"],
-        boundary_conditions=boundary_all_closed,
         mask=mask,
+        **boundary_all_closed,
     )
 
     # Total tendency
@@ -194,8 +192,8 @@ def test_combined_transport_with_mask(simple_grid, boundary_all_closed):
         cell_areas=simple_grid["cell_areas"],
         face_areas_ew=simple_grid["face_areas_ew"],
         face_areas_ns=simple_grid["face_areas_ns"],
-        boundary_conditions=boundary_all_closed,
         mask=mask,
+        **boundary_all_closed,
     )
 
     # Total tendency
@@ -236,7 +234,7 @@ def test_separate_components(simple_grid, boundary_all_closed):
         cell_areas=simple_grid["cell_areas"],
         face_areas_ew=simple_grid["face_areas_ew"],
         face_areas_ns=simple_grid["face_areas_ns"],
-        boundary_conditions=boundary_all_closed,
+        **boundary_all_closed,
     )
 
     # Check that both components are returned
