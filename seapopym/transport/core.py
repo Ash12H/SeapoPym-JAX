@@ -19,6 +19,42 @@ from seapopym.transport.boundary import BoundaryConditions, BoundaryType, get_ne
 # =============================================================================
 
 
+def _ensure_dataarray(value: xr.DataArray | float, template: xr.DataArray) -> xr.DataArray:
+    """Convert scalar to DataArray if needed.
+
+    Args:
+        value: Scalar or DataArray to ensure is a DataArray
+        template: Template DataArray for shape/dims if value is scalar
+
+    Returns:
+        DataArray with same shape as template
+    """
+    if isinstance(value, int | float):
+        return xr.full_like(template, value)
+    return value
+
+
+def _encode_boundary_conditions(boundary_conditions: BoundaryConditions) -> xr.DataArray:
+    """Encode boundary conditions as integer array for Numba kernels.
+
+    Args:
+        boundary_conditions: Boundary conditions object
+
+    Returns:
+        DataArray with shape (4,) encoding [north, south, east, west] as 0=CLOSED, 1=PERIODIC
+    """
+    bc_vals = np.array(
+        [
+            0 if boundary_conditions.north == BoundaryType.CLOSED else 1,
+            0 if boundary_conditions.south == BoundaryType.CLOSED else 1,
+            0 if boundary_conditions.east == BoundaryType.CLOSED else 1,
+            0 if boundary_conditions.west == BoundaryType.CLOSED else 1,
+        ],
+        dtype=np.int32,
+    )
+    return xr.DataArray(bc_vals, dims="boundary_params")
+
+
 def _prepare_transport_data(
     state: xr.DataArray,
     u: xr.DataArray,
@@ -356,6 +392,12 @@ def compute_transport_xarray(
     This function computes both advection and diffusion tendencies using a unified
     finite volume approach that guarantees mass conservation.
 
+    Implementation Note:
+        This Xarray-based implementation prioritizes code clarity and maintainability
+        using shared helper functions (`_prepare_transport_data()`, `_compute_divergence()`).
+        For performance-critical applications, use `compute_transport_numba()` which provides
+        the same results with optimized Numba kernels and minimal overhead.
+
     Args:
         state: Concentration field [Units], shape (..., lat, lon)
         u: Zonal velocity [m/s], shape (..., lat, lon)
@@ -432,161 +474,6 @@ def compute_transport_xarray(
 # =============================================================================
 
 
-def _compute_advection_flux_numba(prepared: dict) -> dict[str, xr.DataArray]:
-    """Compute advection fluxes using Numba-accelerated kernel.
-
-    Args:
-        prepared: Prepared data dictionary from _prepare_transport_data()
-
-    Returns:
-        Dictionary with 'flux_east', 'flux_west', 'flux_north', 'flux_south'
-    """
-    try:
-        from seapopym.transport.numba_kernels import advection_flux_numba
-    except ImportError as err:
-        raise ImportError("Numba is required for Numba implementation.") from err
-
-    dim_y = Coordinates.Y.value
-    dim_x = Coordinates.X.value
-
-    # Prepare boundary conditions encoding
-    bc_vals = np.array(
-        [
-            0 if prepared["boundary_conditions"].north == BoundaryType.CLOSED else 1,
-            0 if prepared["boundary_conditions"].south == BoundaryType.CLOSED else 1,
-            0 if prepared["boundary_conditions"].east == BoundaryType.CLOSED else 1,
-            0 if prepared["boundary_conditions"].west == BoundaryType.CLOSED else 1,
-        ],
-        dtype=np.int32,
-    )
-    bc_da = xr.DataArray(bc_vals, dims="boundary_params")
-
-    # Get mask (create if None)
-    mask = prepared["mask"]
-    if mask is None:
-        mask = xr.ones_like(prepared["state_clean"])
-
-    # Call kernel via apply_ufunc
-    flux_e, flux_w, flux_n, flux_s = xr.apply_ufunc(
-        advection_flux_numba,
-        prepared["state_clean"],
-        prepared["u_clean"],
-        prepared["v_clean"],
-        prepared["face_areas"]["east"],  # ew_area
-        prepared["face_areas"]["north"],  # ns_area
-        mask,
-        bc_da,
-        input_core_dims=[
-            [dim_y, dim_x],  # state
-            [dim_y, dim_x],  # u
-            [dim_y, dim_x],  # v
-            [dim_y, dim_x],  # ew_area
-            [dim_y, dim_x],  # ns_area
-            [dim_y, dim_x],  # mask
-            ["boundary_params"],  # bc
-        ],
-        output_core_dims=[
-            [dim_y, dim_x],  # flux_east
-            [dim_y, dim_x],  # flux_west
-            [dim_y, dim_x],  # flux_north
-            [dim_y, dim_x],  # flux_south
-        ],
-        dask="parallelized",
-        output_dtypes=[prepared["state_clean"].dtype] * 4,
-    )
-
-    return {
-        "flux_east": flux_e,
-        "flux_west": flux_w,
-        "flux_north": flux_n,
-        "flux_south": flux_s,
-    }
-
-
-def _compute_diffusion_flux_numba(prepared: dict) -> dict[str, xr.DataArray]:
-    """Compute diffusion fluxes using Numba-accelerated kernel.
-
-    Args:
-        prepared: Prepared data dictionary from _prepare_transport_data()
-
-    Returns:
-        Dictionary with 'flux_east', 'flux_west', 'flux_north', 'flux_south'
-    """
-    try:
-        from seapopym.transport.numba_kernels import diffusion_flux_numba
-    except ImportError as err:
-        raise ImportError("Numba is required for Numba implementation.") from err
-
-    dim_y = Coordinates.Y.value
-    dim_x = Coordinates.X.value
-
-    # Ensure D, dx, dy are DataArrays
-    def _ensure_da(val: xr.DataArray | float, template: xr.DataArray) -> xr.DataArray:
-        if isinstance(val, int | float):
-            return xr.full_like(template, val)
-        return val
-
-    state = prepared["state_clean"]
-    D_da = _ensure_da(prepared["D"], state)
-    dx_da = _ensure_da(prepared["dx"], state)
-    dy_da = _ensure_da(prepared["dy"], state)
-
-    # Prepare boundary conditions
-    bc_vals = np.array(
-        [
-            0 if prepared["boundary_conditions"].north == BoundaryType.CLOSED else 1,
-            0 if prepared["boundary_conditions"].south == BoundaryType.CLOSED else 1,
-            0 if prepared["boundary_conditions"].east == BoundaryType.CLOSED else 1,
-            0 if prepared["boundary_conditions"].west == BoundaryType.CLOSED else 1,
-        ],
-        dtype=np.int32,
-    )
-    bc_da = xr.DataArray(bc_vals, dims="boundary_params")
-
-    # Get mask
-    mask = prepared["mask"]
-    if mask is None:
-        mask = xr.ones_like(state)
-
-    # Call kernel
-    flux_e, flux_w, flux_n, flux_s = xr.apply_ufunc(
-        diffusion_flux_numba,
-        state,
-        D_da,
-        dx_da,
-        dy_da,
-        prepared["face_areas"]["east"],  # ew_area
-        prepared["face_areas"]["north"],  # ns_area
-        mask,
-        bc_da,
-        input_core_dims=[
-            [dim_y, dim_x],  # state
-            [dim_y, dim_x],  # D
-            [dim_y, dim_x],  # dx
-            [dim_y, dim_x],  # dy
-            [dim_y, dim_x],  # ew_area
-            [dim_y, dim_x],  # ns_area
-            [dim_y, dim_x],  # mask
-            ["boundary_params"],  # bc
-        ],
-        output_core_dims=[
-            [dim_y, dim_x],  # flux_east
-            [dim_y, dim_x],  # flux_west
-            [dim_y, dim_x],  # flux_north
-            [dim_y, dim_x],  # flux_south
-        ],
-        dask="parallelized",
-        output_dtypes=[state.dtype] * 4,
-    )
-
-    return {
-        "flux_east": flux_e,
-        "flux_west": flux_w,
-        "flux_north": flux_n,
-        "flux_south": flux_s,
-    }
-
-
 def compute_transport_numba(
     state: xr.DataArray,
     u: xr.DataArray,
@@ -605,6 +492,11 @@ def compute_transport_numba(
     This function computes both advection and diffusion tendencies using Numba-accelerated
     kernels for optimal performance while maintaining mass conservation.
 
+    Performance Note:
+        This implementation bypasses the high-level Xarray operations in `_prepare_transport_data()`
+        to minimize overhead. Data preparation is streamlined for direct use by Numba kernels,
+        avoiding expensive shift operations and intermediate dictionaries.
+
     Args:
         state: Concentration field [Units], shape (..., lat, lon)
         u: Zonal velocity [m/s], shape (..., lat, lon)
@@ -622,47 +514,125 @@ def compute_transport_numba(
         Dictionary with:
         - advection_rate: Advection tendency [Units/s]
         - diffusion_rate: Diffusion tendency [Units/s]
-
-    Example:
-        >>> result = compute_transport_numba(...)
-        >>> total_tendency = result['advection_rate'] + result['diffusion_rate']
-        >>> biomass_new = biomass + total_tendency * dt
     """
-    # 1. PREPARE (shared data preparation)
-    prepared = _prepare_transport_data(
-        state, u, v, D, dx, dy, cell_areas, face_areas_ew, face_areas_ns, boundary_conditions, mask
+    try:
+        from seapopym.transport.numba_kernels import advection_flux_numba, diffusion_flux_numba
+    except ImportError as err:
+        raise ImportError("Numba is required for Numba implementation.") from err
+
+    dim_y = Coordinates.Y.value
+    dim_x = Coordinates.X.value
+    x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)
+    y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)
+
+    # --- 1. DATA PREPARATION ---
+
+    # Encode boundary conditions for Numba kernels
+    bc_da = _encode_boundary_conditions(boundary_conditions)
+
+    # Clean inputs (replace NaN with 0 to prevent propagation)
+    state_clean = state.fillna(0.0)
+    u_clean = u.fillna(0.0)
+    v_clean = v.fillna(0.0)
+
+    # Ensure scalar parameters are converted to DataArrays
+    D_da = _ensure_dataarray(D, state_clean)
+    dx_da = _ensure_dataarray(dx, state_clean)
+    dy_da = _ensure_dataarray(dy, state_clean)
+
+    # Default mask to all ocean if not provided
+    if mask is None:
+        mask = xr.ones_like(state_clean)
+
+    # Extract face areas aligned with cell centers
+    # Drop coordinates to prevent alignment errors (face coords != center coords)
+    ew_area = (
+        face_areas_ew.isel({x_face_dim: slice(1, None)})
+        .rename({x_face_dim: dim_x})
+        .drop_vars([dim_x, dim_y], errors="ignore")
+    )
+    ns_area = (
+        face_areas_ns.isel({y_face_dim: slice(1, None)})
+        .rename({y_face_dim: dim_y})
+        .drop_vars([dim_x, dim_y], errors="ignore")
     )
 
-    # Store additional info needed by Numba wrappers
-    prepared["boundary_conditions"] = boundary_conditions
-    prepared["D"] = D
-    prepared["dx"] = dx
-    prepared["dy"] = dy
-    prepared["u_clean"] = u.fillna(0.0)
-    prepared["v_clean"] = v.fillna(0.0)
+    # --- 2. ADVECTION FLUXES ---
+    flux_adv_e, flux_adv_w, flux_adv_n, flux_adv_s = xr.apply_ufunc(
+        advection_flux_numba,
+        state_clean,
+        u_clean,
+        v_clean,
+        ew_area,
+        ns_area,
+        mask,
+        bc_da,
+        input_core_dims=[
+            [dim_y, dim_x],  # state
+            [dim_y, dim_x],  # u
+            [dim_y, dim_x],  # v
+            [dim_y, dim_x],  # ew_area
+            [dim_y, dim_x],  # ns_area
+            [dim_y, dim_x],  # mask
+            ["boundary_params"],  # bc
+        ],
+        output_core_dims=[
+            [dim_y, dim_x],
+            [dim_y, dim_x],
+            [dim_y, dim_x],
+            [dim_y, dim_x],
+        ],
+        dask="parallelized",
+        output_dtypes=[state_clean.dtype] * 4,
+    )
 
-    # 2. COMPUTE FLUXES (Numba)
-    flux_adv = _compute_advection_flux_numba(prepared)
-    flux_diff = _compute_diffusion_flux_numba(prepared)
+    # --- 3. DIFFUSION FLUXES ---
+    flux_diff_e, flux_diff_w, flux_diff_n, flux_diff_s = xr.apply_ufunc(
+        diffusion_flux_numba,
+        state_clean,
+        D_da,
+        dx_da,
+        dy_da,
+        ew_area,
+        ns_area,
+        mask,
+        bc_da,
+        input_core_dims=[
+            [dim_y, dim_x],  # state
+            [dim_y, dim_x],  # D
+            [dim_y, dim_x],  # dx
+            [dim_y, dim_x],  # dy
+            [dim_y, dim_x],  # ew_area
+            [dim_y, dim_x],  # ns_area
+            [dim_y, dim_x],  # mask
+            ["boundary_params"],  # bc
+        ],
+        output_core_dims=[
+            [dim_y, dim_x],
+            [dim_y, dim_x],
+            [dim_y, dim_x],
+            [dim_y, dim_x],
+        ],
+        dask="parallelized",
+        output_dtypes=[state_clean.dtype] * 4,
+    )
 
-    # 3. DIVERGENCES (shared)
-    div_adv = _compute_divergence(flux_adv, prepared["cell_areas"])
-    div_diff = _compute_divergence(flux_diff, prepared["cell_areas"])
+    # --- 4. COMPUTE TENDENCIES ---
 
-    # 4. TENDENCIES
+    # Compute flux divergence (inline for minimal overhead)
+    div_adv = (flux_adv_e - flux_adv_w + flux_adv_n - flux_adv_s) / cell_areas
+    div_diff = (flux_diff_e - flux_diff_w + flux_diff_n - flux_diff_s) / cell_areas
+
+    # Tendencies are negative divergence (conservation form)
     advection_rate = -div_adv
     diffusion_rate = -div_diff
 
-    # Apply mask to final results
+    # Mask land cells in final result
     if mask is not None:
         advection_rate = advection_rate * mask
         diffusion_rate = diffusion_rate * mask
 
-    # Restore original dimension order
-    advection_rate = advection_rate.transpose(*state.dims)
-    diffusion_rate = diffusion_rate.transpose(*state.dims)
-
     return {
-        "advection_rate": advection_rate,
-        "diffusion_rate": diffusion_rate,
+        "advection_rate": advection_rate.transpose(*state.dims),
+        "diffusion_rate": diffusion_rate.transpose(*state.dims),
     }
