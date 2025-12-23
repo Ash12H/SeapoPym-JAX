@@ -130,16 +130,20 @@ class Blueprint:
         resolved_mapping = {}
 
         for arg_name, param in sig.parameters.items():
-            if param.default != inspect.Parameter.empty:
-                continue
-
             source_var = self._resolve_input(arg_name, input_mapping)
 
             if source_var and source_var in self.registered_variables:
+                # Case 1: Resolved and registered -> Create dependency
                 resolved_mapping[arg_name] = source_var
                 source_node = self._data_nodes[source_var]
                 self.graph.add_edge(source_node, compute_node)
+
+            elif param.default != inspect.Parameter.empty:
+                # Case 2: Not resolved but has default -> Skip (use default)
+                continue
+
             else:
+                # Case 3: Not resolved and no default -> Error
                 raise MissingInputError(
                     f"Argument '{arg_name}' for unit '{step_name}' could not be resolved (Source: '{source_var}')."
                 )
