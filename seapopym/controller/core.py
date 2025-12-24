@@ -186,10 +186,6 @@ class SimulationController:
         logger.info(f"Starting simulation from {self.config.start_date} to {self.config.end_date}")
 
         try:
-            # Save initial state
-            if self.writer:
-                self.writer.append(self.state, time=self._current_time)
-
             while self._current_time < self.config.end_date:
                 self.step()
                 self._current_time += self.config.timestep
