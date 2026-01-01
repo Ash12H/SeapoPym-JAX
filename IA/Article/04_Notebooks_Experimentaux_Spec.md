@@ -177,15 +177,16 @@ Le notebook existant est déjà complet. Adaptation nécessaire :
 
 **Objectif** : Démontrer que le DAG unifie correctement Transport et Biologie sans biais de "Time Splitting".
 
-### Configuration
+### Configuration de Base
 
 *   **Domaine** : 2D périodique (simplification).
 *   **Température** : $T = 0°C$ partout (donc $\lambda = \lambda_0$ constant).
 *   **Courant** : $u = 0.1 m/s$ (zonal), $v = 0$.
-*   **Diffusion** : $D = 1000 m^2/s$.
+*   **Diffusion Physique** : $D = 1000 m^2/s$.
 *   **Condition initiale** : Gaussienne de biomasse centrée.
+*   **CFL cible** : 0.5 (constant pour tous les tests).
 
-### Protocole
+### Protocole Principal
 
 1.  **Configuration Blueprint** : Inclure Transport ET Mortalité.
     *   Enregistrer `compute_transport_numba` (ou wrapper).
@@ -199,51 +200,168 @@ Le notebook existant est déjà complet. Adaptation nécessaire :
 
 4.  **Comparaison** : Superposer les profils 1D (coupe en Y central).
 
+### Protocole Additionnel : Test de Convergence en Grille
+
+**Objectif** : Prouver que l'erreur observée est d'origine numérique (schéma Upwind O(Δx)) et non architecturale.
+
+**Théorie** : La diffusion numérique du schéma Upwind est :
+$$D_{num} = \frac{u \Delta x}{2} (1 - \sigma) \propto \Delta x$$
+
+En raffinant la grille tout en maintenant le CFL constant, $D_{num}$ diminue proportionnellement.
+
+**Protocole** :
+
+| Résolution | nx × ny | Δx estimé | Δt (CFL=0.5) | D_num attendu |
+|------------|---------|-----------|--------------|---------------|
+| Basse | 200 × 100 | 22 km | ~31h | ~550 m²/s |
+| Moyenne | 400 × 200 | 11 km | ~15h | ~275 m²/s |
+| Haute | 800 × 400 | 5.5 km | ~7.5h | ~138 m²/s |
+
+1.  Exécuter la simulation pour chaque résolution.
+2.  Calculer l'erreur L2 relative pour chaque cas.
+3.  Tracer log(Erreur) vs log(Δx) : la pente doit être ~1 (convergence 1er ordre).
+
 ### Figures attendues
 
-*   **Figure 3A** : Carte 2D de la biomasse simulée (à t_final).
-*   **Figure 3B** : Coupe 1D : Simulation vs Théorie.
-*   **Figure 3C** : Erreur relative en fonction du temps.
+*   **Figure 3A** : Carte 2D de la biomasse simulée (à t_final, résolution moyenne).
+*   **Figure 3B** : Coupe 1D : Simulation vs Théorie (3 résolutions superposées).
+*   **Figure 3C** : Erreur relative en fonction du temps (3 courbes).
+*   **Figure 3D** : Courbe de convergence log(Erreur) vs log(Δx) avec pente annotée.
+
+### Critère de Succès
+
+*   Erreur < 5% pour la résolution moyenne (400×200).
+*   Pente de convergence entre 0.8 et 1.2 (confirmant le comportement O(Δx)).
 
 ---
 
-## Notebook 4 : Benchmark de Scalabilité
+## Notebook 4A : Weak Scaling (Complexité Algorithmique)
 
-**Fichier** : `article_04_performance_scaling.ipynb`
+**Fichier** : `article_04a_weak_scaling.ipynb`
 
-**Objectif** : Quantifier les gains de performance offerts par le parallélisme de tâches du DAG.
+**Objectif** : Démontrer que le temps de calcul croît linéairement avec la taille du problème (O(N)).
+
+### Question posée
+*"Si je double la taille de ma grille, le temps de calcul double-t-il ?"*
 
 ### Configuration
 
-*   **Données Synthétiques** (générées dans le notebook) :
-    *   Grilles de différentes tailles : 100x100, 250x250, 500x500, 1000x1000.
-    *   Forçages constants : T=15°C, NPP=300 mg/m²/day, u=0.1 m/s, D=1000 m²/s.
-
-*   **Modèle** : Blueprint LMTL complet (Production + Mortalité + Transport) avec 10 cohortes.
+```python
+CONFIG_WEAK = {
+    "grid_sizes": [(500, 500), (1000, 1000), (2000, 2000)],
+    "n_cohorts": 50,
+    "n_steps": 20,
+    "backend": "sequential",  # Pas de parallélisation ici
+}
+```
 
 ### Protocole
 
-1.  **Boucle sur les tailles de grille** : Pour chaque taille, créer le Blueprint, les forçages, et exécuter N pas de temps.
-
-2.  **Boucle sur le nombre de threads** : Exécuter avec 1, 2, 4, 8, 12 threads (via `dask.config.set(num_workers=n)`).
-
-3.  **Mesurer** :
-    *   Temps total de simulation.
-    *   Temps moyen par pas de temps.
+1.  **Warmup** : 3 pas de temps pour compilation JIT.
+2.  **Boucle sur les tailles de grille** : Mesurer temps/step pour chaque taille.
+3.  **Régression log-log** : Calculer la pente (exposant de complexité).
 
 ### Figures attendues
 
-*   **Figure 4A** : Courbe de "Speedup" (Temps_1_thread / Temps_N_threads) vs N.
-*   **Figure 4B** : Temps par pas de temps vs Taille de grille (pour montrer la scalabilité "Weak").
-*   **Tableau** : Récapitulatif des temps de calcul.
+*   **Figure 4A** : log(Temps/step) vs log(N cellules) avec pente annotée.
+*   **Tableau** : Récapitulatif (Grille, N, Temps, Complexité).
+
+### Critère de Succès
+
+*   Pente ~1.0 (complexité O(N) linéaire).
+*   Votre résultat actuel : **O(N^1.02)** ✅
+
+---
+
+## Notebook 4B : Benchmark de Scalabilité (Version B - Charge Lourde)
+
+**Fichier** : `article_04b_strong_scaling.ipynb`
+
+**Objectif** : Démontrer que Dask accélère le calcul en parallélisant les tâches indépendantes du DAG.
+
+### Question posée
+*"Si j'ajoute des cœurs, mon calcul va-t-il plus vite ?"*
+
+### Configuration
+
+```python
+CONFIG_STRONG = {
+    "grid_size": (1000, 1000),  # Grille FIXE (1 million de cellules)
+    "n_cohorts": 50,
+    "n_steps": 20,
+    "workers": [1, 2, 4, 8, 12],
+    "backend": "dask",
+}
+```
+
+### Protocole
+
+1.  **Warmup** : 3 pas de temps pour compilation JIT.
+2.  **Baseline** : Exécuter avec backend séquentiel (référence).
+3.  **Boucle sur le nombre de workers** :
+    *   Configurer Dask avec N workers.
+    *   Mesurer temps total et temps/step.
+4.  **Calculer** :
+    *   Speedup = Temps(baseline) / Temps(N workers)
+    *   Efficacité = Speedup / N × 100%
+
+### Figures attendues
+
+*   **Figure 4B** : Speedup vs Nombre de workers (avec ligne "idéal" en pointillés).
+*   **Tableau** : Récapitulatif (Workers, Temps, Speedup, Efficacité).
+
+### Critère de Succès
+
+| Métrique | Seuil Minimum | Objectif |
+|----------|---------------|----------|
+| Speedup (4 workers) | > 1.5× | > 2.0× |
+| Efficacité (4 workers) | > 40% | > 50% |
+
+### Note sur l'Efficacité Attendue
+
+L'efficacité parallèle dépend de :
+1.  **Nombre de tâches indépendantes** : Transport et Mortalité sont indépendants dans le DAG.
+2.  **Ratio calcul/overhead** : Charge lourde (50 cohortes, 1M cellules) favorable.
+3.  **Loi d'Amdahl** : La partie séquentielle (TimeIntegrator) limite le speedup max.
+
+---
+
+## Note sur l'Expérience 3 : Amélioration par Raffinement de Grille
+
+### Pourquoi l'erreur est élevée (6-10%)
+
+Le schéma **Upwind du premier ordre** introduit une diffusion numérique :
+
+$$D_{numérique} \approx \frac{u \cdot \Delta x}{2}$$
+
+Avec la configuration actuelle :
+*   $\Delta x = 22$ km, $u = 0.1$ m/s → $D_{num} \approx 1100$ m²/s
+*   Comparable à la diffusion physique ($D = 1000$ m²/s)
+*   La gaussienne s'étale **2× plus vite** que prévu
+
+### Solution : Doubler la Résolution
+
+| Paramètre | Version Actuelle | Version Améliorée |
+|-----------|------------------|-------------------|
+| Grille | 200×100 | 400×200 |
+| $\Delta x$ | 22 km | 11 km |
+| $D_{num}$ | 1100 m²/s | 550 m²/s |
+| Erreur attendue | ~6-10% | ~3-5% |
+
+### Protocole d'Amélioration
+
+1.  **Test de convergence en grille** : Exécuter avec 200×100, 400×200, 800×400
+2.  **Tracer erreur vs 1/Δx** : Doit montrer une pente ~1 (convergence 1er ordre)
+3.  **Choisir la résolution finale** : Celle qui donne erreur < 5%
 
 ---
 
 ## Résumé des Notebooks
 
-| ID  | Fichier                                  | Objectif Principal                     | Dépendance Code                |
-|-----|------------------------------------------|----------------------------------------|--------------------------------|
-| 1   | `article_01_bio_0d_asymptotic.ipynb`     | Valider la Bio (non-régression v0.3)   | `seapopym.lmtl`, `Blueprint`   |
-| 2   | `article_02_transport_1d_analytic.ipynb` | Valider le Transport vs Analytique     | `seapopym.transport`           |
-| 3   | `article_03_coupling_patch_test.ipynb`   | Valider le Couplage Bio+Transport      | `seapopym.lmtl`, `transport`   |
-| 4   | `article_04_performance_scaling.ipynb`   | Quantifier la Scalabilité Dask         | `DaskBackend`, Full Model      |
+| ID  | Fichier                                  | Objectif Principal                     | Métrique Clé |
+|-----|------------------------------------------|----------------------------------------|--------------|
+| 1   | `article_01_bio_0d_asymptotic.ipynb`     | Valider Bio (non-régression v0.3)      | Erreur < 1% |
+| 2   | `article_02_transport_1d_analytic.ipynb` | Valider Transport vs Analytique        | Conservation 100% |
+| 3   | `article_03_coupling_patch_test.ipynb`   | Valider Couplage + Convergence grille  | Pente ~1, Erreur < 5% |
+| **4A** | **`article_04a_weak_scaling.ipynb`** | **Weak Scaling (Complexité O(N))**     | **Pente ~1** |
+| **4B** | **`article_04b_strong_scaling.ipynb`** | **Strong Scaling (Speedup Dask)**      | **Speedup > 1.5×** |

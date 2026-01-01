@@ -6,6 +6,9 @@
 *.csv
 *.xml
 *.gif
+*.png
+*.pdf
+*.txt
 
 # Python
 __pycache__/
