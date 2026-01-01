@@ -16,9 +16,13 @@ Une première tentative de modernisation, **SeapoPym v0.3** [Lehodey Jr. et al.,
 
 Cet article présente la nouvelle génération du moteur de modélisation (v1.0), qui résout le dilemme "0D vs 3D" en adoptant une architecture fondée sur les **Graphes Dirigés Acycliques (DAG)**.
 
-Contrairement aux approches précédentes, nous ne traitons plus le transport comme une "grille" et la biologie comme une "boucle", mais unifions les deux concepts sous forme de flux de données. Cette approche permet :
+Contrairement à l'approche précédente, nous ne traitons pas les processus biologiques indépendamment. Au lieu d'intégrer la boucle temporelle au sein d'un processus (comme le vieillissement ou le recrutement), nous intégrons la boucle temporelle au sein du graphe DAG. Cette approche permet :
 1.  **Réintégration du Transport** : L'advection et la diffusion deviennent de simples opérateurs fonctionnels au sein du graphe, traites à égalité avec la mortalité ou la croissance.
 2.  **Rigueur Mathématique** : L'architecture impose une résolution explicite et acyclique, garantissant la causalité et la conservation de la masse.
 3.  **Modularité Totale** : Le modélisateur peut assembler des "briques" biologiques (définies par les équations de dynamique de population standard) sans se soucier de l'orchestration informatique.
 
-Nous validons cette approche à travers une série de benchmarks démontrant que l'overhead du graphe est négligeable face aux gains de flexibilité et de précision scientifique.
+Nous validons cette approche à travers une série de benchmarks démontrant que l'overhead du graphe est négligeable face aux gains de flexibilité et de précision scientifique. Plus spécifiquement, nous démontrons :
+1.  La **reproduction des solutions analytiques** pour les processus biologiques et le transport ;
+2.  La **convergence numérique** du couplage transport-biologie vers une solution de référence ;
+3.  La **non-régression** par rapport aux implémentations existantes (SeapoPym v0.3 et Seapodym-LMTL) ;
+4.  La **complexité algorithmique linéaire O(N)** du système, garantissant sa scalabilité.
