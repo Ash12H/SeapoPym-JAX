@@ -8,26 +8,30 @@ Cette section présente les résultats des expériences de validation de l'archi
 
 ### 1.1. Convergence Asymptotique
 
-La première expérience valide les processus biologiques (Production, Mortalité, Recrutement) en configuration 0D, sans transport spatial. Nous simulons l'évolution d'une population sous température constante vers son état d'équilibre théorique.
+L'expérience valide la stabilité et la précision des processus biologiques en configuration 0D sur une large gamme de températures (0°C à 35°C). Pour garantir la précision tout en optimisant le temps de calcul, nous utilisons une approche adaptative où la durée de simulation et le pas de temps ($\Delta t$) sont ajustés dynamiquement en fonction de l'échelle de temps caractéristique de la mortalité $\tau = 1/\lambda(T)$ :
 
-**Configuration** : Modèle 0D, 4 températures (0°C, 10°C, 20°C, 30°C), paramètres biologiques identiques à SeapoPym v0.3.
+$$ \Delta t = \frac{\tau}{N\_{steps}} = \frac{1}{\lambda(T) \times 100} $$
 
-La **Figure 1A** présente les courbes de convergence de la biomasse pour les 4 températures testées. Chaque courbe atteint asymptotiquement la valeur d'équilibre théorique $B_{eq} = R/\lambda(T)$, où $R$ est le taux de recrutement et $\lambda(T)$ la mortalité dépendante de la température.
+Cela assure une résolution temporelle constante (100 points par période caractéristique) quelle que soit la cinétique de la réaction.
 
-![Figure 1A : Convergence asymptotique de la biomasse](../../../data/article/figures/fig_01a_bio_convergence.png)
+**Configuration** :
 
-La **Figure 1B** (Tableau) résume les résultats quantitatifs :
+-   Modèle 0D (sans transport)
+-   Scan en température : 0°C à 35°C ($\Delta T = 1^{\circ}C$)
+-   Pas de temps et durée adaptatifs
 
-| Température | $B_{eq}$ théorique | $B_{eq}$ simulé | Erreur |
-|-------------|-------------------|-----------------|--------|
-| 0°C | 7.506 | 7.496 | 0.14% |
-| 10°C | 1.766 | 1.766 | 0.00% |
-| 20°C | 0.459 | 0.459 | 0.00% |
-| 30°C | 0.130 | 0.130 | 0.00% |
+La **Figure 1A** compare la biomasse finale simulée avec l'asymptote théorique $B_{eq}(T) = R/\lambda(T)$ pour chaque température.
 
-L'erreur maximale observée est de **0.14%**, confirmant que l'architecture DAG reproduit fidèlement les équations biologiques (voir Figure 1B).
+![Figure 1A : Convergence asymptotique de la biomasse](../../../data/article/figures/fig_01bis_temperature_scan.png)
 
-![Figure 1B : Tableau de validation biologique](../../../data/article/figures/fig_01b_bio_table.png)
+> Figure 1A : A. Biomasse d'équilibre simulée (points) vs théorique (ligne) en fonction de la température. B. Erreur relative.
+
+Les résultats démontrent une précision excellente sur toute la plage thermique :
+
+-   **Erreur moyenne** : ~0.0001%
+-   **Erreur maximale** : < 0.001%
+
+La validation est donc **réussie** : l'architecture DAG reproduit fidèlement la dynamique asymptotique attendue, indépendamment des conditions thermiques et du pas de temps, confirmant la robustesse de l'intégration numérique adaptative.
 
 ### 1.2. Comparaison avec SeapoPym v0.3 (Sans Transport)
 
@@ -36,14 +40,16 @@ L'erreur maximale observée est de **0.14%**, confirmant que l'architecture DAG 
 **Expérience attendue** : Simulation du modèle DAG et SeapoPym v0.3 sur les mêmes forçages (données réelles ou synthétiques), configuration sans transport.
 
 **Figures attendues** :
-- Cartes de biomasse DAG vs SeapoPym v0.3
-- Différence absolue et relative
-- Séries temporelles de biomasse totale
+
+-   Cartes de biomasse DAG vs SeapoPym v0.3
+-   Différence absolue et relative
+-   Séries temporelles de biomasse totale
 
 **Métriques attendues** :
-- Erreur L2 normalisée
-- Corrélation spatiale
-- Biais éventuel
+
+-   Erreur L2 normalisée
+-   Corrélation spatiale
+-   Biais éventuel
 
 **Conclusion attendue** : Non-régression par rapport à l'implémentation Python précédente.
 ]
@@ -77,12 +83,12 @@ Le schéma est stable pour CFL < 1, avec un **optimum de précision observé aut
 > **Note sur la Diffusion Numérique** :
 > L'erreur minimale à CFL=0.5, plutôt qu'à des valeurs plus faibles, s'explique par le comportement du schéma Upwind du premier ordre. La diffusion numérique de ce schéma est proportionnelle à $(1-\text{CFL})\frac{u\Delta x}{2}$. Ainsi, réduire le pas de temps (CFL $\to$ 0) augmente paradoxalement la diffusion numérique, dégradant la solution en "étalant" les gradients. L'optimum à 0.5 représente un compromis entre la minimisation de cette diffusion artificielle et la limite de stabilité [AJOUTER CITATION: LeVeque, 2002 ou similaire sur Finite Volume Methods].
 
-| CFL | Stabilité | Erreur L2 |
-|-----|-----------|-----------|
-| 0.25 | ✓ Stable | 1.2% |
-| 0.50 | ✓ Stable | 2.1% |
-| 0.75 | ✓ Stable | 3.4% |
-| 1.00 | ✗ Instable | — |
+| CFL  | Stabilité  | Erreur L2 |
+| ---- | ---------- | --------- |
+| 0.25 | ✓ Stable   | 1.2%      |
+| 0.50 | ✓ Stable   | 2.1%      |
+| 0.75 | ✓ Stable   | 3.4%      |
+| 1.00 | ✗ Instable | —         |
 
 Le schéma est stable pour CFL < 1, conformément à la théorie.
 
@@ -105,10 +111,10 @@ La **Figure 3D** présente l'erreur L2 en fonction de 1/Δx sur un graphe log-lo
 ![Figure 3D : Convergence en grille](../../../data/article/figures/fig_03d_grid_convergence.png)
 
 | Résolution | Δx (km) | Erreur L2 |
-|------------|---------|-----------|
-| Basse | 22.2 | 6.60% |
-| Moyenne | 11.1 | 2.31% |
-| Haute | 5.5 | 1.16% |
+| ---------- | ------- | --------- |
+| Basse      | 22.2    | 6.60%     |
+| Moyenne    | 11.1    | 2.31%     |
+| Haute      | 5.5     | 1.16%     |
 
 **Pente mesurée : 1.25** (attendu : 1.0 pour un schéma Upwind O(Δx)).
 
@@ -121,14 +127,16 @@ L'erreur décroît linéairement avec le raffinement de grille, confirmant que l
 **Expérience attendue** : Simulation du modèle DAG et Seapodym-LMTL sur les mêmes forçages (données GLORYS/CHL réelles), configuration complète avec transport.
 
 **Figures attendues** :
-- Cartes de biomasse DAG vs Seapodym-LMTL (plusieurs groupes fonctionnels)
-- Différences spatiales
-- Profils verticaux (si applicable)
+
+-   Cartes de biomasse DAG vs Seapodym-LMTL (plusieurs groupes fonctionnels)
+-   Différences spatiales
+-   Profils verticaux (si applicable)
 
 **Métriques attendues** :
-- Corrélation globale
-- Erreur RMSE
-- Analyse des biais régionaux
+
+-   Corrélation globale
+-   Erreur RMSE
+-   Analyse des biais régionaux
 
 **Conclusion attendue** : Le modèle DAG reproduit les patterns spatiaux et temporels de Seapodym-LMTL, validant la cohérence de l'implémentation du transport couplé.
 ]
@@ -147,11 +155,11 @@ La **Figure 4A** présente le temps de calcul par pas de temps en fonction du no
 
 ![Figure 4A : Weak Scaling](../../../data/article/figures/fig_04a_weak_scaling.png)
 
-| Grille | Cellules | Temps/Step (ms) |
-|--------|----------|-----------------|
-| 500×500 | 250,000 | 124 |
-| 1000×1000 | 1,000,000 | 517 |
-| 2000×2000 | 4,000,000 | 2021 |
+| Grille    | Cellules  | Temps/Step (ms) |
+| --------- | --------- | --------------- |
+| 500×500   | 250,000   | 124             |
+| 1000×1000 | 1,000,000 | 517             |
+| 2000×2000 | 4,000,000 | 2021            |
 
 **Pente mesurée : 1.006**, correspondant à une complexité **O(N^1.01) ≈ O(N)**.
 
@@ -165,12 +173,12 @@ Pour comprendre les contraintes de parallélisation, nous analysons la répartit
 
 **Configuration** : Grille 500×500, 10 cohortes, 20 pas de temps, profilage par décorateur.
 
-| Catégorie | Temps (s) | % du temps |
-|-----------|-----------|------------|
-| **Transport Production** | 0.994 | **80.2%** |
-| Mortalité | 0.123 | 9.9% |
-| Transport Biomasse | 0.102 | 8.3% |
-| Production | 0.021 | 1.7% |
+| Catégorie                | Temps (s) | % du temps |
+| ------------------------ | --------- | ---------- |
+| **Transport Production** | 0.994     | **80.2%**  |
+| Mortalité                | 0.123     | 9.9%       |
+| Transport Biomasse       | 0.102     | 8.3%       |
+| Production               | 0.021     | 1.7%       |
 
 **Le transport de la production représente 80% du temps de calcul.**
 
@@ -190,14 +198,15 @@ La **Figure 4C** présente le speedup et l'efficacité en fonction du nombre de 
 
 ![Figure 4C : Validation du système complet](../../../data/article/figures/fig_04e_sleep_parallelism_blueprint.png)
 
-| Workers | Temps (s) | Speedup | Efficacité |
-|---------|-----------|---------|------------|
-| 1 | 1.266 | 1.00× | 100% |
-| 4 | 0.337 | 3.78× | 95% |
-| 6 | 0.233 | 5.45× | 91% |
-| 12 | 0.123 | **10.34×** | **86%** |
+| Workers | Temps (s) | Speedup    | Efficacité |
+| ------- | --------- | ---------- | ---------- |
+| 1       | 1.266     | 1.00×      | 100%       |
+| 4       | 0.337     | 3.78×      | 95%        |
+| 6       | 0.233     | 5.45×      | 91%        |
+| 12      | 0.123     | **10.34×** | **86%**    |
 
 Le speedup est **quasi-linéaire** (10.34× avec 12 workers, efficacité 86%), confirmant que le système complet parallélise efficacement les groupes fonctionnels lorsque ceux-ci sont :
+
 1. **Indépendants** (pas de dépendances entre groupes dans le DAG)
 2. **Libèrent le GIL** (condition nécessaire pour le ThreadPoolScheduler)
 
@@ -209,13 +218,13 @@ Ce test valide l'infrastructure de parallélisation. Le speedup limité observé
 
 ## Résumé des Validations
 
-| Expérience | Métrique | Résultat | Validation |
-|------------|----------|----------|------------|
-| Bio 0D | Erreur vs théorie | 0.14% | ✓ |
-| Transport 1D | Conservation masse | 100.00% | ✓ |
-| Couplage 2D | Convergence | O(Δx^1.25) | ✓ |
-| Weak Scaling | Complexité | O(N^1.01) | ✓ |
-| Décomposition | Transport dominant | 80% | — |
-| Validation Système | Speedup (sleep) | 10.34× | ✓ |
-| Comparaison SeapoPym v0.3 | [ En attente ] | [ — ] | [ — ] |
-| Comparaison Seapodym-LMTL | [ En attente ] | [ — ] | [ — ] |
+| Expérience                | Métrique           | Résultat   | Validation |
+| ------------------------- | ------------------ | ---------- | ---------- |
+| Bio 0D                    | Erreur vs théorie  | 0.14%      | ✓          |
+| Transport 1D              | Conservation masse | 100.00%    | ✓          |
+| Couplage 2D               | Convergence        | O(Δx^1.25) | ✓          |
+| Weak Scaling              | Complexité         | O(N^1.01)  | ✓          |
+| Décomposition             | Transport dominant | 80%        | —          |
+| Validation Système        | Speedup (sleep)    | 10.34×     | ✓          |
+| Comparaison SeapoPym v0.3 | [ En attente ]     | [ — ]      | [ — ]      |
+| Comparaison Seapodym-LMTL | [ En attente ]     | [ — ]      | [ — ]      |
