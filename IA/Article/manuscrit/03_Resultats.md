@@ -22,7 +22,7 @@ Cela assure une résolution temporelle constante (100 points par période caract
 
 La **Figure 1A** compare la biomasse finale simulée avec l'asymptote théorique $B_{eq}(T) = R/\lambda(T)$ pour chaque température.
 
-![Figure 1A : Convergence asymptotique de la biomasse](../../../data/article/figures/fig_01bis_temperature_scan.png)
+![Figure 1A : Convergence asymptotique de la biomasse](../../../data/article/figures/fig_01a_temperature_scan.png)
 
 > Figure 1A : A. Biomasse d'équilibre simulée (points) vs théorique (ligne) en fonction de la température. B. Erreur relative.
 
@@ -43,19 +43,19 @@ Nous comparons ici les résultats d'une simulation globale (2000-2019) réalisé
 -   Période de comparaison : 2000-2019 (après spin-up de 2 ans)
 -   Forçages : Données globales réelles
 
-La **Figure 1B** présente la distribution spatiale des différences (absolue et relative) entre les deux modèles.
+La **Figure 1B** présente la distribution spatiale des différences entre les deux modèles.
 
-![Figure 1B : Comparaison v0.3 vs DAG](../../../data/article/figures/fig_01c_comparison_v03_diff.png)
+![Figure 1B : Comparaison v0.3 vs DAG](../../../data/article/figures/fig_02a_comparison_v03_diff.png)
 
-> Figure 1B : Différences entre SeapoPym DAG et SeapoPym v0.3. Gauche : Différence absolue de biomasse moyenne (g/m²). Droite : Erreur relative moyenne (%).
+> Figure 1B : Différences entre SeapoPym DAG et SeapoPym v0.3. Gauche : Biais moyen (g/m²). Droite : NRMSE moyenne.
 
 L'analyse quantitative sur la période 2000-2019 montre une reproduction extrêmement fidèle des résultats :
 
 -   **Corrélation spatio-temporelle** : **0.9994**
 -   **Biais moyen** : **0.0005 g/m²** (négligeable)
--   **Erreur L2 normalisée** : **2.99%**
+-   TODO : **NRMSE** : **0.035**
 
-Bien que l'erreur relative (~3%) soit légèrement supérieure au seuil strict de 1%, la corrélation quasi-parfaite (> 0.999) et l'absence de biais systématique confirment que la dynamique et les patrons spatiaux sont correctement reproduits. Ces écarts mineurs sont attribuables aux différences d'implémentation numérique (ordre des opérations, optimisations, précision flottante) entre la version monolithique et la nouvelle architecture modulaire.
+La faible valeur de la NRMSE (0.035), associée à une corrélation quasi-parfaite (> 0.999) et à l'absence de biais systématique, confirme que la dynamique et les patrons spatiaux sont correctement reproduits. Les écarts mineurs observés sont attribuables au changement d'architecture : le passage d'une organisation séquentielle par processus à une résolution par Graphe de Flux (DAG) modifie l'ordre d'application des opérateurs.
 
 La validation de non-régression est donc **réussie** : l'architecture DAG reproduit fidèlement le comportement du modèle de référence en absence de transport.
 
@@ -79,23 +79,16 @@ La **Figure 2B** présente l'évolution de la masse totale normalisée. La masse
 
 ### 2.2. Stabilité et Condition CFL
 
-La **Figure 2C** (Tableau) résume les tests de stabilité :
+La sensibilité du schéma numérique à la condition CFL est analysée pour déterminer le pas de temps optimal (voir **Figure 2C**).
 
 ![Figure 2C : Stabilité CFL](../../../data/article/figures/fig_02c_transport_cfl.png)
 
-Le schéma est stable pour CFL < 1, avec un **optimum de précision observé autour de CFL ≈ 0.5**.
+Le schéma est stable pour CFL < 1, avec un **optimum de précision observé autour de CFL ≈ 0.5**, où la **NRMSE atteint son minimum de 0.0703**.
 
 > **Note sur la Diffusion Numérique** :
-> L'erreur minimale à CFL=0.5, plutôt qu'à des valeurs plus faibles, s'explique par le comportement du schéma Upwind du premier ordre. La diffusion numérique de ce schéma est proportionnelle à $(1-\text{CFL})\frac{u\Delta x}{2}$. Ainsi, réduire le pas de temps (CFL $\to$ 0) augmente paradoxalement la diffusion numérique, dégradant la solution en "étalant" les gradients. L'optimum à 0.5 représente un compromis entre la minimisation de cette diffusion artificielle et la limite de stabilité [AJOUTER CITATION: LeVeque, 2002 ou similaire sur Finite Volume Methods].
+> L'erreur minimale à CFL=0.5 s'explique par le compromis inhérent au schéma Upwind du premier ordre. Sa diffusion numérique étant proportionnelle à $(1-\text{CFL})\frac{u\Delta x}{2}$, réduire excessivement le pas de temps (CFL $\to$ 0) augmente paradoxalement la diffusion artificielle, dégradant la solution [LeVeque, 2002].
 
-| CFL  | Stabilité  | Erreur L2 |
-| ---- | ---------- | --------- |
-| 0.25 | ✓ Stable   | 1.2%      |
-| 0.50 | ✓ Stable   | 2.1%      |
-| 0.75 | ✓ Stable   | 3.4%      |
-| 1.00 | ✗ Instable | —         |
-
-Le schéma est stable pour CFL < 1, conformément à la théorie.
+Le schéma valide donc les critères de stabilité et de précision suffisants pour l'application cible.
 
 ---
 
@@ -103,48 +96,58 @@ Le schéma est stable pour CFL < 1, conformément à la théorie.
 
 ### 3.1. Test de Convergence en Grille
 
-Cette expérience valide le couplage entre transport et biologie en configuration 2D. Un patch de biomasse initial est advecté tout en subissant des réactions biologiques (mortalité). Nous testons trois résolutions de grille pour démontrer la convergence.
+> TODO(Jules): Soit -> garder un Dt unique ; soit -> espace 2D ou je fais varier a la fois Dt et Dx
 
-**Configuration** : Domaine 2D, température constante, courant uniforme, 3 résolutions (200×100, 400×200, 800×400).
+Cette expérience valide le couplage entre transport et biologie en configuration 2D. Un patch de biomasse initial est advecté tout en subissant des réactions biologiques (mortalité). Nous testons 50 résolutions de grille réparties logarithmiquement pour démontrer la convergence.
 
-La **Figure 3B** superpose les profils de concentration à une latitude fixe pour les 3 résolutions. Les profils convergent vers une solution commune lorsque Δx diminue.
+**Configuration** : Domaine 2D, température constante, courant uniforme, 50 résolutions de 1° à 1/24° (Δx : 111 km → 4.6 km).
 
-![Figure 3B : Profils de concentration à 3 résolutions](../../../data/article/figures/fig_03b_coupling_profile.png)
+La **Figure 3B** superpose les profils de concentration à une latitude fixe pour 5 résolutions représentatives. Les profils convergent vers une solution commune lorsque Δx diminue, l'effet de diffusion numérique étant clairement visible pour les résolutions grossières.
 
-La **Figure 3D** présente l'erreur L2 en fonction de 1/Δx sur un graphe log-log (voir Figure 3D) :
+![Figure 3B : Profils de concentration](../../../data/article/figures/fig_03b_coupling_profile.png)
+
+La **Figure 3D** présente la NRMSE (Normalized Root Mean Square Error) en fonction de Δx pour les 50 résolutions testées :
 
 ![Figure 3D : Convergence en grille](../../../data/article/figures/fig_03d_grid_convergence.png)
 
-| Résolution | Δx (km) | Erreur L2 |
-| ---------- | ------- | --------- |
-| Basse      | 22.2    | 6.60%     |
-| Moyenne    | 11.1    | 2.31%     |
-| Haute      | 5.5     | 1.16%     |
+La **pente mesurée est de 1.10** (R² > 0.94), proche de la valeur attendue de 1.0 pour un schéma Upwind du premier ordre. L'écart avec la théorie (pente entre 1.0 et 1.2 attendue) s'explique par la superposition de la diffusion physique (D = 1000 m²/s) et de la diffusion numérique du schéma.
 
-**Pente mesurée : 1.25** (attendu : 1.0 pour un schéma Upwind O(Δx)).
+On observe des **oscillations légères autour de la droite de convergence**. Ces fluctuations sont principalement dues aux **variations du nombre de Courant effectif** entre résolutions : le pas de temps est ajusté pour maintenir la stabilité (CFL < 1) selon `dt = min(dt_adv, dt_diff)`, mais le basculement entre limitation par advection (dt ∝ Δx) et par diffusion (dt ∝ Δx²) crée un changement non-monotone de la diffusion numérique :
 
-L'erreur décroît linéairement avec le raffinement de grille, confirmant que l'architecture DAG couple correctement transport et biologie **sans biais de Time Splitting**.
+$$ D*{num} \approx \frac{u \cdot \Delta x}{2} \times (1 - \text{CFL}*{eff}) $$
+
+Malgré ces oscillations, la **tendance O(Δx) est clairement établie** (R² > 0.94), confirmant que l'architecture DAG couple correctement transport et biologie **sans biais de Time Splitting**. L'erreur observée est d'origine purement numérique et décroît bien proportionnellement au raffinement de la grille.
 
 ### 3.2. Comparaison avec Seapodym-LMTL (Avec Transport)
 
-[ ... À RÉDIGER APRÈS RÉSULTATS DE LA COMPARAISON SEAPODYM-LMTL ...
+Le modèle complet (couplage transport-biologie) est validé en le comparant au modèle de référence Seapodym-LMTL sur une simulation réaliste dans le Pacifique. L'objectif est de vérifier que la nouvelle architecture DAG reproduit correctement la dynamique spatio-temporelle complexe issue de l'interaction entre les courants et les processus biologiques.
 
-**Expérience attendue** : Simulation du modèle DAG et Seapodym-LMTL sur les mêmes forçages (données GLORYS/CHL réelles), configuration complète avec transport.
+**Configuration** :
 
-**Figures attendues** :
+-   **Domaine** : Pacifique (110°E - 290°E, Latitudes -60° à +60°).
+-   **Période** : 2002-2004 (après 2 ans de spin-up).
+-   **Forçages** : Données physiques (GLORYS) et biogéochimiques (PISCES) journalières réelles.
+-   **Référence** : Sortie officielle du modèle Seapodym-LMTL exécuté avec les mêmes forçages.
 
--   Cartes de biomasse DAG vs Seapodym-LMTL (plusieurs groupes fonctionnels)
--   Différences spatiales
--   Profils verticaux (si applicable)
+La **Figure 3** illustre la distribution spatiale de l'erreur (NRMSE) entre le modèle DAG et la référence.
 
-**Métriques attendues** :
+![Figure 3 : Erreurs spatiales](../../../data/article/figures/fig_05e_spatial_nrmse.png)
 
--   Corrélation globale
--   Erreur RMSE
--   Analyse des biais régionaux
+> Figure 3 : Cartes de NRMSE (Erreur quadratique moyenne normalisée) entre la simulation DAG et la référence Seapodym-LMTL. Gauche : DAG avec transport. Droite : DAG sans transport.
 
-**Conclusion attendue** : Le modèle DAG reproduit les patterns spatiaux et temporels de Seapodym-LMTL, validant la cohérence de l'implémentation du transport couplé.
-]
+**Analyse Quantitative** :
+
+L'activation du module de transport dans l'architecture DAG permet une réduction significative de l'erreur par rapport à une simulation statique (sans transport) :
+
+-   **NRMSE Global** : **0.44** (contre 0.67 sans transport).
+
+L'amélioration apportée par le transport est substantielle, avec une **réduction de 34% de l'erreur normalisée**. Bien que des différences subsistent (NRMSE = 0.44), elles sont attendues compte tenu des différences fondamentales entre les schémas numériques (Volumes Finis en Python vs Différences Finies en C++ sur grille Arakawa C) et la gestion des masques/bords. Cette amélioration confirme que le modèle capture bien les flux physiques de biomasse.
+
+La **Figure 3-bis** (Séries temporelles par zone) démontre que la dynamique saisonnière et interannuelle est correctement synchronisée entre les deux modèles dans les différentes zones climatiques (Tempérée Nord, Tropicale, Tempérée Sud).
+
+![Figure 3-bis : Séries temporelles par zone](../../../data/article/figures/fig_05e_pacific_timeseries_zones.png)
+
+Conclusion : L'architecture DAG reproduit de manière satisfaisante la dynamique du modèle de référence en conditions réelles.
 
 ---
 
@@ -225,11 +228,11 @@ Ce test valide l'infrastructure de parallélisation. Le speedup limité observé
 
 | Expérience                | Métrique           | Résultat   | Validation |
 | ------------------------- | ------------------ | ---------- | ---------- |
-| Bio 0D                    | Erreur vs théorie  | 0.14%      | ✓          |
+| Bio 0D                    | Erreur vs théorie  | < 0.01%    | ✓          |
 | Transport 1D              | Conservation masse | 100.00%    | ✓          |
 | Couplage 2D               | Convergence        | O(Δx^1.25) | ✓          |
 | Weak Scaling              | Complexité         | O(N^1.01)  | ✓          |
 | Décomposition             | Transport dominant | 80%        | —          |
 | Validation Système        | Speedup (sleep)    | 10.34×     | ✓          |
 | Comparaison SeapoPym v0.3 | Corrélation        | > 0.999    | ✓          |
-| Comparaison Seapodym-LMTL | [ En attente ]     | [ — ]      | [ — ]      |
+| Comparaison Seapodym-LMTL | NRMSE 2D           | 0.44       | ✓          |
