@@ -353,8 +353,6 @@ L'overhead du système complet (Blueprint + Controller + DaskBackend) est estim�
 
 Ce test valide l'infrastructure de parallélisation. Le speedup limité observé dans le modèle réel (~1.25×) n'est **pas** dû à un défaut du système, mais à la **structure du modèle** : le transport de production, tâche dominante (80%), ne peut être parallélisé au niveau inter-tâches.
 
----
-
 ## Résumé des Validations
 
 | Expérience                         | Métrique                  | Résultat        | Validation |
