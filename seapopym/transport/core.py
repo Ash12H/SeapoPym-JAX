@@ -6,6 +6,8 @@ This module implements the refactored transport functions with:
 - Unified orchestrators for Xarray and Numba
 """
 
+import logging
+import warnings
 from typing import Any
 
 import numpy as np
@@ -14,9 +16,96 @@ import xarray as xr
 from seapopym.standard.coordinates import Coordinates, GridPosition
 from seapopym.transport.boundary import BoundaryConditions, BoundaryType, get_neighbors_with_bc
 
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CUSTOM WARNINGS
+# =============================================================================
+
+
+class PerformanceWarning(UserWarning):
+    """Warning category for performance-related issues."""
+
+    pass
+
+
 # =============================================================================
 # SHARED HELPERS
 # =============================================================================
+
+
+def _validate_chunking_for_transport(state: xr.DataArray) -> None:
+    """Validate that chunking is optimal for transport computation.
+
+    This function checks if the state DataArray has chunked Dask arrays, and if so,
+    verifies that the core dimensions (Y and X) are NOT chunked. Chunking along
+    core dimensions triggers expensive rechunking operations that degrade performance.
+
+    Args:
+        state: The state DataArray to validate
+
+    Warnings:
+        Issues a performance warning if Y or X dimensions are chunked.
+    """
+    # Only validate if it's a Dask array
+    if not hasattr(state.data, "chunks") or state.data.chunks is None:
+        return
+
+    dim_y = Coordinates.Y.value
+    dim_x = Coordinates.X.value
+
+    # Check if Y and X are in the dimensions
+    if dim_y not in state.dims or dim_x not in state.dims:
+        return
+
+    # Get the chunk structure for Y and X
+    dim_y_idx = state.dims.index(dim_y)
+    dim_x_idx = state.dims.index(dim_x)
+
+    y_chunks = state.data.chunks[dim_y_idx]
+    x_chunks = state.data.chunks[dim_x_idx]
+
+    # Check if Y or X are chunked (more than one chunk)
+    y_is_chunked = len(y_chunks) > 1
+    x_is_chunked = len(x_chunks) > 1
+
+    if y_is_chunked or x_is_chunked:
+        # Build detailed warning message
+        chunk_info = []
+        if y_is_chunked:
+            chunk_info.append(f"  - {dim_y}: {len(y_chunks)} chunks {y_chunks}")
+        if x_is_chunked:
+            chunk_info.append(f"  - {dim_x}: {len(x_chunks)} chunks {x_chunks}")
+
+        # Identify non-core dimensions that SHOULD be chunked
+        non_core_dims = [d for d in state.dims if d not in [dim_y, dim_x]]
+        suggested_chunks = {dim_y: -1, dim_x: -1}
+        if non_core_dims:
+            # Suggest chunking along first non-core dimension (typically 'cohort')
+            suggested_chunks[non_core_dims[0]] = 1
+
+        warnings.warn(
+            "Transport computation: Core dimensions (Y, X) are chunked, which will trigger expensive rechunking.\n"
+            "Current chunking:\n" + "\n".join(chunk_info) + "\n\n"
+            f"Performance impact:\n"
+            f"  - Rechunking causes data shuffling between workers\n"
+            f"  - Increased memory usage and communication overhead\n"
+            f"  - Can significantly slow down transport operations\n\n"
+            f"Recommended fix: Rechunk your data to avoid fragmenting Y and X:\n"
+            f"  state = state.chunk({suggested_chunks})\n\n"
+            f"Example for typical LMTL model:\n"
+            f"  # Good: Chunk only along cohort dimension\n"
+            f"  production = production.chunk({{'Y': -1, 'X': -1, 'cohort': 1}})\n"
+            f"  # Bad: Chunk along spatial dimensions\n"
+            f"  production = production.chunk({{'Y': 100, 'X': 100, 'cohort': 1}})\n",
+            PerformanceWarning,
+            stacklevel=4,
+        )
+        logger.warning(
+            f"Transport: Core dimensions are chunked. Y: {len(y_chunks)} chunks, X: {len(x_chunks)} chunks. "
+            f"This will trigger rechunking."
+        )
 
 
 def _ensure_dataarray(value: xr.DataArray | float, template: xr.DataArray) -> xr.DataArray:
@@ -569,6 +658,10 @@ def compute_transport_numba(
     except ImportError as err:
         raise ImportError("Numba is required for Numba implementation.") from err
 
+    # --- 0. VALIDATE CHUNKING ---
+    # Check if chunking is optimal for transport (warn if Y or X are chunked)
+    _validate_chunking_for_transport(state)
+
     dim_y = Coordinates.Y.value
     dim_x = Coordinates.X.value
     x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)
@@ -635,6 +728,7 @@ def compute_transport_numba(
         ],
         dask="parallelized",
         output_dtypes=[state_clean.dtype] * 4,
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
 
     # --- 3. DIFFUSION FLUXES ---
@@ -666,6 +760,7 @@ def compute_transport_numba(
         ],
         dask="parallelized",
         output_dtypes=[state_clean.dtype] * 4,
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
 
     # --- 4. COMPUTE TENDENCIES ---

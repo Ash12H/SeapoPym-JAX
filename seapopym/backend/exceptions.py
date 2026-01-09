@@ -11,3 +11,9 @@ class ExecutionError(BackendError):
     """Raised when an error occurs during unit execution."""
 
     pass
+
+
+class BackendConfigurationError(BackendError):
+    """Raised when backend is misconfigured for the data type or setup."""
+
+    pass

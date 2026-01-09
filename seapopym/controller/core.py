@@ -37,8 +37,13 @@ class SimulationController:
 
         Args:
             config: Configuration parameters for the simulation.
-            backend: The execution backend to use. Can be a string ('sequential', 'dask')
-                    or a ComputeBackend instance. Defaults to 'sequential'.
+            backend: The execution backend to use. Can be a string or a ComputeBackend instance.
+                    Supported strings:
+                    - 'sequential': Pure sequential execution with eager computation (no parallelism)
+                    - 'task_parallel': Task parallelism via dask.delayed (inter-task parallelism)
+                    - 'data_parallel': Data parallelism via Dask chunking (intra-task parallelism)
+                    - 'dask': Deprecated alias for 'task_parallel'
+                    Defaults to 'sequential'.
         """
         self.config = config
         self.blueprint = Blueprint()
@@ -53,10 +58,30 @@ class SimulationController:
             if backend == "sequential":
                 self.backend = SequentialBackend()
             elif backend == "dask":
+                # Deprecation warning for old 'dask' backend name
+                import warnings
+
+                warnings.warn(
+                    "backend='dask' is deprecated and will be removed in v2.0. "
+                    "Use backend='task_parallel' for task parallelism or "
+                    "backend='data_parallel' for data chunking parallelism.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                # For backwards compatibility, map to DaskBackend (which still exists)
                 self.backend = DaskBackend()
+            elif backend == "task_parallel":
+                from seapopym.backend.task_parallel import TaskParallelBackend
+
+                self.backend = TaskParallelBackend()
+            elif backend == "data_parallel":
+                from seapopym.backend.data_parallel import DataParallelBackend
+
+                self.backend = DataParallelBackend()
             else:
                 raise ValueError(
-                    f"Unknown backend type: '{backend}'. Supported: 'sequential', 'dask'."
+                    f"Unknown backend type: '{backend}'. "
+                    f"Supported: 'sequential', 'task_parallel', 'data_parallel'."
                 )
         else:
             self.backend = backend
@@ -66,12 +91,13 @@ class SimulationController:
     def setup(
         self,
         model_configuration_func: Callable[[Blueprint], None],
-        forcings: xr.Dataset | None = None,
         initial_state: xr.Dataset | dict[str, xr.Dataset] | None = None,
+        forcings: xr.Dataset | None = None,
         parameters: Any | None = None,
         output_path: str | Path | None = None,
         output_variables: list[str] | dict[str, list[str]] | None = None,
         output_metadata: dict[str, Any] | None = None,
+        chunks: dict[str, int] | None = None,
     ) -> None:
         """Configure et initialise la simulation.
 
@@ -87,6 +113,8 @@ class SimulationController:
             output_variables: List of variables to save. If None, all variables are saved.
                             Peut être une liste simple ou un dictionnaire {groupe: [vars]}.
             output_metadata: Metadata to add to the output dataset.
+            chunks: Configuration du chunking Dask pour l'état initial (parallélisme de données).
+                   Ex: {"cohort": 1} pour paralléliser sur les cohortes.
         """
         # 1. Configuration du modèle (Blueprint)
         model_configuration_func(self.blueprint)
@@ -96,10 +124,26 @@ class SimulationController:
         if parameters is not None:
             param_ds = self._ingest_parameters(parameters)
 
-        # 3. Ingestion de l'état initial
-        state_ds = self._ingest_initial_state(initial_state)
+        # 3. Validation backend vs chunking configuration
+        if chunks is not None:
+            # Import here to avoid circular import
+            from seapopym.backend.exceptions import BackendConfigurationError
+            from seapopym.backend.task_parallel import TaskParallelBackend
 
-        # 4. Ingestion des variables de sortie
+            if isinstance(self.backend, TaskParallelBackend):
+                raise BackendConfigurationError(
+                    "TaskParallelBackend is incompatible with chunked data (chunks parameter provided).\n"
+                    "TaskParallelBackend uses dask.delayed which materializes all inputs.\n\n"
+                    "Solution: Use backend='data_parallel' for data chunking parallelism.\n"
+                    "Example:\n"
+                    "  controller = SimulationController(config, backend='data_parallel')\n"
+                    "  controller.setup(..., chunks={'cohort': 1})"
+                )
+
+        # 4. Ingestion de l'état initial
+        state_ds = self._ingest_initial_state(initial_state, chunks=chunks)
+
+        # 5. Ingestion des variables de sortie
         output_vars_list = self._ingest_output_variables(output_variables)
 
         # 5. Compilation du plan d'exécution
@@ -323,21 +367,33 @@ class SimulationController:
 
         return ds
 
-    def _ingest_initial_state(self, state: xr.Dataset | dict[str, xr.Dataset]) -> xr.Dataset:
+    def _ingest_initial_state(
+        self,
+        state: xr.Dataset | dict[str, xr.Dataset],
+        chunks: dict[str, int] | None = None,
+    ) -> xr.Dataset:
         """Prépare l'état initial en fusionnant les datasets si nécessaire."""
         if isinstance(state, xr.Dataset):
-            return state
+            final_ds = state
+        else:
+            # Si c'est un dict, on renomme les variables et on merge
+            datasets_to_merge = []
+            for prefix, ds in state.items():
+                # Renommer uniquement les variables de données, pas les coordonnées
+                # sauf si elles sont spécifiques au dataset
+                renamed_vars = {var: f"{prefix}/{var}" for var in ds.data_vars}
+                renamed_ds = ds.rename(renamed_vars)
+                datasets_to_merge.append(renamed_ds)
 
-        # Si c'est un dict, on renomme les variables et on merge
-        datasets_to_merge = []
-        for prefix, ds in state.items():
-            # Renommer uniquement les variables de données, pas les coordonnées
-            # sauf si elles sont spécifiques au dataset
-            renamed_vars = {var: f"{prefix}/{var}" for var in ds.data_vars}
-            renamed_ds = ds.rename(renamed_vars)
-            datasets_to_merge.append(renamed_ds)
+            final_ds = xr.merge(datasets_to_merge)
 
-        return xr.merge(datasets_to_merge)
+        # Appliquer la stratégie de parallélisme (Dask Chunking)
+        if chunks is not None:
+            # On log l'opération car elle impacte la performance
+            logger.info(f"Applying user-defined chunking strategy: {chunks}")
+            final_ds = final_ds.chunk(chunks)
+
+        return final_ds
 
     def _ingest_output_variables(
         self, outputs: list[str] | dict[str, list[str]] | None
