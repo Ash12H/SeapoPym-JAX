@@ -102,9 +102,14 @@ def test_controller_with_tendencies():
         return {"growth": xr.DataArray([0.001], dims=["x"])}
 
     def configure_model(bp: Blueprint):
-        bp.register_forcing("biomass")
+        bp.register_group(
+            "",
+            state_variables={"biomass": {"dims": ("x",), "units": "dimensionless"}},
+            units=[],
+        )
         bp.register_unit(
             compute_tendency,
+            input_mapping={"biomass": "biomass"},
             output_mapping={"growth": "growth_rate"},
             output_tendencies={"growth": "biomass"},  # Tendance de biomass
         )

@@ -335,7 +335,7 @@ class Blueprint:
             # 1. Enregistrement automatique des paramètres du groupe
             if parameters:
                 for param_name, param_spec in parameters.items():
-                    full_name = f"{group_prefix}/{param_name}"
+                    full_name = f"{group_prefix}/{param_name}" if group_prefix else param_name
                     self.register_parameter(
                         name=full_name,
                         units=param_spec.get("units"),
@@ -345,7 +345,7 @@ class Blueprint:
             # 2. Enregistrement des variables d'état explicites
             if state_variables:
                 for var_name, var_spec in state_variables.items():
-                    full_name = f"{group_prefix}/{var_name}"
+                    full_name = f"{group_prefix}/{var_name}" if group_prefix else var_name
                     if full_name in self.registered_variables:
                         raise ConfigurationError(
                             f"State variable '{full_name}' is already registered."

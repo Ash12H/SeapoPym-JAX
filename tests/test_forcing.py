@@ -91,3 +91,56 @@ def test_dask_lazy_evaluation():
     # Check that we can compute it
     val = result["temp"].compute()
     assert val.shape == (10, 10)
+
+
+def test_init_unsorted_time():
+    """Test error when time coordinate is not monotonic."""
+    ds = xr.Dataset(
+        {"temp": ((Coordinates.T), [1, 2, 3])},
+        coords={Coordinates.T: pd.to_datetime(["2020-01-01", "2020-01-03", "2020-01-02"])},
+    )
+    with pytest.raises(ValueError, match="monotonically increasing"):
+        ForcingManager(ds)
+
+
+def test_init_dask_time_coordinate():
+    """Test init with dask-backed time coordinate."""
+    times = pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"])
+    ds = xr.Dataset({"temp": ((Coordinates.T), [1, 2, 3])}, coords={Coordinates.T: times}).chunk(
+        {Coordinates.T: 1}
+    )
+
+    # Should not raise, compute() called internally
+    mgr = ForcingManager(ds)
+    assert len(mgr.forcings[Coordinates.T]) == 3
+
+
+def test_method_ffill(simple_forcing):
+    """Test ffill method."""
+    manager = ForcingManager(simple_forcing, method="ffill")
+    # Time 1.5 should allow 1.0 (ffill)
+    target_time = datetime(2020, 1, 1, 12, 0)
+    result = manager.get_forcings(target_time)
+
+    # Value at Jan 1 is 10.0
+    assert result["temperature"].isel(x=0).item() == 10.0
+
+
+def test_method_nearest(simple_forcing):
+    """Test nearest method."""
+    manager = ForcingManager(simple_forcing, method="nearest")
+    # Time 1.9 should take 2.0
+    target_time = datetime(2020, 1, 1, 22, 0)  # Close to Jan 2
+    result = manager.get_forcings(target_time)
+
+    # Value at Jan 2 is 11.0
+    assert result["temperature"].isel(x=0).item() == 11.0
+
+
+def test_unknown_method(simple_forcing):
+    """Test unknown method raises error."""
+    manager = ForcingManager(simple_forcing)
+    # Hack to inject invalid method if type checking is bypassed
+    manager.method = "invalid"
+    with pytest.raises(ValueError, match="Unknown method"):
+        manager.get_forcings(datetime(2020, 1, 1))

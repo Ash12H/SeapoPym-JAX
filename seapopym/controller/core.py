@@ -57,22 +57,13 @@ class SimulationController:
         if isinstance(backend, str):
             if backend == "sequential":
                 self.backend = SequentialBackend()
-            elif backend == "task_parallel":
-                from seapopym.backend.task_parallel import TaskParallelBackend
-
-                self.backend = TaskParallelBackend()
-            elif backend == "data_parallel":
-                from seapopym.backend.data_parallel import DataParallelBackend
-
-                self.backend = DataParallelBackend()
             elif backend == "distributed":
                 from seapopym.backend.distributed import DistributedBackend
 
                 self.backend = DistributedBackend()
             else:
                 raise ValueError(
-                    f"Unknown backend type: '{backend}'. "
-                    f"Supported: 'sequential', 'task_parallel', 'data_parallel', 'distributed'."
+                    f"Unknown backend type: '{backend}'. Supported: 'sequential', 'distributed'."
                 )
         else:
             self.backend = backend
@@ -116,20 +107,8 @@ class SimulationController:
             param_ds = self._ingest_parameters(parameters)
 
         # 3. Validation backend vs chunking configuration
-        if chunks is not None:
-            # Import here to avoid circular import
-            from seapopym.backend.exceptions import BackendConfigurationError
-            from seapopym.backend.task_parallel import TaskParallelBackend
-
-            if isinstance(self.backend, TaskParallelBackend):
-                raise BackendConfigurationError(
-                    "TaskParallelBackend is incompatible with chunked data (chunks parameter provided).\n"
-                    "TaskParallelBackend uses dask.delayed which materializes all inputs.\n\n"
-                    "Solution: Use backend='data_parallel' for data chunking parallelism.\n"
-                    "Example:\n"
-                    "  controller = SimulationController(config, backend='data_parallel')\n"
-                    "  controller.setup(..., chunks={'cohort': 1})"
-                )
+        # Checks removed as TaskParallelBackend is deprecated.
+        pass
 
         # 4. Ingestion de l'état initial
         state_ds = self._ingest_initial_state(initial_state, chunks=chunks)

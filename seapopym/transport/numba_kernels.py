@@ -1,4 +1,8 @@
-"""New Numba-accelerated transport kernels with separate flux computation."""
+"""Numba-accelerated transport kernels for advection and diffusion.
+
+Coverage tools cannot trace JIT-compiled functions.
+See tests/test_transport_numba.py for functional tests.
+"""
 
 from numba import float32, float64, guvectorize, int32  # type: ignore[import-not-found]
 
