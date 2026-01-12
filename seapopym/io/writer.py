@@ -45,30 +45,20 @@ class BaseOutputWriter(ABC):
         """Finalize writing and return the complete dataset."""
         ...
 
-    def append(self, state: xr.Dataset, time: Any | None = None) -> None:
-        """Append a simulation state to the output.
+    def get_append_task(self, state: xr.Dataset, time: Any | None = None) -> Any:
+        """Create a task to append the state to the output.
 
-        Automatically initializes the writer on the first call.
-        Filters variables if a list was provided.
+        The returned task can be:
+        - A dask.delayed object (for ZarrWriter with lazy data)
+        - A callable (for MemoryWriter)
+        - None (if nothing to do)
 
-        Args:
-            state: The simulation state to append.
-            time: Optional time value to add as a coordinate if not present in state.
+        This allows the Controller/Backend to decide WHEN and WHERE to execute the task.
         """
-        # Filter variables
+        # Common logic (variable selection, time coord)
         if self.variables is not None:
-            # We only keep variables that exist in the state
-            # (to avoid errors if a requested variable is missing, or we could raise)
-            # Let's be strict: if user asked for it, it should be there.
-            # But state might contain coords that are not in data_vars.
-            # We select data_vars + coords that are in the list.
-
-            # Actually, simple selection works well in xarray
-            # It selects data_vars and keeps associated coords.
-            # If a variable in 'variables' is not in state, it raises KeyError.
             state = state[self.variables]
 
-        # Add time coordinate if provided and not already present
         if time is not None:
             from seapopym.standard.coordinates import Coordinates
 
@@ -76,11 +66,26 @@ class BaseOutputWriter(ABC):
             if time_coord not in state.coords:
                 state = state.assign_coords({time_coord: time})
 
-        if not self._is_initialized:
-            self._initialize(state)
-            self._is_initialized = True
+        # Return a callable that executes the write
+        # Subclasses can override to return a Delayed object
+        def _task() -> None:
+            if not self._is_initialized:
+                self._initialize(state)
+                self._is_initialized = True
+            self._write_step(state)
 
-        self._write_step(state)
+        return _task
+
+    def append(self, state: xr.Dataset, time: Any | None = None) -> None:
+        """Append a simulation state to the output (Synchronous).
+
+        Automatically initializes the writer on the first call.
+        """
+        task = self.get_append_task(state, time)
+        if hasattr(task, "compute"):
+            task.compute()
+        elif callable(task):
+            task()
 
 
 class MemoryWriter(BaseOutputWriter):
@@ -156,71 +161,45 @@ class ZarrWriter(BaseOutputWriter):
         self.path = Path(path)
         self.chunks = chunks or {"time": 1}
 
-    def _initialize(self, state: xr.Dataset) -> None:
+    def _initialize(self, state: xr.Dataset, compute: bool = True) -> Any:
         """Create the Zarr store structure."""
         if self.path.exists():
             raise FileExistsError(f"Output path '{self.path}' already exists.")
 
         self.path.mkdir(parents=True, exist_ok=True)
 
-        # We need to prepare the dataset for Zarr writing:
-        # 1. Expand dims to include time (if scalar) so Zarr knows it's a dimension
-        # 2. Set up encoding/chunks
-
         from seapopym.standard.coordinates import Coordinates
 
         # Check for time coordinate
         time_dim = Coordinates.T.value
         if time_dim not in state.coords:
-            # If missing, we can't really initialize properly for time series
             raise ValueError(f"State is missing time coordinate '{time_dim}'")
 
-        # Ensure time is a dimension (it might be a scalar coord)
+        # Ensure time is a dimension
         ds_to_init = state.expand_dims(dim=time_dim) if time_dim not in state.dims else state
 
         # Initialize Zarr store
-        # We use compute=False to just write metadata/structure?
-        # No, to_zarr with compute=False returns a Delayed object.
-        # We want to write the first chunk or initialize empty?
-        # Actually, we can just write the first step, and subsequent steps will append.
-        # But 'append' mode in Zarr requires the store to exist.
-
-        # Strategy:
-        # 1. Write the first timestep (mode='w')
-        # 2. Subsequent steps use mode='a' (append)
-
-        # Apply chunking
-        # We can pass encoding to to_zarr
-        # encoding = {var: {'chunks': ...} for var in ds_to_init.data_vars}
-
-        # Write first step
         ds_to_init.attrs.update(self.metadata)
-        ds_to_init.to_zarr(self.path, mode="w", safe_chunks=False)
+        return ds_to_init.to_zarr(self.path, mode="w", safe_chunks=False, compute=compute)
 
-    def _write_step(self, state: xr.Dataset) -> None:
+    def _write_step(self, state: xr.Dataset, compute: bool = True) -> Any:
         """Write timestep to Zarr."""
         from seapopym.standard.coordinates import Coordinates
 
         time_dim = Coordinates.T.value
-
-        # Ensure time dimension
         ds_to_write = state.expand_dims(dim=time_dim) if time_dim not in state.dims else state
 
         # Append to existing store
-        ds_to_write.to_zarr(self.path, append_dim=time_dim, safe_chunks=False)
+        return ds_to_write.to_zarr(
+            self.path, append_dim=time_dim, safe_chunks=False, compute=compute
+        )
 
-    def append(self, state: xr.Dataset, time: Any | None = None) -> None:
-        """Overridden to handle the specific init/write logic for Zarr.
-
-        Args:
-            state: The simulation state to append.
-            time: Optional time value to add as a coordinate if not present in state.
-        """
-        # Filter variables
+    def get_append_task(self, state: xr.Dataset, time: Any | None = None) -> Any:
+        """Get the dask.delayed task for writing without executing it."""
+        # Pre-process state (filtering, coordinates)
         if self.variables is not None:
             state = state[self.variables]
 
-        # Add time coordinate if provided and not already present
         if time is not None:
             from seapopym.standard.coordinates import Coordinates
 
@@ -228,12 +207,22 @@ class ZarrWriter(BaseOutputWriter):
             if time_coord not in state.coords:
                 state = state.assign_coords({time_coord: time})
 
+        # Return the delayed object
         if not self._is_initialized:
-            # For Zarr, initialization IS writing the first step
-            self._initialize(state)
             self._is_initialized = True
+            return self._initialize(state, compute=False)
         else:
-            self._write_step(state)
+            return self._write_step(state, compute=False)
+
+    def append(self, state: xr.Dataset, time: Any | None = None) -> None:
+        """Sync append override."""
+        # Use the base implementation which calls get_append_task().compute()
+        # But we need to make sure _initialize/_write_step are called with compute=False internally
+        # if called via get_append_task.
+        # Actually, base implementation calls get_append_task then .compute().
+        # So ZarrWriter.get_append_task returns a Delayed.
+        # Base.append calls Delayed.compute(). It works.
+        super().append(state, time)
 
     def finalize(self) -> xr.Dataset:
         """Return the opened Zarr dataset."""

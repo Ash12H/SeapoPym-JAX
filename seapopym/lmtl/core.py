@@ -208,27 +208,21 @@ def compute_production_initialization(
         {"output": production_tendency} in [g/m²/s] for cohort dimension.
         Only cohort 0 receives flux (E * NPP), others are zero.
     """
-    # This assumes we can construct the full array or that xarray handles broadcasting.
-    # But we don't know the cohort dimension size here easily without the state.
-    # However, if 'primary_production' aligns with T, Y, X, we can add a cohort coord.
-
-    # To be safe and efficient, we should probably handle this by returning a
-    # specific variable "production_source" that is then mapped to "production"
-    # but the TimeIntegrator logic sums everything.
-
-    # Let's assume the caller (TimeIntegrator) handles broadcasting if we return
-    # a DataArray with a single coordinate value for cohort=0.
-
     # Source is a rate (e.g. gC/m2/s)
     # The TimeIntegrator will multiply by dt (in seconds).
     tendency_rate = E * primary_production
 
-    # We expand dims to include cohort=0
-    tendency = tendency_rate.expand_dims(cohort=[0])
+    # Create a cohort mask: [1, 0, 0, ..., 0]
+    # This approach avoids expensive reindex() operation that creates large Dask graphs
+    n_cohorts = len(cohorts)
+    cohort_mask = np.zeros(n_cohorts)
+    cohort_mask[0] = 1.0
 
-    # Reindex to match the full cohorts shape (filling other cohorts with 0)
-    # We assume 'cohorts' is the coordinate DataArray for the cohort dimension.
-    tendency = tendency.reindex(cohort=cohorts, fill_value=0.0)
+    # Broadcast tendency_rate × mask
+    # Works for both numpy and dask arrays without graph explosion
+    tendency = tendency_rate.expand_dims(cohort=cohorts) * xr.DataArray(
+        cohort_mask, dims=["cohort"], coords={"cohort": cohorts}
+    )
 
     return {"output": tendency}
 

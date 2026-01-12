@@ -88,17 +88,10 @@ def _validate_chunking_for_transport(state: xr.DataArray) -> None:
         warnings.warn(
             "Transport computation: Core dimensions (Y, X) are chunked, which will trigger expensive rechunking.\n"
             "Current chunking:\n" + "\n".join(chunk_info) + "\n\n"
-            f"Performance impact:\n"
-            f"  - Rechunking causes data shuffling between workers\n"
-            f"  - Increased memory usage and communication overhead\n"
-            f"  - Can significantly slow down transport operations\n\n"
-            f"Recommended fix: Rechunk your data to avoid fragmenting Y and X:\n"
-            f"  state = state.chunk({suggested_chunks})\n\n"
-            f"Example for typical LMTL model:\n"
-            f"  # Good: Chunk only along cohort dimension\n"
-            f"  production = production.chunk({{'Y': -1, 'X': -1, 'cohort': 1}})\n"
-            f"  # Bad: Chunk along spatial dimensions\n"
-            f"  production = production.chunk({{'Y': 100, 'X': 100, 'cohort': 1}})\n",
+            "Performance impact:\n"
+            "  - Rechunking causes data shuffling between workers\n"
+            "  - Increased memory usage and communication overhead\n"
+            "  - Can significantly slow down transport operations\n\n",
             PerformanceWarning,
             stacklevel=4,
         )
@@ -728,7 +721,7 @@ def compute_transport_numba(
         ],
         dask="parallelized",
         output_dtypes=[state_clean.dtype] * 4,
-        dask_gufunc_kwargs={"allow_rechunk": True},
+        dask_gufunc_kwargs={"allow_rechunk": False},
     )
 
     # --- 3. DIFFUSION FLUXES ---
@@ -760,7 +753,7 @@ def compute_transport_numba(
         ],
         dask="parallelized",
         output_dtypes=[state_clean.dtype] * 4,
-        dask_gufunc_kwargs={"allow_rechunk": True},
+        dask_gufunc_kwargs={"allow_rechunk": False},
     )
 
     # --- 4. COMPUTE TENDENCIES ---

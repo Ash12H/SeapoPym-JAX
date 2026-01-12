@@ -94,6 +94,37 @@ class TaskParallelBackend(ComputeBackend):
         """Initialize TaskParallelBackend."""
         logger.info("TaskParallelBackend initialized")
 
+    def prepare_data(self, data: xr.Dataset) -> xr.Dataset:
+        """Prepare data by computing eagerly if it contains lazy arrays.
+
+        TaskParallelBackend uses dask.delayed which captures data in closures.
+        This has an important limitation: large datasets (>100 MB) will be
+        serialized into the task graph, causing warnings about large graph sizes.
+
+        This is a known architectural limitation of dask.delayed. For simulations
+        with large forcings, consider using DataParallelBackend instead.
+
+        Args:
+            data: Dataset to prepare (state, forcings, etc.)
+
+        Returns:
+            Dataset with arrays computed eagerly into memory.
+
+        Note:
+            If you see warnings about "large graph of size XXX MiB", this is
+            expected with TaskParallelBackend when using large datasets.
+            Consider switching to DataParallelBackend with chunking to avoid this.
+        """
+        if hasattr(data, "compute"):
+            # Check if it actually has lazy arrays (not all Datasets do)
+            has_dask = any(hasattr(var.data, "__dask_graph__") for var in data.data_vars.values())
+            if has_dask:
+                logger.info(
+                    "Computing dataset eagerly (TaskParallelBackend requires materialized inputs)"
+                )
+                return data.compute()
+        return data
+
     def execute(
         self,
         task_groups: list[tuple[str, list[ComputeNode]]],

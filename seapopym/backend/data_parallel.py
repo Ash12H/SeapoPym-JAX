@@ -37,13 +37,10 @@ class DataParallelBackend(ComputeBackend):
     - Best when individual chunks fit in memory but full dataset doesn't
 
     Args:
-        persist_intermediates: If True, call .persist() on results after each group
-                             to materialize intermediate results in distributed memory.
-                             This prevents graph explosion but increases memory usage.
-                             Default: False (pure lazy evaluation).
+        None
 
     Example:
-        >>> backend = DataParallelBackend(persist_intermediates=False)
+        >>> backend = DataParallelBackend()
         >>> controller = SimulationController(config, backend=backend)
         >>> controller.setup(
         ...     configure_model,
@@ -52,18 +49,47 @@ class DataParallelBackend(ComputeBackend):
         ... )
     """
 
-    def __init__(self, persist_intermediates: bool = False):
-        """Initialize DataParallelBackend.
+    def __init__(self) -> None:
+        """Initialize DataParallelBackend."""
+        logger.info("DataParallelBackend initialized (auto-persist enabled)")
+
+    def prepare_data(self, data: xr.Dataset) -> xr.Dataset:
+        """Prepare data by persisting to distributed memory.
+
+        This prevents large numpy arrays or lazy Dask graphs from being embedded
+        into task graphs, which would cause huge graph sizes and slow serialization.
 
         Args:
-            persist_intermediates: Whether to persist results after each task group.
-                                 Set to True to avoid graph explosion with many steps,
-                                 but increases memory usage.
+            data: Dataset to prepare (state, forcings, etc.)
+
+        Returns:
+            Dataset with arrays persisted to distributed memory.
         """
-        self.persist_intermediates = persist_intermediates
-        logger.info(
-            f"DataParallelBackend initialized with persist_intermediates={persist_intermediates}"
-        )
+        if hasattr(data, "persist"):
+            logger.info("Persisting dataset to distributed memory (cutting graph lineage)")
+            persisted = data.persist()
+
+            # CRITICAL: Wait for persist to complete before returning
+            # Without this, the data might still be lazy when first used,
+            # causing it to be embedded in the task graph
+            from dask.distributed import wait
+
+            # Collect all dask arrays from the dataset (data_vars AND coords)
+            futures = []
+            for var in persisted.data_vars.values():
+                if hasattr(var.data, "__dask_graph__"):
+                    futures.append(var.data)
+            for coord in persisted.coords.values():
+                if hasattr(coord.data, "__dask_graph__"):
+                    futures.append(coord.data)
+
+            if futures:
+                logger.debug(f"Waiting for {len(futures)} arrays to be persisted...")
+                wait(futures)
+                logger.debug("Persist complete")
+
+            return persisted
+        return data
 
     def execute(
         self,
@@ -76,12 +102,17 @@ class DataParallelBackend(ComputeBackend):
         sequentially. However, the actual computation within each task is parallelized
         automatically by Dask when operations are applied to chunked arrays.
 
+        Crucially, this backend applies .persist() after each task group. This forces
+        the computation of intermediate results into distributed memory, cutting the
+        task graph lineage. This is essential for iterative simulations to prevent
+        exponential graph growth.
+
         Args:
             task_groups: List of (group_name, list_of_tasks) tuples
             state: Current simulation state (should contain chunked Dask arrays)
 
         Returns:
-            Dictionary of results {variable_name: DataArray}
+            Dictionary of results {variable_name: DataArray} (persisted)
 
         Warnings:
             Issues a warning if no chunked data is detected, suggesting alternative backends.
@@ -98,10 +129,10 @@ class DataParallelBackend(ComputeBackend):
             # Dask will parallelize operations within each task automatically
             group_results = execute_task_sequence(tasks, state, all_results)
 
-            # Optional: persist intermediate results to prevent graph explosion
-            if self.persist_intermediates:
-                logger.debug(f"Persisting {len(group_results)} results from group '{group_name}'")
-                group_results = self._persist_results(group_results)
+            # Always persist intermediate results to prevent graph explosion
+            # This keeps data in distributed memory (workers) and cuts the lineage
+            logger.debug(f"Persisting {len(group_results)} results from group '{group_name}'")
+            group_results = self._persist_results(group_results)
 
             all_results.update(group_results)
 
@@ -109,6 +140,23 @@ class DataParallelBackend(ComputeBackend):
             f"DataParallelBackend execution complete. {len(all_results)} variables produced."
         )
         return all_results
+
+    def stabilize_state(self, state: xr.Dataset) -> xr.Dataset:
+        """Stabilize the state by persisting it to distributed memory.
+
+        This cuts the Dask dependency graph lineage, which is critical for iterative
+        simulations to prevent linear growth of the task graph size.
+
+        Args:
+            state: The current simulation state (lazy Dask arrays).
+
+        Returns:
+            The stabilized (persisted) state.
+        """
+        # We persist the whole dataset. Dask is smart enough to only compute
+        # what hasn't been computed yet (e.g., static variables won't be recomputed).
+        logger.debug("Stabilizing state: Persisting full state to cut graph lineage.")
+        return state.persist()
 
     def _persist_results(self, results: dict[str, Any]) -> dict[str, Any]:
         """Persist lazy Dask arrays to distributed memory.

@@ -10,7 +10,7 @@ import pint
 import pint_xarray  # noqa: F401
 import xarray as xr
 
-from seapopym.backend import ComputeBackend, DaskBackend, SequentialBackend
+from seapopym.backend import ComputeBackend, SequentialBackend
 from seapopym.blueprint import Blueprint, ExecutionPlan
 from seapopym.forcing import ForcingManager
 from seapopym.gsm import StateManager
@@ -42,7 +42,7 @@ class SimulationController:
                     - 'sequential': Pure sequential execution with eager computation (no parallelism)
                     - 'task_parallel': Task parallelism via dask.delayed (inter-task parallelism)
                     - 'data_parallel': Data parallelism via Dask chunking (intra-task parallelism)
-                    - 'dask': Deprecated alias for 'task_parallel'
+                    - 'distributed': Optimal distributed execution with futures (task+data parallelism)
                     Defaults to 'sequential'.
         """
         self.config = config
@@ -57,19 +57,6 @@ class SimulationController:
         if isinstance(backend, str):
             if backend == "sequential":
                 self.backend = SequentialBackend()
-            elif backend == "dask":
-                # Deprecation warning for old 'dask' backend name
-                import warnings
-
-                warnings.warn(
-                    "backend='dask' is deprecated and will be removed in v2.0. "
-                    "Use backend='task_parallel' for task parallelism or "
-                    "backend='data_parallel' for data chunking parallelism.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                # For backwards compatibility, map to DaskBackend (which still exists)
-                self.backend = DaskBackend()
             elif backend == "task_parallel":
                 from seapopym.backend.task_parallel import TaskParallelBackend
 
@@ -78,10 +65,14 @@ class SimulationController:
                 from seapopym.backend.data_parallel import DataParallelBackend
 
                 self.backend = DataParallelBackend()
+            elif backend == "distributed":
+                from seapopym.backend.distributed import DistributedBackend
+
+                self.backend = DistributedBackend()
             else:
                 raise ValueError(
                     f"Unknown backend type: '{backend}'. "
-                    f"Supported: 'sequential', 'task_parallel', 'data_parallel'."
+                    f"Supported: 'sequential', 'task_parallel', 'data_parallel', 'distributed'."
                 )
         else:
             self.backend = backend
@@ -144,7 +135,18 @@ class SimulationController:
         state_ds = self._ingest_initial_state(initial_state, chunks=chunks)
 
         # 5. Ingestion des variables de sortie
-        output_vars_list = self._ingest_output_variables(output_variables)
+        if output_variables is None:
+            # Default behavior: Only save state variables (dynamic) to save memory/disk
+            # Saving everything (including static params) at each timestep is wasteful
+            output_vars_list = list(self.blueprint.get_state_variables())
+            logger.info(
+                f"No output_variables provided. Defaulting to state variables only: {output_vars_list}"
+            )
+        else:
+            output_vars_list_tmp = self._ingest_output_variables(output_variables)
+            if output_vars_list_tmp is None:
+                raise ValueError("output_variables should not produce None")
+            output_vars_list = output_vars_list_tmp
 
         # 5. Compilation du plan d'exécution
         self.execution_plan = self.blueprint.build()
@@ -206,6 +208,16 @@ class SimulationController:
 
         self.state = self._standardize_units(self.state)
 
+        # 5.5. Préparation des données pour le backend
+        # Permet au backend d'optimiser le stockage des données (persist, compute, etc.)
+        # Cette étape est cruciale pour éviter l'explosion de la taille des graphes Dask
+        self.state = self.backend.prepare_data(self.state)
+        logger.debug("Initial state prepared by backend")
+
+        if forcings is not None:
+            forcings = self.backend.prepare_data(forcings)
+            logger.debug("Forcings prepared by backend")
+
         # 6. Création du Time Integrator
         # Pour l'instant, pas de contrainte de positivité par défaut
         self.time_integrator = TimeIntegrator(scheme="euler")
@@ -216,6 +228,12 @@ class SimulationController:
 
         # 8. Setup Output Writer
         if output_path is None:
+            if chunks is not None:
+                logger.warning(
+                    "You are using DataParallelBackend (chunks provided) with MemoryWriter (no output_path). "
+                    "This is risky for large simulations as it stores all timesteps in RAM. "
+                    "Consider providing an 'output_path' to stream results to disk (Zarr)."
+                )
             self.writer = MemoryWriter(variables=output_vars_list, metadata=output_metadata)
         else:
             self.writer = ZarrWriter(
@@ -236,7 +254,9 @@ class SimulationController:
 
                 # Save state after step
                 if self.writer:
-                    self.writer.append(self.state, time=self._current_time)
+                    # Delegate IO to the backend (allows async writing)
+                    io_task = self.writer.get_append_task(self.state, time=self._current_time)
+                    self.backend.process_io_task(io_task)
 
             # Finalize writing
             if self.writer:
@@ -276,7 +296,11 @@ class SimulationController:
         }
         self.state = StateManager.update_with_forcings(self.state, diagnostics)
 
-        # 5. Préparation du pas suivant
+        # 5. Stabilisation de l'état (Backend Hook)
+        # Permet au backend de gérer le cycle de vie de la donnée (ex: Dask persist pour couper le graphe)
+        self.state = self.backend.stabilize_state(self.state)
+
+        # 6. Préparation du pas suivant
         self.state = StateManager.initialize_next_step(self.state)
 
     def _ingest_parameters(self, parameters: Any) -> xr.Dataset:

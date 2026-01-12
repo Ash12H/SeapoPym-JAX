@@ -327,31 +327,33 @@ $$S_{max} = \frac{1}{f_{seq}} = \frac{1}{0.80} = 1.25\times$$
 
 Même avec un nombre infini de workers, le speedup ne peut dépasser **1.25×** tant que le transport de production n'est pas lui-même parallélisé (par chunking spatial, par exemple).
 
-### 4.3. Validation du Système Complet (Blueprint + Controller + DaskBackend)
+### 4.3. Limites du Parallélisme de Tâches (Loi d'Amdahl)
 
-Pour confirmer que le système complet parallélise correctement les tâches indépendantes, nous testons avec 12 groupes fonctionnels indépendants, chacun contenant une fonction synthétique (`time.sleep`) qui libère explicitement le GIL. Cette architecture simule un modèle multi-espèces réaliste.
+Bien que l'infrastructure logicielle soit capable de paralléliser efficacement des tâches indépendantes (speedup de 10.34× sur un test synthétique `sleep` avec 12 workers), son application au modèle réel se heurte à la structure même des calculs.
 
-**Configuration** : 12 groupes fonctionnels indépendants, 1 tâche sleep (100ms) par groupe, système complet Blueprint → SimulationController → DaskBackend.
+Comme montré en section 4.2, le transport de la production est une tâche monolithique représentant 80% du temps de calcul. Dans une stratégie de **Task Parallelism** pur (parallélisation inter-processus), cette tâche agit comme un goulot d'étranglement séquentiel. Selon la loi d'Amdahl, le speedup maximal est théoriquement borné :
 
-La **Figure 4C** présente le speedup et l'efficacité en fonction du nombre de workers :
+$$S_{max} = \frac{1}{f_{seq}} = \frac{1}{0.80} = 1.25\times$$
 
-![Figure 4C : Validation du système complet](../../../data/article/figures/fig_04e_sleep_parallelism_blueprint.png)
+Nos mesures confirment cette limite théorique : quel que soit le nombre de workers (jusqu'à 12), le speedup du Task Parallelism plafonne à **~1.28×**. L'ajout de ressources de calcul supplémentaires est inutile sans modifier la stratégie de décomposition.
 
-| Workers | Temps (s) | Speedup    | Efficacité |
-| ------- | --------- | ---------- | ---------- |
-| 1       | 1.266     | 1.00×      | 100%       |
-| 4       | 0.337     | 3.78×      | 95%        |
-| 6       | 0.233     | 5.45×      | 91%        |
-| 12      | 0.123     | **10.34×** | **86%**    |
+### 4.4. Passage à l'Échelle via Parallélisme de Données (Strong Scaling)
 
-Le speedup est **quasi-linéaire** (10.34× avec 12 workers, efficacité 86%), confirmant que le système complet parallélise efficacement les groupes fonctionnels lorsque ceux-ci sont :
+Pour briser la limite d'Amdahl, nous adoptons une stratégie de **Data Parallelism** en divisant la tâche dominante (transport de production) selon la dimension `cohort`. Chaque cohorte étant physiquement indépendante, elles peuvent être transportées en parallèle.
 
-1. **Indépendants** (pas de dépendances entre groupes dans le DAG)
-2. **Libèrent le GIL** (condition nécessaire pour le ThreadPoolScheduler)
+Nous évaluons cette approche sur deux scénarios contrastés (Figure 4) :
+1.  **Scénario "Zooplancton"** (12 cohortes) : Représente des organismes à vie courte.
+2.  **Scénario "Micronecton"** (527 cohortes) : Représente des organismes à vie longue nécessitant un suivi fin.
 
-L'overhead du système complet (Blueprint + Controller + DaskBackend) est estimé à **~23ms** (18.7%), ce qui reste acceptable. On note également que le speedup optimal est atteint lorsque le nombre de workers divise exactement le nombre de tâches (ici 12), car les tâches s'exécutent alors en "vagues" complètes sans workers inactifs.
+**Résultats de Strong Scaling :**
 
-Ce test valide l'infrastructure de parallélisation. Le speedup limité observé dans le modèle réel (~1.25×) n'est **pas** dû à un défaut du système, mais à la **structure du modèle** : le transport de production, tâche dominante (80%), ne peut être parallélisé au niveau inter-tâches.
+-   **Micronecton (Complexité élevée)** : Le Data Parallelism délivre un speedup de **2.41×** avec 12 workers (contre 1.06× pour le Task Parallelism). L'accélération est significative car le temps de calcul par tâche domine largement le surcoût de gestion du graphe Dask.
+-   **Zooplancton (Complexité faible)** : Le Data Parallelism est **moins performant** que l'exécution séquentielle (Speedup 0.61×). L'overhead constant de l'ordonnanceur Dask (~1-2s) devient prépondérant face à la rapidité du calcul physique pour un petit nombre de cohortes.
+
+**Validation Numérique :**
+La justesse des calculs ("correctness") est validée pour toutes les configurations parallèles. L'écart quadratique moyen (RMSE) par rapport à la référence séquentielle reste inférieur à $10^{-10}$ g/m², confirmant que le découpage des données n'introduit aucun biais numérique.
+
+En conclusion, le Data Parallelism est la clé pour le passage à l'échelle des simulations complexes (Micronecton), permettant de dépasser la barrière d'Amdahl, tandis que l'exécution séquentielle reste optimale pour les modèles légers.
 
 ## Résumé des Validations
 
@@ -374,6 +376,7 @@ Ce test valide l'infrastructure de parallélisation. Le speedup limité observé
 | **4. Performances**                |                           |                 |            |
 | 4.1 Weak Scaling                   | Complexité                | O(N^{1.01})     | ✓          |
 | 4.2 Décomposition                  | Transport production      | 80%             | —          |
-| 4.3 Validation Système             | Speedup (12 workers)      | 10.34×          | ✓          |
+| 4.3 Task Parallelism               | Speedup max (Amdahl)      | ~1.28×          | ✓          |
+| 4.4 Data Parallelism               | Speedup (Micronecton)     | **2.41×**       | ✓          |
 
 **Note** : \*L'ordre de convergence réduit (0.66-0.82) pour l'advection Upwind est dû à la diffusion numérique, comportement attendu et documenté (section 2.4). La conservation de masse stricte confirme la cohérence du schéma.

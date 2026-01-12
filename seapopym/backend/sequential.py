@@ -44,6 +44,20 @@ class SequentialBackend(ComputeBackend):
         """Initialize SequentialBackend."""
         logger.info("SequentialBackend initialized (eager computation, no parallelism)")
 
+    def prepare_data(self, data: xr.Dataset) -> xr.Dataset:
+        """Prepare data by materializing all lazy arrays.
+
+        Consistent with SequentialBackend's philosophy of eager computation,
+        this ensures all data is materialized into memory before use.
+
+        Args:
+            data: Dataset to prepare (state, forcings, etc.)
+
+        Returns:
+            Dataset with all arrays materialized (Numpy arrays).
+        """
+        return self._materialize_dataset(data)
+
     def execute(
         self,
         task_groups: list[tuple[str, list[ComputeNode]]],
