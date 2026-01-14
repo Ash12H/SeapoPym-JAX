@@ -117,7 +117,7 @@ def check_diffusion_stability(
             f"  D = {D_max:.2e} m²/s\n"
             f"  min(dx) = {dx_min:.2f} m\n"
             f"  min(dy) = {dy_min:.2f} m\n"
-            f"Recommendation: Reduce timestep by factor of {1/margin:.2f}"
+            f"Recommendation: Reduce timestep by factor of {1 / margin:.2f}"
         )
     elif cfl > 0.2:
         # Warn if CFL is close to limit (within 80% of max)
@@ -209,7 +209,7 @@ def compute_advection_cfl(
             f"  CFL_x = {cfl_x_max:.3f}, CFL_y = {cfl_y_max:.3f}\n"
             f"  max|u| = {u_max:.3f} m/s, max|v| = {v_max:.3f} m/s\n"
             f"  dt = {dt_val:.2f} s\n"
-            f"Recommendation: Reduce timestep by factor of {1/cfl_max:.2f}"
+            f"Recommendation: Reduce timestep by factor of {1 / cfl_max:.2f}"
         )
     elif cfl_max > 0.8:
         logger.warning(

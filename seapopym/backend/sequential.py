@@ -92,7 +92,9 @@ class SequentialBackend(ComputeBackend):
             group_results = self._materialize_results(group_results)
             all_results.update(group_results)
 
-        logger.info(f"SequentialBackend execution complete. {len(all_results)} variables produced.")
+        logger.debug(
+            f"SequentialBackend execution complete. {len(all_results)} variables produced."
+        )
         return all_results
 
     def _materialize_dataset(self, ds: xr.Dataset) -> xr.Dataset:

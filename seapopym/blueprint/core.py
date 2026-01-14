@@ -1,5 +1,7 @@
 """Blueprint module for dependency graph construction and execution planning."""
 
+from __future__ import annotations
+
 import inspect
 import itertools
 from collections.abc import Callable
@@ -53,7 +55,7 @@ class Blueprint:
         if name in self.registered_variables:
             raise ConfigurationError(f"Variable '{name}' is already registered.")
 
-        node = DataNode(name=name, dims=dims, units=units)
+        node = DataNode(name=name, dims=dims, units=units, is_parameter=True)
         self.graph.add_node(node)
         self.registered_variables.add(name)
         self._data_nodes[name] = node
@@ -615,17 +617,29 @@ class Blueprint:
         lines = [f"graph {direction}"]
 
         # Styles
-        lines.append("    classDef data fill:#e1f5fe,stroke:#01579b,stroke-width:2px,rx:5,ry:5;")
-        lines.append("    classDef state fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,rx:5,ry:5;")
-        lines.append("    classDef compute fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;")
-        lines.append("    classDef forcing fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,rx:5,ry:5;")
+        lines.append(
+            "    classDef data fill:#e1f5fe,stroke:#01579b,stroke-width:2px,rx:5,ry:5;"
+        )  # Light Blue
+        lines.append(
+            "    classDef state fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,rx:5,ry:5;"
+        )  # Light Yellow
+        lines.append(
+            "    classDef compute fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;"
+        )  # Pale Purple (inchangé)
+        lines.append(
+            "    classDef forcing fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,rx:5,ry:5;"
+        )  # Light Green
         lines.append(
             "    classDef tendency fill:#fff3e0,stroke:#e65100,stroke-width:2px,rx:5,ry:5;"
+        )  # Light Orange
+        # Modification ci-dessous : Passage au Rouge Pastel
+        lines.append(
+            "    classDef parameter fill:#ffebee,stroke:#c62828,stroke-width:2px,rx:5,ry:5;"
         )
 
-        # Helper to generate safe IDs
+        # Helper to generate safe IDs based on object identity (handle duplicate names)
         def get_id(node: Any) -> str:
-            return f"n{abs(hash(node))}"
+            return f"n{id(node)}"
 
         # Group nodes
         groups: dict[str, list[Any]] = {}
@@ -653,7 +667,9 @@ class Blueprint:
             label = node.name.split("/")[-1]  # Short name for display
 
             if isinstance(node, DataNode):
-                if node.is_state:
+                if node.is_parameter:
+                    return f'    {node_id}(["{label}"]):::parameter'
+                elif node.is_state:
                     # Database shape for state variables
                     return f'    {node_id}[("{label}")]:::state'
                 elif node.is_tendency_of:
