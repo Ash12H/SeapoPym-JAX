@@ -69,7 +69,7 @@ from seapopym.transport import (
     compute_spherical_dy,
     compute_spherical_face_areas_ew,
     compute_spherical_face_areas_ns,
-    compute_transport_numba,
+    compute_transport_fv,
 )
 
 ureg = pint.get_application_registry()
@@ -279,7 +279,7 @@ def configure_lmtl_full(bp) -> None:
                 "output_units": {"mortality_loss": "g/m**2/second"},
             },
             {
-                "func": compute_transport_numba,
+                "func": compute_transport_fv,
                 "name": "transport_biomass",
                 "input_mapping": {
                     "state": "biomass",
@@ -311,7 +311,7 @@ def configure_lmtl_full(bp) -> None:
                 },
             },
             {
-                "func": compute_transport_numba,
+                "func": compute_transport_fv,
                 "name": "transport_production",
                 "input_mapping": {
                     "state": "production",

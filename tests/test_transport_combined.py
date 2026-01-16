@@ -9,8 +9,7 @@ from seapopym.transport import (
     compute_spherical_dy,
     compute_spherical_face_areas_ew,
     compute_spherical_face_areas_ns,
-    compute_transport_numba,
-    compute_transport_xarray,
+    compute_transport_fv,
 )
 
 
@@ -72,66 +71,6 @@ def create_blob(grid, center=(10, 10), radius=2.0, amplitude=100.0):
     )
 
 
-def test_combined_transport_numba_vs_xarray(simple_grid, boundary_all_closed):
-    """Verify that Numba and Xarray implementations produce identical results."""
-    biomass = create_blob(simple_grid)
-
-    # Advection and Diffusion parameters
-    u = xr.full_like(biomass, 0.1)
-    v = xr.full_like(biomass, 0.05)
-    D = 100.0
-
-    mask = xr.ones_like(biomass)
-
-    # Xarray version
-    res_xr = compute_transport_xarray(
-        state=biomass,
-        u=u,
-        v=v,
-        D=D,
-        dx=simple_grid["dx"],
-        dy=simple_grid["dy"],
-        cell_areas=simple_grid["cell_areas"],
-        face_areas_ew=simple_grid["face_areas_ew"],
-        face_areas_ns=simple_grid["face_areas_ns"],
-        mask=mask,
-        **boundary_all_closed,
-    )
-
-    # Numba version
-    res_nb = compute_transport_numba(
-        state=biomass,
-        u=u,
-        v=v,
-        D=D,
-        dx=simple_grid["dx"],
-        dy=simple_grid["dy"],
-        cell_areas=simple_grid["cell_areas"],
-        face_areas_ew=simple_grid["face_areas_ew"],
-        face_areas_ns=simple_grid["face_areas_ns"],
-        mask=mask,
-        **boundary_all_closed,
-    )
-
-    # Check advection
-    adv_xr = res_xr["advection_rate"]
-    adv_nb = res_nb["advection_rate"]
-
-    diff_adv = np.abs(adv_xr - adv_nb)
-    max_diff_adv = diff_adv.max().item()
-
-    assert max_diff_adv < 1e-10, f"Advection mismatch: {max_diff_adv}"
-
-    # Check diffusion
-    diff_xr = res_xr["diffusion_rate"]
-    diff_nb = res_nb["diffusion_rate"]
-
-    diff_diff = np.abs(diff_xr - diff_nb)
-    max_diff_diff = diff_diff.max().item()
-
-    assert max_diff_diff < 1e-10, f"Diffusion mismatch: {max_diff_diff}"
-
-
 def test_combined_transport_mass_conservation(simple_grid, boundary_all_closed):
     """Verify global mass conservation for the combined solver."""
     biomass = create_blob(simple_grid)
@@ -142,7 +81,7 @@ def test_combined_transport_mass_conservation(simple_grid, boundary_all_closed):
 
     mask = xr.ones_like(biomass)
 
-    res = compute_transport_numba(
+    res = compute_transport_fv(
         state=biomass,
         u=u,
         v=v,
@@ -182,7 +121,7 @@ def test_combined_transport_with_mask(simple_grid, boundary_all_closed):
     v = xr.full_like(biomass, 0.0)
     D = 200.0
 
-    res = compute_transport_numba(
+    res = compute_transport_fv(
         state=biomass,
         u=u,
         v=v,
@@ -224,7 +163,7 @@ def test_separate_components(simple_grid, boundary_all_closed):
     v = xr.full_like(biomass, 0.0)
     D = 1000.0
 
-    res = compute_transport_xarray(
+    res = compute_transport_fv(
         state=biomass,
         u=u,
         v=v,

@@ -1,5 +1,6 @@
 """Core functions for LMTL model."""
 
+import dask.array as da
 import numpy as np
 import xarray as xr
 
@@ -29,20 +30,12 @@ def compute_day_length(latitude: xr.DataArray, time: xr.DataArray) -> dict[str, 
     """
     # Ensure time is datetime64
     # We extract day of year
-    # Note: time might be a coordinate or a DataArray.
-    # If it's a DataArray without coords, .dt accessor works on values.
     doy = time.dt.dayofyear
 
     # Latitude in radians
     phi = np.deg2rad(latitude)
 
     # Declination of the sun
-    # Declination of the sun
-    # theta = 0.2163108 + 2 * np.arctan(0.9671396 * np.tan(0.00860 * (doy - 186)))
-
-    # Hour angle
-    # P = asin[ 0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(0.00860 * (J - 186)))) ]
-    # We use a simplified approximation often used in ecological models
     # Brock model (1981)
     declination = 23.45 * np.sin(np.deg2rad(360 * (284 + doy) / 365))
     declination_rad = np.deg2rad(declination)
@@ -220,11 +213,67 @@ def compute_production_initialization(
 
     # Broadcast tendency_rate × mask
     # Works for both numpy and dask arrays without graph explosion
-    tendency = tendency_rate.expand_dims(cohort=cohorts) * xr.DataArray(
+    # expand_dims(axis=-1) ensures the NEW dimension (cohort) is at the END.
+    tendency = tendency_rate.expand_dims(dim={"cohort": cohorts}, axis=-1) * xr.DataArray(
         cohort_mask, dims=["cohort"], coords={"cohort": cohorts}
     )
 
     return {"output": tendency}
+
+
+def _shift_with_overlap(
+    data: xr.DataArray, dim: str, shift: int = 1, fill_value: float = 0.0
+) -> xr.DataArray:
+    """Optimized shift using dask.map_overlap to avoid global rechunking.
+
+    Only supports positive shift=1 for now (used in aging).
+    Uses symmetric overlap with dask map_overlap to ensure communication
+    is local between neighboring chunks, avoiding shuffle.
+    """
+    if shift != 1:
+        # Fallback to standard shift for other cases or implement generic logic
+        return data.shift({dim: shift}, fill_value=fill_value)
+
+    # Check if we are dealing with dask array chunked along dim
+    if not isinstance(data.data, da.Array):
+        return data.shift({dim: shift}, fill_value=fill_value)
+
+    # Get axis index
+    axis = data.get_axis_num(dim)
+
+    # Optimized path for Dask
+    dask_arr = data.data
+
+    def _local_shift_kernel(chunk: np.ndarray, axis: int, _fill_val: float) -> np.ndarray:
+        """Kernel applied on chunks.
+
+        Chunk has shape (..., 1_left + N + 1_right, ...) due to symmetric overlap.
+        For shift=+1 (right):
+        - Input schema: [Ghost_L | D_0, ..., D_N-1 | Ghost_R]
+        - Target Output: [Ghost_L, D_0, ..., D_{N-2}]
+        So we just take the slice [:-2] along the axis.
+        """
+        sl = [slice(None)] * chunk.ndim
+        sl[axis] = slice(None, -2)
+        return chunk[tuple(sl)]
+
+    # Workaround: Dask supports constant boundary with symmetric overlap (int depth)
+    # We ask for depth=1 (implies (1, 1)).
+    depth = {axis: 1}
+    boundary = {axis: fill_value}
+
+    shifted_dask = dask_arr.map_overlap(
+        _local_shift_kernel,
+        dtype=dask_arr.dtype,
+        depth=depth,
+        boundary=boundary,
+        axis=axis,
+        fill_val=fill_value,
+        trim=False,  # We handle size manually
+    )
+
+    # Wrap back in DataArray
+    return xr.DataArray(shifted_dask, coords=data.coords, dims=data.dims, name=data.name)
 
 
 def compute_production_dynamics(
@@ -242,7 +291,7 @@ def compute_production_dynamics(
        - If NOT recruited: Exit the model (Senescence/Outflow).
 
     Prevents double-counting of outflows for the last cohort.
-    Uses efficient Dask operations (concat/slice) instead of reindex/shift
+    Uses efficient Dask operations (concat/slice/map_overlap) instead of reindex/shift
     to prevent implicit rechunking and task explosion.
     """
     # Calculate Delta_tau (cohort duration)
@@ -279,8 +328,8 @@ def compute_production_dynamics(
     total_outflow_flux = production * aging_rate
 
     # 3. Influx (from previous cohort)
-    # Flux_in[C] = Flux_out[C-1]
-    influx_flux = total_outflow_flux.shift(cohort=1, fill_value=0.0)
+    # Optimized shift
+    influx_flux = _shift_with_overlap(total_outflow_flux, dim="cohort", shift=1, fill_value=0.0)
 
     # 4. Identify Recruited Cohorts
     is_recruited = cohort_ages >= recruitment_age
@@ -291,8 +340,8 @@ def compute_production_dynamics(
 
     # Influx to C = (Outflow from C-1) * (1 - is_recruited[C-1])
 
-    # Let's compute the mask for the previous cohort safely
-    prev_is_recruited = is_recruited.shift(cohort=1, fill_value=False)
+    # Optimized shift for mask
+    prev_is_recruited = _shift_with_overlap(is_recruited, dim="cohort", shift=1, fill_value=False)
 
     # Effective Influx to C
     # Only receive from C-1 if C-1 was NOT recruited.

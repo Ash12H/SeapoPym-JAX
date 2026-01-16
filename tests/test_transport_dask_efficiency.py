@@ -15,8 +15,7 @@ from seapopym.transport import (
     compute_spherical_dy,
     compute_spherical_face_areas_ew,
     compute_spherical_face_areas_ns,
-    compute_transport_numba,
-    compute_transport_xarray,
+    compute_transport_fv,
 )
 
 
@@ -58,8 +57,7 @@ def count_tasks(dask_obj):
     return 0
 
 
-@pytest.mark.parametrize("transport_f", [compute_transport_xarray, compute_transport_numba])
-def test_transport_task_scaling(grid_efficiency, transport_f):
+def test_transport_task_scaling(grid_efficiency):
     """Verify task scaling with time chunks."""
     # Scale with number of chunks
     n_times = 5
@@ -84,7 +82,7 @@ def test_transport_task_scaling(grid_efficiency, transport_f):
         # We need to broadcast static grid fields if using dask inputs with time?
         # The function handles static grid internally via broadcasting.
 
-        res = transport_f(state, u, v, D, dx, dy, areas, Few, Fns)
+        res = compute_transport_fv(state, u, v, D, dx, dy, areas, Few, Fns)
         return res["advection_rate"]
 
     # 1 Chunk
@@ -105,8 +103,7 @@ def test_transport_task_scaling(grid_efficiency, transport_f):
     assert ratio < 8.0
 
 
-@pytest.mark.parametrize("transport_f", [compute_transport_xarray, compute_transport_numba])
-def test_transport_no_rechunking(grid_efficiency, transport_f):
+def test_transport_no_rechunking(grid_efficiency):
     """Ensure no implicit rechunking."""
     dims = (Coordinates.T.value, Coordinates.Y.value, Coordinates.X.value)
     shape = (5, 100, 100)
@@ -117,7 +114,7 @@ def test_transport_no_rechunking(grid_efficiency, transport_f):
     v = xr.DataArray(da.ones(shape, chunks=(chunk_size, 100, 100)), dims=dims)
     D = 100.0
 
-    res = transport_f(
+    res = compute_transport_fv(
         state,
         u,
         v,

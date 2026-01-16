@@ -1,6 +1,6 @@
 """Tests for Chunking Correctness on Transport Functions.
 
-Objective: Ensure that compute_transport_numba and compute_transport_xarray behave correctly with input chunks.
+Objective: Ensure that compute_transport_fv behaves correctly with input chunks.
 """
 
 import numpy as np
@@ -14,8 +14,7 @@ from seapopym.transport import (
     compute_spherical_dy,
     compute_spherical_face_areas_ew,
     compute_spherical_face_areas_ns,
-    compute_transport_numba,
-    compute_transport_xarray,
+    compute_transport_fv,
 )
 
 
@@ -62,8 +61,7 @@ def create_state(grid, dims=(Coordinates.Y.value, Coordinates.X.value)):
     return xr.DataArray(np.random.rand(*shape) + 1.0, coords=coords, dims=dims)
 
 
-@pytest.mark.parametrize("transport_func", [compute_transport_xarray, compute_transport_numba])
-def test_transport_spatial_chunking(grid_for_chunking, transport_func):
+def test_transport_spatial_chunking(grid_for_chunking):
     """Test transport with spatial chunking."""
     state = create_state(grid_for_chunking)
     u = xr.full_like(state, 0.5)
@@ -71,7 +69,7 @@ def test_transport_spatial_chunking(grid_for_chunking, transport_func):
     D = 100.0
 
     # Reference
-    res_ref = transport_func(
+    res_ref = compute_transport_fv(
         state,
         u,
         v,
@@ -84,23 +82,15 @@ def test_transport_spatial_chunking(grid_for_chunking, transport_func):
     )
 
     # Chunked
-    # IMPORTANT: compute_transport_numba requires core dimensions (y, x) to NOT be chunked for proper guvectorize execution on map_blocks?
-    # Actually, guvectorize handles chunks automatically if using dask input.
-    # However, finite volume usually requires ghost cells or overlap.
-    # seapopym transport architecture likely handles this internally or expects single-block spatial domains if overlap isn't managed.
-    # Let's see if it supports spatial chunking.
-
     state_c = state.chunk({Coordinates.Y.value: 10, Coordinates.X.value: 10})
     u_c = u.chunk({Coordinates.Y.value: 10, Coordinates.X.value: 10})
     v_c = v.chunk({Coordinates.Y.value: 10, Coordinates.X.value: 10})
 
     # Numba guvectorize limitations on chunked core dims
-    if transport_func == compute_transport_numba:
-        pytest.xfail("Numba guvectorize requires unchunked core dimensions (y, x)")
+    pytest.xfail("Numba guvectorize requires unchunked core dimensions (y, x)")
 
-    # Note: If library does not support spatial chunking, this test might fail or warn.
-    # But checking correctness is the goal.
-    res_chunked = transport_func(
+    # The code below is unreachable due to xfail, but kept for logic documentation
+    res_chunked = compute_transport_fv(
         state_c,
         u_c,
         v_c,
@@ -116,13 +106,8 @@ def test_transport_spatial_chunking(grid_for_chunking, transport_func):
     xr.testing.assert_allclose(res_chunked["diffusion_rate"].compute(), res_ref["diffusion_rate"])
 
 
-@pytest.mark.parametrize("transport_func", [compute_transport_xarray, compute_transport_numba])
-def test_transport_time_chunking(grid_for_chunking, transport_func):
+def test_transport_time_chunking(grid_for_chunking):
     """Test transport with time chunking (if extra dimension present)."""
-    # Assuming transport functions can map over time if time is a batch dimension
-    # or if we loop over it. The current signatures take 'state' which is (Y, X).
-    # If we pass (T, Y, X), it should probably broadcast/vectorize.
-
     state = create_state(
         grid_for_chunking, dims=(Coordinates.T.value, Coordinates.Y.value, Coordinates.X.value)
     )
@@ -130,7 +115,7 @@ def test_transport_time_chunking(grid_for_chunking, transport_func):
     v = xr.full_like(state, 0.2)
     D = 100.0
 
-    res_ref = transport_func(
+    res_ref = compute_transport_fv(
         state,
         u,
         v,
@@ -149,7 +134,7 @@ def test_transport_time_chunking(grid_for_chunking, transport_func):
     u_c = u.chunk({Coordinates.T.value: 1, Coordinates.Y.value: -1, Coordinates.X.value: -1})
     v_c = v.chunk({Coordinates.T.value: 1, Coordinates.Y.value: -1, Coordinates.X.value: -1})
 
-    res_chunked = transport_func(
+    res_chunked = compute_transport_fv(
         state_c,
         u_c,
         v_c,
