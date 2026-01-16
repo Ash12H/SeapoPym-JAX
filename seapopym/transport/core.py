@@ -151,8 +151,198 @@ def _encode_boundary_conditions(
     return xr.DataArray(bc_vals, dims="boundary_params")
 
 
+def _has_nan(da: xr.DataArray) -> bool:
+    """Check if DataArray contains any NaN values (fast check)."""
+    if hasattr(da.data, "chunks"):  # Dask array
+        # For Dask, we assume no NaN to avoid computation
+        # The Numba kernel handles NaN anyway
+        return False
+    return bool(np.isnan(da.data).any())
+
+
+def _prepare_face_areas(
+    face_areas_ew: xr.DataArray,
+    face_areas_ns: xr.DataArray,
+    dim_x: str,
+    dim_y: str,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Extract and align face areas with cell centers (cached version)."""
+    x_face_dim = GridPosition.get_face_dim(Coordinates.X, GridPosition.LEFT)
+    y_face_dim = GridPosition.get_face_dim(Coordinates.Y, GridPosition.LEFT)
+
+    ew_area = (
+        face_areas_ew.isel({x_face_dim: slice(1, None)})
+        .rename({x_face_dim: dim_x})
+        .drop_vars([dim_x, dim_y], errors="ignore")
+    )
+    ns_area = (
+        face_areas_ns.isel({y_face_dim: slice(1, None)})
+        .rename({y_face_dim: dim_y})
+        .drop_vars([dim_x, dim_y], errors="ignore")
+    )
+    return ew_area, ns_area
+
+
 # =============================================================================
-# FLUX COMPUTATION (NUMBA)
+# FLUX COMPUTATION (NUMBA) - OPTIMIZED VERSION
+# =============================================================================
+
+
+def compute_transport_fv_optimized(
+    state: xr.DataArray,
+    u: xr.DataArray,
+    v: xr.DataArray,
+    D: xr.DataArray | float,
+    dx: xr.DataArray | float,
+    dy: xr.DataArray | float,
+    cell_areas: xr.DataArray,
+    face_areas_ew: xr.DataArray,
+    face_areas_ns: xr.DataArray,
+    mask: xr.DataArray | None = None,
+    boundary_north: int | float = 0,
+    boundary_south: int | float = 0,
+    boundary_east: int | float = 0,
+    boundary_west: int | float = 0,
+    # Optimization flags
+    skip_nan_check: bool = False,
+    precomputed_face_areas: tuple[xr.DataArray, xr.DataArray] | None = None,
+) -> dict[str, xr.DataArray]:
+    """Optimized transport using Numba-accelerated finite volume method.
+
+    This is an optimized version of compute_transport_fv with:
+    - Optional NaN check skipping (if you know data has no NaN)
+    - Pre-computed face areas (for repeated calls)
+    - Conditional transpose (only if needed)
+
+    Args:
+        state: Concentration field [Units], shape (..., lat, lon)
+        u: Zonal velocity [m/s], shape (..., lat, lon)
+        v: Meridional velocity [m/s], shape (..., lat, lon)
+        D: Diffusion coefficient [m²/s], scalar or DataArray
+        dx: Grid spacing in X [m], scalar or DataArray
+        dy: Grid spacing in Y [m], scalar or DataArray
+        cell_areas: Cell areas [m²], shape (lat, lon)
+        face_areas_ew: East/West face areas [m], shape (lat, lon+1)
+        face_areas_ns: North/South face areas [m], shape (lat+1, lon)
+        mask: Ocean/land mask (1=ocean, 0=land), shape (lat, lon)
+        boundary_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        boundary_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        skip_nan_check: If True, skip NaN checking (faster if you know data is clean)
+        precomputed_face_areas: Pre-computed (ew_area, ns_area) tuple for repeated calls
+
+    Returns:
+        Dictionary with:
+        - advection_rate: Advection tendency [Units/s]
+        - diffusion_rate: Diffusion tendency [Units/s]
+    """
+    try:
+        from seapopym.transport.numba_kernels import transport_tendency_numba
+    except ImportError as err:
+        raise ImportError("Numba is required for Numba implementation.") from err
+
+    dim_y = Coordinates.Y.value
+    dim_x = Coordinates.X.value
+
+    # --- 0. VALIDATE CHUNKING (optional) ---
+    _validate_chunking_for_transport(state)
+
+    # --- 1. DATA PREPARATION (OPTIMIZED) ---
+
+    # Encode boundary conditions
+    bc_da = _encode_boundary_conditions(
+        boundary_north, boundary_south, boundary_east, boundary_west
+    )
+
+    # OPTIMIZATION 1: Skip fillna if no NaN detected
+    if skip_nan_check:
+        state_clean = state
+        u_clean = u
+        v_clean = v
+    else:
+        state_clean = state.fillna(0.0) if _has_nan(state) else state
+        u_clean = u.fillna(0.0) if _has_nan(u) else u
+        v_clean = v.fillna(0.0) if _has_nan(v) else v
+
+    # OPTIMIZATION 2: Only convert if needed (D, dx, dy must be 2D DataArrays)
+    D_da = (
+        D if isinstance(D, xr.DataArray) and dim_y in D.dims else _ensure_dataarray(D, state_clean)
+    )
+    dx_da = (
+        dx
+        if isinstance(dx, xr.DataArray) and dim_y in dx.dims
+        else _ensure_dataarray(dx, state_clean)
+    )
+    dy_da = (
+        dy
+        if isinstance(dy, xr.DataArray) and dim_y in dy.dims
+        else _ensure_dataarray(dy, state_clean)
+    )
+
+    # Default mask
+    if mask is None:
+        mask = xr.ones_like(
+            state_clean.isel({d: 0 for d in state_clean.dims if d not in [dim_y, dim_x]})
+        )
+
+    # OPTIMIZATION 3: Use pre-computed face areas if provided
+    if precomputed_face_areas is not None:
+        ew_area, ns_area = precomputed_face_areas
+    else:
+        ew_area, ns_area = _prepare_face_areas(face_areas_ew, face_areas_ns, dim_x, dim_y)
+
+    # --- 2. UNIFIED TRANSPORT COMPUTATION (SINGLE KERNEL) ---
+    # This computes advection + diffusion tendencies in a single pass,
+    # avoiding 8 intermediate flux arrays and multiple memory passes.
+    advection_rate, diffusion_rate = xr.apply_ufunc(
+        transport_tendency_numba,
+        state_clean,
+        u_clean,
+        v_clean,
+        D_da,
+        dx_da,
+        dy_da,
+        cell_areas,
+        ew_area,
+        ns_area,
+        mask,
+        bc_da,
+        input_core_dims=[
+            [dim_y, dim_x],  # state
+            [dim_y, dim_x],  # u
+            [dim_y, dim_x],  # v
+            [dim_y, dim_x],  # D
+            [dim_y, dim_x],  # dx
+            [dim_y, dim_x],  # dy
+            [dim_y, dim_x],  # cell_areas
+            [dim_y, dim_x],  # ew_area
+            [dim_y, dim_x],  # ns_area
+            [dim_y, dim_x],  # mask
+            ["boundary_params"],  # bc
+        ],
+        output_core_dims=[
+            [dim_y, dim_x],  # advection_tendency
+            [dim_y, dim_x],  # diffusion_tendency
+        ],
+        dask="parallelized",
+        output_dtypes=[state_clean.dtype] * 2,
+        dask_gufunc_kwargs={"allow_rechunk": False},
+    )
+
+    # OPTIMIZATION 4: Only transpose if dimensions changed
+    if advection_rate.dims != state.dims:
+        advection_rate = advection_rate.transpose(*state.dims)
+        diffusion_rate = diffusion_rate.transpose(*state.dims)
+
+    return {
+        "advection_rate": advection_rate,
+        "diffusion_rate": diffusion_rate,
+    }
+
+
+# =============================================================================
+# FLUX COMPUTATION (NUMBA) - ORIGINAL VERSION
 # =============================================================================
 
 

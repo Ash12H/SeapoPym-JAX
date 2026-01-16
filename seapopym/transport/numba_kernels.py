@@ -6,6 +6,252 @@ See tests/test_transport_numba.py for functional tests.
 
 from numba import float32, float64, guvectorize, int32  # type: ignore[import-not-found]
 
+# =============================================================================
+# UNIFIED TRANSPORT KERNEL (Advection + Diffusion + Divergence in one pass)
+# =============================================================================
+
+
+@guvectorize(
+    [
+        (
+            float32[:, :],  # state
+            float32[:, :],  # u
+            float32[:, :],  # v
+            float32[:, :],  # D
+            float32[:, :],  # dx
+            float32[:, :],  # dy
+            float32[:, :],  # cell_areas
+            float32[:, :],  # ew_area
+            float32[:, :],  # ns_area
+            float32[:, :],  # mask
+            int32[:],  # bc
+            float32[:, :],  # advection_tendency (output)
+            float32[:, :],  # diffusion_tendency (output)
+        ),
+        (
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            float64[:, :],
+            int32[:],
+            float64[:, :],
+            float64[:, :],
+        ),
+    ],
+    "(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(b)->(y,x),(y,x)",
+    nopython=True,
+    cache=True,
+    fastmath=True,
+    target="parallel",
+)
+def transport_tendency_numba(  # type: ignore[no-untyped-def]
+    state,
+    u,
+    v,
+    D,
+    dx,
+    dy,
+    cell_areas,
+    ew_area,
+    ns_area,
+    mask,
+    bc,
+    advection_tendency,
+    diffusion_tendency,
+):
+    """Compute transport tendencies (advection + diffusion) in a single pass.
+
+    This unified kernel avoids creating intermediate flux arrays by computing
+    the flux divergence directly for each cell.
+
+    Args:
+        state: Concentration (ny, nx)
+        u: Zonal velocity (ny, nx)
+        v: Meridional velocity (ny, nx)
+        D: Diffusion coefficient (ny, nx)
+        dx: Grid spacing x (ny, nx)
+        dy: Grid spacing y (ny, nx)
+        cell_areas: Cell areas (ny, nx)
+        ew_area: East face area of each cell (ny, nx)
+        ns_area: North face area of each cell (ny, nx)
+        mask: Binary mask for valid cells (ny, nx)
+        bc: Boundary conditions [north, south, east, west]
+        advection_tendency: Output advection rate (ny, nx)
+        diffusion_tendency: Output diffusion rate (ny, nx)
+    """
+    ny, nx = state.shape
+
+    bc_north = bc[0]
+    bc_south = bc[1]
+    bc_east = bc[2]
+    bc_west = bc[3]
+
+    for j in range(ny):
+        for i in range(nx):
+            # Initialize outputs
+            advection_tendency[j, i] = 0.0
+            diffusion_tendency[j, i] = 0.0
+
+            # Skip land cells
+            if mask[j, i] == 0:
+                continue
+
+            c_center = state[j, i]
+            u_center = u[j, i]
+            v_center = v[j, i]
+            d_center = D[j, i]
+            dx_center = dx[j, i]
+            dy_center = dy[j, i]
+            area = cell_areas[j, i]
+
+            # Accumulate flux divergence
+            adv_div = 0.0
+            diff_div = 0.0
+
+            # --- NEIGHBOR INDICES ---
+            # East (i+1)
+            ip1 = i + 1
+            if ip1 >= nx:
+                if bc_east == 2:  # PERIODIC
+                    ip1 = 0
+                elif bc_east == 1:  # OPEN
+                    ip1 = i
+                else:
+                    ip1 = -1
+
+            # West (i-1)
+            im1 = i - 1
+            if im1 < 0:
+                if bc_west == 2:  # PERIODIC
+                    im1 = nx - 1
+                elif bc_west == 1:  # OPEN
+                    im1 = i
+                else:
+                    im1 = -1
+
+            # North (j+1)
+            jp1 = j + 1
+            if jp1 >= ny:
+                if bc_north == 2:  # PERIODIC
+                    jp1 = 0
+                elif bc_north == 1:  # OPEN
+                    jp1 = j
+                else:
+                    jp1 = -1
+
+            # South (j-1)
+            jm1 = j - 1
+            if jm1 < 0:
+                if bc_south == 2:  # PERIODIC
+                    jm1 = ny - 1
+                elif bc_south == 1:  # OPEN
+                    jm1 = j
+                else:
+                    jm1 = -1
+
+            # --- EAST FACE ---
+            if ip1 != -1 and mask[j, ip1] != 0:
+                c_east = state[j, ip1]
+                u_east = u[j, ip1]
+                d_east = D[j, ip1]
+                dx_east = dx[j, ip1]
+                face_area = ew_area[j, i]
+
+                # Advection (upwind)
+                u_face = 0.5 * (u_center + u_east)
+                c_up = c_center if u_face > 0 else c_east
+                flux_adv_e = u_face * c_up * face_area
+
+                # Diffusion
+                d_face = 0.5 * (d_center + d_east)
+                dx_face = 0.5 * (dx_center + dx_east)
+                grad_x = (c_east - c_center) / dx_face
+                flux_diff_e = -d_face * grad_x * face_area
+
+                adv_div += flux_adv_e
+                diff_div += flux_diff_e
+
+            # --- WEST FACE ---
+            if im1 != -1 and mask[j, im1] != 0:
+                c_west = state[j, im1]
+                u_west = u[j, im1]
+                d_west = D[j, im1]
+                dx_west = dx[j, im1]
+                face_area = ew_area[j, im1]
+
+                # Advection (upwind)
+                u_face = 0.5 * (u_west + u_center)
+                c_up = c_west if u_face > 0 else c_center
+                flux_adv_w = u_face * c_up * face_area
+
+                # Diffusion
+                d_face = 0.5 * (d_west + d_center)
+                dx_face = 0.5 * (dx_west + dx_center)
+                grad_x = (c_center - c_west) / dx_face
+                flux_diff_w = -d_face * grad_x * face_area
+
+                adv_div -= flux_adv_w
+                diff_div -= flux_diff_w
+
+            # --- NORTH FACE ---
+            if jp1 != -1 and mask[jp1, i] != 0:
+                c_north = state[jp1, i]
+                v_north = v[jp1, i]
+                d_north = D[jp1, i]
+                dy_north = dy[jp1, i]
+                face_area = ns_area[j, i]
+
+                # Advection (upwind)
+                v_face = 0.5 * (v_center + v_north)
+                c_up = c_center if v_face > 0 else c_north
+                flux_adv_n = v_face * c_up * face_area
+
+                # Diffusion
+                d_face = 0.5 * (d_center + d_north)
+                dy_face = 0.5 * (dy_center + dy_north)
+                grad_y = (c_north - c_center) / dy_face
+                flux_diff_n = -d_face * grad_y * face_area
+
+                adv_div += flux_adv_n
+                diff_div += flux_diff_n
+
+            # --- SOUTH FACE ---
+            if jm1 != -1 and mask[jm1, i] != 0:
+                c_south = state[jm1, i]
+                v_south = v[jm1, i]
+                d_south = D[jm1, i]
+                dy_south = dy[jm1, i]
+                face_area = ns_area[jm1, i]
+
+                # Advection (upwind)
+                v_face = 0.5 * (v_south + v_center)
+                c_up = c_south if v_face > 0 else c_center
+                flux_adv_s = v_face * c_up * face_area
+
+                # Diffusion
+                d_face = 0.5 * (d_south + d_center)
+                dy_face = 0.5 * (dy_south + dy_center)
+                grad_y = (c_center - c_south) / dy_face
+                flux_diff_s = -d_face * grad_y * face_area
+
+                adv_div -= flux_adv_s
+                diff_div -= flux_diff_s
+
+            # Compute tendencies: -divergence / area (with mask)
+            advection_tendency[j, i] = -adv_div / area * mask[j, i]
+            diffusion_tendency[j, i] = -diff_div / area * mask[j, i]
+
+
+# =============================================================================
+# SEPARATE FLUX KERNELS (Original implementation)
+# =============================================================================
+
 
 @guvectorize(
     [
@@ -39,6 +285,7 @@ from numba import float32, float64, guvectorize, int32  # type: ignore[import-no
     "(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(b)->(y,x),(y,x),(y,x),(y,x)",
     nopython=True,
     cache=True,
+    fastmath=True,
 )
 def advection_flux_numba(state, u, v, ew_area, ns_area, mask, bc, flux_e, flux_w, flux_n, flux_s):  # type: ignore[no-untyped-def]
     """Compute advection fluxes at all cell faces using upwind scheme.
@@ -206,6 +453,7 @@ def advection_flux_numba(state, u, v, ew_area, ns_area, mask, bc, flux_e, flux_w
     "(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(y,x),(b)->(y,x),(y,x),(y,x),(y,x)",
     nopython=True,
     cache=True,
+    fastmath=True,
 )
 def diffusion_flux_numba(  # type: ignore[no-untyped-def]
     state, D, dx, dy, ew_area, ns_area, mask, bc, flux_e, flux_w, flux_n, flux_s

@@ -4,7 +4,7 @@ Provides advection and diffusion processes as Blueprint-compatible units.
 """
 
 from .boundary import BoundaryConditions, BoundaryType, get_neighbors_with_bc
-from .core import compute_transport_fv
+from .core import _prepare_face_areas, compute_transport_fv, compute_transport_fv_optimized
 from .grid import (
     compute_spherical_cell_areas,
     compute_spherical_dx,
@@ -17,6 +17,8 @@ from .stability import check_diffusion_stability, compute_advection_cfl
 __all__ = [
     # Core transport functions
     "compute_transport_fv",
+    "compute_transport_fv_optimized",
+    "_prepare_face_areas",
     # Boundary conditions
     "BoundaryType",
     "BoundaryConditions",
