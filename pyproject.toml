@@ -1,5 +1,5 @@
 [project]
-name = "seapopym-message"
+name = "seapopym"
 version = "0.1.0"
 description = "Distributed population dynamics simulation using Ray and JAX"
 authors = [
@@ -21,8 +21,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "jax[cpu]>=0.4.20",
-    "ray[default]>=2.9.0",
     "xarray>=2023.12.0",
     "zarr>=2.16.1",
     "numpy>=1.26.0",
@@ -30,7 +28,6 @@ dependencies = [
     "netcdf4>=1.6.0",
     "dask>=2023.12.0",
     "matplotlib>=3.8.0",
-    "jax-cfd>=0.2.0",
     "networkx>=3.0",
     "bokeh>=3.8.1",
     "distributed>=2025.11.0",
@@ -64,10 +61,6 @@ viz = [
     "matplotlib>=3.8.0",
     "cartopy>=0.22.0",
     "seaborn>=0.13.0",
-]
-
-all = [
-    "seapopym-message[dev,docs,viz]",
 ]
 
 [project.urls]

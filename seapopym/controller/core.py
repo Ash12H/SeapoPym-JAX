@@ -61,9 +61,13 @@ class SimulationController:
                 from seapopym.backend.distributed import DistributedBackend
 
                 self.backend = DistributedBackend()
+            elif backend == "monitoring":
+                from seapopym.backend.monitoring import MonitoringBackend
+
+                self.backend = MonitoringBackend()
             else:
                 raise ValueError(
-                    f"Unknown backend type: '{backend}'. Supported: 'sequential', 'distributed'."
+                    f"Unknown backend type: '{backend}'. Supported: 'sequential', 'distributed', 'monitoring'."
                 )
         else:
             self.backend = backend
