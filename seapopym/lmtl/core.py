@@ -268,7 +268,7 @@ def _shift_with_overlap(
         depth=depth,
         boundary=boundary,
         axis=axis,
-        fill_val=fill_value,
+        _fill_val=fill_value,
         trim=False,  # We handle size manually
     )
 
