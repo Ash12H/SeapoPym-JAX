@@ -1,8 +1,9 @@
-"""Notebook 4B: Time Decomposition - Process-Level Profiling.
+"""Notebook 4B-bis: Time Decomposition - Optimized Transport.
 
-Mesure le temps alloué à chaque processus du modèle LMTL (température moyenne,
-transport, mortalité, production, etc.) pour identifier les goulots d'étranglement
-et optimiser les performances.
+Mesure le temps alloué à chaque processus du modèle LMTL avec la fonction
+de transport OPTIMISÉE (kernel unifié Numba).
+
+Comparaison avec 04b pour mesurer le gain de performance.
 """
 
 # %% [markdown]
@@ -56,7 +57,7 @@ from seapopym.lmtl.configuration import LMTLParams
 from seapopym.lmtl.core import (
     compute_gillooly_temperature,
     compute_mortality_tendency,
-    compute_production_dynamics,
+    compute_production_dynamics_optimized,
     compute_production_initialization,
     compute_recruitment_age,
     compute_threshold_temperature,
@@ -69,7 +70,7 @@ from seapopym.transport import (
     compute_spherical_dy,
     compute_spherical_face_areas_ew,
     compute_spherical_face_areas_ns,
-    compute_transport_fv,
+    compute_transport_fv_optimized,
 )
 
 ureg = pint.get_application_registry()
@@ -157,7 +158,7 @@ lmtl_params = LMTLParams(
 )
 
 # Figures
-FIGURE_PREFIX = "fig_04b_time_decomposition"
+FIGURE_PREFIX = "fig_04b_bis_time_decomposition_optimized"
 FIGURE_FORMATS = ["png"]
 
 print("=" * 80)
@@ -251,7 +252,7 @@ def configure_lmtl_full(bp) -> None:
                 "output_units": {"output": "g/m**2/second"},
             },
             {
-                "func": compute_production_dynamics,
+                "func": compute_production_dynamics_optimized,
                 "input_mapping": {
                     "production": "production",
                     "recruitment_age": "recruitment_age",
@@ -279,7 +280,7 @@ def configure_lmtl_full(bp) -> None:
                 "output_units": {"mortality_loss": "g/m**2/second"},
             },
             {
-                "func": compute_transport_fv,
+                "func": compute_transport_fv_optimized,
                 "name": "transport_biomass",
                 "input_mapping": {
                     "state": "biomass",
@@ -311,7 +312,7 @@ def configure_lmtl_full(bp) -> None:
                 },
             },
             {
-                "func": compute_transport_fv,
+                "func": compute_transport_fv_optimized,
                 "name": "transport_production",
                 "input_mapping": {
                     "state": "production",

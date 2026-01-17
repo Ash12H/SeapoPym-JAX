@@ -35,6 +35,7 @@ dependencies = [
     "pint-xarray>=0.5.1",
     "numba>=0.63.1",
     "scipy>=1.15.3",
+    "tqdm>=4.67.1",
 ]
 
 [project.optional-dependencies]

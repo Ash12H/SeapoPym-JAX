@@ -9,7 +9,12 @@ def euler_forward(
     tendency_map: dict[str, list[str]],
     dt: float,
 ) -> xr.Dataset:
-    """Schéma d'Euler explicite : S(t+dt) = S(t) + dt * sum(tendances).
+    """Schéma d'Euler explicite (optimisé) : S(t+dt) = S(t) + dt * sum(tendances).
+
+    Optimizations:
+    - Avoids full state.copy() by using state.assign() at the end
+    - Avoids creating intermediate list of tendencies
+    - Uses incremental sum instead of Python sum() over list
 
     Args:
         state: État actuel.
@@ -20,17 +25,27 @@ def euler_forward(
     Returns:
         Nouvel état.
     """
-    new_state = state.copy()
+    # Collect all updates to apply at once (avoids multiple Dataset copies)
+    updates: dict[str, xr.DataArray] = {}
 
     for target_var, tendency_names in tendency_map.items():
-        if target_var in state:
-            # Collecter les tendances disponibles
-            tendencies = [all_results[t] for t in tendency_names if t in all_results]
+        if target_var not in state:
+            continue
 
-            if tendencies:
-                # Somme de toutes les tendances affectant cette variable
-                total_tendency = sum(tendencies)
-                new_state[target_var] = state[target_var] + dt * total_tendency
-            # Sinon, la variable reste inchangée (pas de tendance appliquée)
+        # Incremental sum without building a list
+        total_tendency: xr.DataArray | None = None
+        for t_name in tendency_names:
+            if t_name in all_results:
+                if total_tendency is None:
+                    total_tendency = all_results[t_name]
+                else:
+                    # In-place style addition (xarray handles this efficiently)
+                    total_tendency = total_tendency + all_results[t_name]
 
-    return new_state
+        if total_tendency is not None:
+            updates[target_var] = state[target_var] + dt * total_tendency
+
+    # Single assignment operation (more efficient than repeated __setitem__)
+    if updates:
+        return state.assign(updates)
+    return state

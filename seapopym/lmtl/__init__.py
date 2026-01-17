@@ -7,6 +7,7 @@ from .core import (
     compute_layer_weighted_mean,
     compute_mortality_tendency,
     compute_production_dynamics,
+    compute_production_dynamics_optimized,
     compute_production_initialization,
     compute_recruitment_age,
     compute_threshold_temperature,
@@ -21,5 +22,6 @@ __all__ = [
     "compute_threshold_temperature",
     "compute_production_initialization",
     "compute_production_dynamics",
+    "compute_production_dynamics_optimized",
     "compute_mortality_tendency",
 ]

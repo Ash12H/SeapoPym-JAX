@@ -223,14 +223,37 @@ class SimulationController:
                 path=output_path, variables=output_vars_list, metadata=output_metadata
             )
 
-    def run(self) -> None:
-        """Exécute la boucle de simulation complète."""
+    def run(self, progress: bool = True) -> None:
+        """Exécute la boucle de simulation complète.
+
+        Args:
+            progress: If True (default), display a progress bar.
+                     Works in both terminal and Jupyter notebooks (auto-detection).
+        """
         if self.state is None:
             raise RuntimeError("Simulation not set up. Call setup() first.")
 
         logger.info(f"Starting simulation from {self.config.start_date} to {self.config.end_date}")
 
+        # Calculate total steps
+        total_seconds = (self.config.end_date - self.config.start_date).total_seconds()
+        n_steps = int(total_seconds / self.config.timestep.total_seconds())
+
+        # Setup progress bar (auto-detects notebook vs terminal)
+        if progress:
+            try:
+                from tqdm.auto import tqdm  # type: ignore[import-untyped]
+
+                pbar = tqdm(total=n_steps, desc="Simulation", unit="step")
+            except ImportError:
+                logger.warning("tqdm not installed. Progress bar disabled.")
+                progress = False
+                pbar = None
+        else:
+            pbar = None
+
         try:
+            step_count = 0
             while self._current_time < self.config.end_date:
                 self.step()
                 self._current_time += self.config.timestep
@@ -241,12 +264,25 @@ class SimulationController:
                     io_task = self.writer.get_append_task(self.state, time=self._current_time)
                     self.backend.process_io_task(io_task)
 
+                # Update progress bar
+                step_count += 1
+                if pbar is not None:
+                    pbar.update(1)
+                    # Show current simulation time in postfix
+                    pbar.set_postfix({"time": str(self._current_time.date())})
+
+            # Close progress bar
+            if pbar is not None:
+                pbar.close()
+
             # Finalize writing
             if self.writer:
                 self.writer.finalize()
 
             logger.info("Simulation completed.")
         except Exception as e:
+            if pbar is not None:
+                pbar.close()
             logger.error(f"Simulation failed at {self._current_time}: {e}")
             raise
 
