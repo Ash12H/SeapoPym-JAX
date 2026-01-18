@@ -98,7 +98,7 @@ Le test de Zalesak utilise un **disque avec fente rectangulaire** ("slotted disk
 -   Fente rectangulaire : largeur = 0.05, hauteur = 0.25 (s'étend vers le bas)
 -   Centre de rotation : (0.5, 0.5)
 -   Période de rotation : 1 révolution
--   3 résolutions : 50×50, 100×100, 200×200
+-   10 résolutions testées : de 32×32 à 256×256
 
 **Schéma numérique** :
 
@@ -210,9 +210,9 @@ L'architecture DAG a une complexité **linéaire** en fonction de la taille du p
 
 ### 4.2. Décomposition du Temps de Calcul
 
-Pour comprendre les contraintes de parallélisation, nous analysons la répartition du temps de calcul par type de tâche (voir Figure 4B).
+L'analyse de la répartition du temps de calcul par type de tâche révèle les processus dominants du modèle (voir Figure 4B).
 
-![Figure 4B : Décomposition du temps de calcul](../../../data/article/figures/fig_04f_time_decomposition.png)
+![Figure 4B : Décomposition du temps de calcul](../../../data/article/figures/fig_04b_bis_time_decomposition_optimized_by_group.png)
 
 **Configuration** : Grille 500×500, 10 cohortes, 20 pas de temps, profilage par décorateur.
 
@@ -225,40 +225,9 @@ Pour comprendre les contraintes de parallélisation, nous analysons la répartit
 
 **Le transport de la production représente 80% du temps de calcul.**
 
-Cette dominance d'une seule tâche a des implications directes pour la parallélisation. Selon la Loi d'Amdahl, avec une fraction séquentielle de 80%, le speedup maximal théorique est borné :
+Cette décomposition révèle que l'optimisation du noyau de transport est cruciale pour améliorer les performances globales. Le profil de temps observé confirme que l'architecture DAG n'introduit pas de surcoût significatif : le temps est dominé par les calculs physiques (transport, mortalité) plutôt que par l'orchestration du graphe.
 
-$$S_{max} = \frac{1}{f_{seq}} = \frac{1}{0.80} = 1.25\times$$
-
-Même avec un nombre infini de workers, le speedup ne peut dépasser **1.25×** tant que le transport de production n'est pas lui-même parallélisé (par chunking spatial, par exemple).
-
-### 4.3. Limites du Parallélisme de Tâches (Loi d'Amdahl)
-
-Bien que l'infrastructure logicielle soit capable de paralléliser efficacement des tâches indépendantes (speedup de 10.34× sur un test synthétique `sleep` avec 12 workers), son application au modèle réel se heurte à la structure même des calculs.
-
-Comme montré en section 4.2, le transport de la production est une tâche monolithique représentant 80% du temps de calcul. Dans une stratégie de **Task Parallelism** pur (parallélisation inter-processus), cette tâche agit comme un goulot d'étranglement séquentiel. Selon la loi d'Amdahl, le speedup maximal est théoriquement borné :
-
-$$S_{max} = \frac{1}{f_{seq}} = \frac{1}{0.80} = 1.25\times$$
-
-Nos mesures confirment cette limite théorique : quel que soit le nombre de workers (jusqu'à 12), le speedup du Task Parallelism plafonne à **~1.28×**. L'ajout de ressources de calcul supplémentaires est inutile sans modifier la stratégie de décomposition.
-
-### 4.4. Passage à l'Échelle via Parallélisme de Données (Strong Scaling)
-
-Pour briser la limite d'Amdahl, nous adoptons une stratégie de **Data Parallelism** en divisant la tâche dominante (transport de production) selon la dimension `cohort`. Chaque cohorte étant physiquement indépendante, elles peuvent être transportées en parallèle.
-
-Nous évaluons cette approche sur deux scénarios contrastés (Figure 4) :
-
-1.  **Scénario "Zooplancton"** (12 cohortes) : Représente des organismes à vie courte.
-2.  **Scénario "Micronecton"** (527 cohortes) : Représente des organismes à vie longue nécessitant un suivi fin.
-
-**Résultats de Strong Scaling :**
-
--   **Micronecton (Complexité élevée)** : Le Data Parallelism délivre un speedup de **2.41×** avec 12 workers (contre 1.06× pour le Task Parallelism). L'accélération est significative car le temps de calcul par tâche domine largement le surcoût de gestion du graphe Dask.
--   **Zooplancton (Complexité faible)** : Le Data Parallelism est **moins performant** que l'exécution séquentielle (Speedup 0.61×). L'overhead constant de l'ordonnanceur Dask (~1-2s) devient prépondérant face à la rapidité du calcul physique pour un petit nombre de cohortes.
-
-**Validation Numérique :**
-La justesse des calculs ("correctness") est validée pour toutes les configurations parallèles. L'écart quadratique moyen (RMSE) par rapport à la référence séquentielle reste inférieur à $10^{-10}$ g/m², confirmant que le découpage des données n'introduit aucun biais numérique.
-
-En conclusion, le Data Parallelism est la clé pour le passage à l'échelle des simulations complexes (Micronecton), permettant de dépasser la barrière d'Amdahl, tandis que l'exécution séquentielle reste optimale pour les modèles légers.
+---
 
 ## Résumé des Validations
 
@@ -276,8 +245,6 @@ En conclusion, le Data Parallelism est la clé pour le passage à l'échelle des
 |                                    | Amélioration vs no-trans  | -34%         | ✓          |
 | **4. Performances**                |                           |              |            |
 | 4.1 Weak Scaling                   | Complexité                | O(N^{1.01})  | ✓          |
-| 4.2 Décomposition                  | Transport production      | 80%          | —          |
-| 4.3 Task Parallelism               | Speedup max (Amdahl)      | ~1.28×       | ✓          |
-| 4.4 Data Parallelism               | Speedup (Micronecton)     | **2.41×**    | ✓          |
+| 4.2 Décomposition                  | Transport production      | 80%          | ✓          |
 
 **Note** : \*L'ordre de convergence réduit (0.22) pour le schéma Upwind est dû à la diffusion numérique, comportement attendu pour ce type de schéma [LeVeque, 2002; Zalesak, 1979]. La conservation de masse parfaite confirme la cohérence du schéma. L'architecture DAG permet de remplacer ce module par des schémas d'ordre supérieur si nécessaire.
