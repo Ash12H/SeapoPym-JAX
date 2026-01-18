@@ -34,7 +34,7 @@ Cette stratégie assure une convergence > 99.9% (15 périodes caractéristiques)
 
 La **Figure 1A** compare la biomasse finale simulée avec l'asymptote théorique $B_{eq}(T) = R/\lambda(T)$ pour chaque température.
 
-![Figure 1A : Convergence asymptotique de la biomasse](../../../data/article/figures/fig_01a_temperature_scan.png)
+![Figure 1A : Convergence asymptotique de la biomasse](../../data/article/figures/fig_01a_temperature_scan.png)
 
 > Figure 1A : Biomasse d'équilibre simulée (points) vs théorique (ligne) en fonction de la température, avec erreur relative associée.
 
@@ -60,7 +60,7 @@ Nous comparons ici les résultats d'une simulation globale (1998-2019) réalisé
 
 La **Figure 1B** présente la distribution spatiale des différences entre les deux modèles.
 
-![Figure 1B : Comparaison v0.3 vs DAG](../../../data/article/figures/fig_02a_comparison_v03_nrmse.png)
+![Figure 1B : Comparaison v0.3 vs DAG](../../data/article/figures/fig_02a_comparison_v03_nrmse.png)
 
 > Figure 1B : NRMSE spatiale entre SeapoPym v0.3 et SeapoPym v1.0 (architecture DAG).
 
@@ -111,13 +111,13 @@ Le test de Zalesak utilise un **disque avec fente rectangulaire** ("slotted disk
 
 La **Figure 2A** compare l'état initial et final du disque pour différentes résolutions.
 
-![Figure 2A : Test de Zalesak - Comparaison](../../../data/article/figures/fig_03d_zalesak_comparison.png)
+![Figure 2A : Test de Zalesak - Comparaison](../../data/article/figures/fig_03d_zalesak_comparison.png)
 
 > Figure 2A : État du disque avant (haut) et après (bas) une révolution. La diffusion numérique est visible à basse résolution (gauche) et diminue à haute résolution (droite).
 
 La **Figure 2B** présente l'analyse de convergence spatiale.
 
-![Figure 2B : Test de Zalesak - Convergence](../../../data/article/figures/fig_03d_zalesak_convergence.png)
+![Figure 2B : Test de Zalesak - Convergence](../../data/article/figures/fig_03d_zalesak_convergence.png)
 
 > Figure 2B : (A) NRMSE vs espacement de grille en échelle log-log. La pente mesurée (0.22) indique une convergence positive. (B) Préservation du maximum, indicateur de la diffusion numérique.
 
@@ -166,7 +166,7 @@ Le modèle complet (couplage transport-biologie) est validé en le comparant au 
 
 La **Figure 3** illustre la distribution spatiale de l'erreur (NRMSE) entre le modèle DAG et la référence.
 
-![Figure 3 : Erreurs spatiales](../../../data/article/figures/fig_05e_spatial_rmse.png)
+![Figure 3 : Erreurs spatiales](../../data/article/figures/fig_05e_spatial_rmse.png)
 
 > Figure 3 : Cartes de NRMSE (Erreur quadratique moyenne normalisée) entre la simulation DAG et la référence Seapodym-LMTL. Gauche : DAG avec transport. Droite : DAG sans transport.
 
@@ -180,7 +180,7 @@ L'amélioration apportée par le transport est substantielle, avec une **réduct
 
 La **Figure 3-bis** (Séries temporelles par zone) démontre que la dynamique saisonnière et interannuelle est correctement synchronisée entre les deux modèles dans les différentes zones climatiques (Tempérée Nord, Tropicale, Tempérée Sud).
 
-![Figure 3-bis : Séries temporelles par zone](../../../data/article/figures/fig_05e_pacific_timeseries_zones.png)
+![Figure 3-bis : Séries temporelles par zone](../../data/article/figures/fig_05e_pacific_timeseries_zones.png)
 
 Conclusion : L'architecture DAG reproduit de manière satisfaisante la dynamique du modèle de référence en conditions réelles.
 
@@ -196,7 +196,7 @@ La complexité algorithmique est évaluée en mesurant le temps de calcul pour d
 
 La **Figure 4A** présente le temps de calcul par pas de temps en fonction du nombre de cellules, sur un graphe log-log.
 
-![Figure 4A : Weak Scaling](../../../data/article/figures/fig_04a_weak_scaling.png)
+![Figure 4A : Weak Scaling](../../data/article/figures/fig_04a_weak_scaling.png)
 
 | Grille    | Cellules  | Temps/Step (ms) |
 | --------- | --------- | --------------- |
@@ -212,7 +212,7 @@ L'architecture DAG a une complexité **linéaire** en fonction de la taille du p
 
 L'analyse de la répartition du temps de calcul par type de tâche révèle les processus dominants du modèle (voir Figure 4B).
 
-![Figure 4B : Décomposition du temps de calcul](../../../data/article/figures/fig_04b_bis_time_decomposition_optimized_by_group.png)
+![Figure 4B : Décomposition du temps de calcul](../../data/article/figures/fig_04b_bis_time_decomposition_optimized_by_group.png)
 
 **Configuration** : Grille 500×500, 10 cohortes, 20 pas de temps, profilage par décorateur.
 
