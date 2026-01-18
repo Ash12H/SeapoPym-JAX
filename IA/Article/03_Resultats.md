@@ -166,7 +166,7 @@ Le modèle complet (couplage transport-biologie) est validé en le comparant au 
 
 La **Figure 3** illustre la distribution spatiale de l'erreur (NRMSE) entre le modèle DAG et la référence.
 
-![Figure 3 : Erreurs spatiales](../../../data/article/figures/fig_05e_spatial_nrmse.png)
+![Figure 3 : Erreurs spatiales](../../../data/article/figures/fig_05e_spatial_rmse.png)
 
 > Figure 3 : Cartes de NRMSE (Erreur quadratique moyenne normalisée) entre la simulation DAG et la référence Seapodym-LMTL. Gauche : DAG avec transport. Droite : DAG sans transport.
 
