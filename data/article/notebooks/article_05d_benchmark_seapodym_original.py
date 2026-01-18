@@ -82,7 +82,20 @@ t_biomass = run_seapodym("-B", "Calcul Biomasse")
 if t_biomass > 0:
     timings["biomass"] = t_biomass
 
-# Résumé
+# Résumé et génération du Summary
+import pandas as pd
+
+SUMMARY_DIR = (
+    Path(__file__).parent.parent / "summary"
+    if "__file__" in globals()
+    else Path.cwd().parent / "summary"
+)
+SUMMARY_DIR.mkdir(exist_ok=True)
+
+FIGURE_PREFIX = "fig_05d_benchmark_seapodym"
+summary_filename = f"{FIGURE_PREFIX.replace('fig_', 'notebook_')}_summary.txt"
+summary_path = SUMMARY_DIR / summary_filename
+
 print("\n" + "=" * 70)
 print("RÉSUMÉ")
 print("=" * 70)
@@ -96,15 +109,61 @@ if timings:
     print("-" * 35)
     print(f"{'TOTAL':<20} {total:<15.2f}")
 
-    # Sauvegarder les résultats
-    results_file = Path(CONFIG_XML).parent / "benchmark_seapodym_original.txt"
-    with open(results_file, "w") as f:
-        f.write("SEAPODYM-LMTL Original Benchmark\n")
-        f.write("=" * 40 + "\n")
+    # Génération du summary détaillé
+    with open(summary_path, "w") as f:
+        f.write("=" * 80 + "\n")
+        f.write("NOTEBOOK 05D: BENCHMARK SEAPODYM-LMTL ORIGINAL (C++/FORTRAN)\n")
+        f.write("=" * 80 + "\n\n")
+
+        f.write("DATE: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
+
+        f.write("OBJECTIF:\n")
+        f.write("-" * 80 + "\n")
+        f.write("Mesurer le temps d'exécution du modèle SEAPODYM-LMTL original (C++/Fortran)\n")
+        f.write("pour servir de référence de performance lors de la comparaison avec\n")
+        f.write("l'implémentation Python (SeapoPym DAG).\n\n")
+
+        f.write("CONFIGURATION:\n")
+        f.write("-" * 80 + "\n")
+        f.write(f"Binaire SEAPODYM          : {SEAPODYM_BIN}\n")
+        f.write(f"Fichier configuration XML : {CONFIG_XML}\n")
+        f.write(f"Groupe fonctionnel        : {GROUP}\n")
+        f.write(f"Nombre de processus MPI   : {N_PROCS}\n\n")
+
+        f.write("DESCRIPTION DU MODÈLE ORIGINAL:\n")
+        f.write("-" * 80 + "\n")
+        f.write("SEAPODYM-LMTL est le modèle de référence développé en C++/Fortran par SPC.\n")
+        f.write("Il calcule la dynamique des niveaux trophiques bas et moyens (LMTL)\n")
+        f.write("à partir de forçages environnementaux (NPP, température, courants).\n\n")
+
+        f.write("ÉTAPES D'EXÉCUTION:\n")
+        f.write("-" * 80 + "\n")
+        f.write("1. Calcul Production (-P) : Calcule la production primaire transformée\n")
+        f.write("   en biomasse micronectonique via les cohortes d'âge.\n")
+        f.write("2. Calcul Biomasse (-B)   : Calcule la biomasse finale avec transport\n")
+        f.write("   (advection + diffusion) et mortalité.\n\n")
+
+        f.write("TEMPS D'EXÉCUTION:\n")
+        f.write("-" * 80 + "\n")
         for name, t in timings.items():
-            f.write(f"{name}: {t:.2f}s\n")
-        f.write(f"TOTAL: {total:.2f}s\n")
-    print(f"\n✅ Résultats sauvegardés: {results_file}")
+            f.write(f"{name:<20} : {t:.2f} s ({t / 60:.2f} min)\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"{'TOTAL':<20} : {total:.2f} s ({total / 60:.2f} min)\n\n")
+
+        f.write("UTILISATION:\n")
+        f.write("-" * 80 + "\n")
+        f.write("Ces temps servent de référence pour évaluer les performances de SeapoPym.\n")
+        f.write("Un facteur d'accélération ou de ralentissement peut être calculé en\n")
+        f.write("comparant avec les temps du notebook 05b (simulation SeapoPym).\n\n")
+
+        f.write("FICHIERS GÉNÉRÉS:\n")
+        f.write("-" * 80 + "\n")
+        f.write("- Sortie SEAPODYM (Zarr référence) dans data/LMTL_Pacific_Run/\n")
+        f.write(f"- {summary_filename} (ce fichier)\n\n")
+
+        f.write("=" * 80 + "\n")
+
+    print(f"\n✅ Résumé sauvegardé: {summary_path}")
 else:
     print("❌ Aucun benchmark réussi")
 

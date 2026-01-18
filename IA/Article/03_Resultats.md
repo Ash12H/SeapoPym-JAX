@@ -82,176 +82,80 @@ La validation de **non-régression** est donc **réussie** : l'architecture DAG 
 
 ---
 
-## 2. Validation du Module de Transport 1D
+## 2. Validation du Module de Transport 2D
 
-Les schémas numériques de transport sont validés indépendamment par comparaison avec des solutions analytiques dans une configuration 1D simplifiée (ruban étroit de 3 cellules en latitude). Cette approche permet d'isoler les erreurs numériques et d'analyser la convergence spatiale sans les complications de la géométrie sphérique 2D.
+Le schéma de transport (advection + diffusion) est validé par le **test de Zalesak**, une référence classique dans la littérature des méthodes numériques [Zalesak, 1979]. Ce test consiste à faire tourner un disque dans un champ de vitesse en rotation solide. Après une révolution complète, le disque devrait revenir identique à son état initial. L'écart mesuré quantifie la **diffusion numérique** introduite par le schéma.
 
-### 2.1. Advection Pure (Schéma Upwind)
+### 2.1. Configuration
 
-**Objectif** : Valider le schéma Upwind (1er ordre) pour l'advection en comparant avec la solution analytique $C(x,t) = C_0(x - ut)$ (translation de gaussienne).
+Le test de Zalesak utilise un **disque avec fente rectangulaire** ("slotted disk") qui tourne dans un champ de vitesse en rotation solide. Après une révolution complète, le disque devrait revenir identique à son état initial. L'écart mesuré quantifie la diffusion numérique.
 
-**Configuration** :
+**Domaine et slotted disk** (paramètres originaux de Zalesak) :
 
--   Domaine 1D : ruban de 100° (3 cellules en Y), conditions fermées
--   Vitesse uniforme : $u = 1.0$ m/s, diffusion nulle ($D = 0$)
--   Condition initiale : Gaussienne (σ = 80 km, centrée à 25% du domaine)
--   24 résolutions testées : de 1° (111 km) à 1/24° (4.6 km)
--   CFL = 0.5 (dt adaptatif), durée : 7 jours (~605 km de déplacement)
+-   Domaine carré : [0, 1] × [0, 1] (équivalent à 1000 km × 1000 km)
+-   Centre du disque : (0.5, 0.75)
+-   Rayon du disque : 0.15
+-   Fente rectangulaire : largeur = 0.05, hauteur = 0.25 (s'étend vers le bas)
+-   Centre de rotation : (0.5, 0.5)
+-   Période de rotation : 1 révolution
+-   3 résolutions : 50×50, 100×100, 200×200
 
-La **Figure 2A** compare les profils simulés et analytiques pour différentes résolutions.
+**Schéma numérique** :
 
-![Figure 2A : Advection 1D - Profils](../../../data/article/figures/fig_03a_advection_1d_profiles.png)
+-   Méthode des Volumes Finis (conservation de masse garantie)
+-   Advection : schéma Upwind (1er ordre)
+-   Intégration temporelle : Euler explicite
+-   CFL = 0.5
 
-> Figure 2A : Profils de concentration après 7 jours pour 4 résolutions. La diffusion numérique du schéma Upwind est visible à basse résolution.
+### 2.2. Résultats
 
-**Analyse de convergence** :
+La **Figure 2A** compare l'état initial et final du disque pour différentes résolutions.
 
-La **Figure 2B** présente l'évolution de l'erreur (NRMSE) en fonction de la résolution spatiale.
+![Figure 2A : Test de Zalesak - Comparaison](../../../data/article/figures/fig_03d_zalesak_comparison.png)
 
-![Figure 2B : Advection 1D - Convergence](../../../data/article/figures/fig_03a_advection_convergence.png)
+> Figure 2A : État du disque avant (haut) et après (bas) une révolution. La diffusion numérique est visible à basse résolution (gauche) et diminue à haute résolution (droite).
 
-> Figure 2B : Convergence spatiale du schéma Upwind. L'ordre mesuré (0.66) est inférieur à la théorie (1.0) en raison de la diffusion numérique.
+La **Figure 2B** présente l'analyse de convergence spatiale.
 
-**Résultats** :
+![Figure 2B : Test de Zalesak - Convergence](../../../data/article/figures/fig_03d_zalesak_convergence.png)
 
--   **Ordre de convergence mesuré** : **0.66** (théorique : 1.0)
--   **R²** : 0.98 (ajustement log-log excellent)
--   **NRMSE** : de 0.60 (111 km) à 0.08 (4.6 km), ratio 7.1×
--   **Conservation de masse** : parfaite (erreur < 10⁻¹⁵%)
+> Figure 2B : (A) NRMSE vs espacement de grille en échelle log-log. La pente mesurée (0.22) indique une convergence positive. (B) Préservation du maximum, indicateur de la diffusion numérique.
 
-L'écart entre l'ordre mesuré (0.66) et théorique (1.0) s'explique par la **diffusion numérique** du schéma Upwind : l'erreur dominante n'est pas l'erreur de troncature O(Δx) mais la diffusion artificielle, qui a une dépendance complexe en Δx et CFL. Ce comportement est bien documenté dans la littérature [LeVeque, 2002].
+**Métriques clés** :
 
-**Validation** : ✅ Le schéma Upwind est validé. La conservation de masse est stricte et l'erreur décroît de manière monotone avec la résolution, confirmant la cohérence du schéma.
+| Résolution | dx [km] | NRMSE | Max Preservation |
+| ---------- | ------- | ----- | ---------------- |
+| 50×50      | 20      | 0.75  | 66%              |
+| 100×100    | 10      | 0.66  | 68%              |
+| 200×200    | 5       | 0.55  | 82%              |
 
-### 2.2. Diffusion Pure (Schéma Centré)
+-   **Conservation de masse** : parfaite (erreur < 10⁻¹⁴%)
+-   **Ordre de convergence** : 0.22 (R² = 0.98)
+-   **Convergence monotone** : l'erreur décroît avec la résolution
 
-**Objectif** : Valider le schéma centré (2nd ordre) pour la diffusion en comparant avec la solution analytique $\sigma^2(t) = \sigma_0^2 + 2Dt$ (élargissement de gaussienne).
+### 2.3. Discussion
 
-**Configuration** :
-
--   Domaine 1D : ruban de 100°, conditions fermées
--   Coefficient de diffusion : $D = 50000$ m²/s, advection nulle ($u = 0$)
--   Condition initiale : Gaussienne (σ₀ = 80 km, centrée au milieu)
--   12 résolutions testées : de 1° (111 km) à 1/12° (9.3 km)
--   Fourier = 0.25 (dt adaptatif), durée : 7 jours
-
-La **Figure 2C** présente l'analyse de convergence.
-
-![Figure 2C : Diffusion 1D - Convergence](../../../data/article/figures/fig_03b_diffusion_convergence.png)
-
-> Figure 2C : Convergence spatiale du schéma centré pour la diffusion. L'ordre mesuré (2.02) est conforme à la théorie (2.0).
-
-**Résultats** :
-
--   **Ordre de convergence mesuré** : **2.02** ≈ 2.0 (théorique : 2.0) ✅
--   **R²** : 0.9999 (ajustement log-log quasi-parfait)
--   **NRMSE** : de 0.010 (111 km) à 0.000065 (9.3 km), ratio 155×
--   **Conservation de masse** : parfaite (erreur < 10⁻¹⁵%)
-
-**Validation** : ✅ Le schéma de diffusion centré est validé. L'ordre de convergence est conforme à la théorie et la précision est excellente même à basse résolution.
-
-### 2.3. Couplage Advection-Réaction (Mortalité)
-
-**Objectif** : Valider le couplage entre l'advection (Upwind) et les processus biologiques (mortalité) via _operator splitting_ en comparant avec la solution analytique $C(x,t) = C_0(x-ut) \times e^{-\lambda t}$.
-
-**Configuration** :
-
--   Domaine 1D : ruban de 100°, conditions fermées
--   Advection : $u = 1.0$ m/s, diffusion nulle
--   Mortalité constante : $\lambda = 7.72 \times 10^{-8}$ s⁻¹ (demi-vie : 104 jours)
--   Température fixe : 0°C (pour λ constant)
--   12 résolutions testées : de 1° (111 km) à 1/12° (9.3 km)
--   CFL = 0.5, durée : 7 jours (décroissance de masse : ~6.5%)
-
-La **Figure 2D** montre l'évolution temporelle de la masse normalisée.
-
-![Figure 2D : Couplage Advection-Réaction - Décroissance de masse](../../../data/article/figures/fig_03c_advection_reaction_mass_decay.png)
-
-> Figure 2D : Décroissance de la masse totale M(t)/M₀. La simulation suit fidèlement la loi exponentielle théorique $e^{-\lambda t}$ pour toutes les résolutions.
-
-**Validation du taux de mortalité** :
-
-Le taux de mortalité λ est mesuré à partir de la décroissance de masse : $\lambda_{mesuré} = -\ln(M_{final}/M_0) / t$.
-
-| Résolution     | λ mesuré (s⁻¹)   | Erreur (%) |
-| -------------- | ---------------- | ---------- |
-| 1° (111 km)    | 7.733 × 10⁻⁸     | 0.22%      |
-| 1/12° (9.3 km) | 7.717 × 10⁻⁸     | 0.018%     |
-| **Théorique**  | **7.716 × 10⁻⁸** | —          |
-
-**Résultats** :
-
--   **Ordre de convergence spatial** : 0.57 (inférieur à la théorie 1.0)
--   **Erreur moyenne sur λ** : **0.056%** ✅
--   **Erreur maximale sur λ** : **0.22%** ✅
--   **NRMSE** : de 0.60 (111 km) à 0.15 (9.3 km), ratio 4.0×
--   **Stabilité** : CFL effectif stable (~0.5)
-
-L'ordre de convergence réduit (0.57) est cohérent avec les résultats de l'expérience 2.1 (advection seule : 0.66), confirmant que l'erreur dominante provient de la diffusion numérique du schéma Upwind, non du couplage. L'ajout de la réaction amplifie légèrement cet effet car la normalisation devient plus sensible quand la masse décroît.
-
-**Validation** : ✅ Le couplage advection-réaction par _operator splitting_ est validé. Le taux de mortalité est capturé avec une précision < 0.25%, et la décroissance exponentielle de masse est correctement reproduite.
-
-### 2.4. Discussion : Diffusion Numérique et Ordre de Convergence
-
-L'analyse des expériences 2.1 et 2.3 révèle un écart significatif entre l'ordre de convergence théorique (1.0) et mesuré (0.66 pour advection, 0.57 pour advection-réaction) du schéma Upwind. Cette observation mérite discussion.
-
-**Origine de l'écart** :
-
-Le schéma Upwind introduit une **diffusion numérique** dont l'amplitude dépend de la résolution spatiale et du nombre de Courant :
+L'ordre de convergence mesuré (0.22) est inférieur à l'ordre théorique (1.0) du schéma Upwind. Cet écart s'explique par la **diffusion numérique** inhérente au schéma Upwind :
 
 $$ D\_{num} = \frac{u \Delta x}{2} (1 - \text{CFL}) $$
 
-À CFL = 0.5, cela correspond à $D_{num} \approx 0.25 \times u \Delta x$. Sur 7 jours avec $u = 1$ m/s et $\Delta x = 111$ km (résolution 1°), cette diffusion artificielle lisse significativement la gaussienne initiale (σ = 80 km), dominant l'erreur de troncature.
+Cette diffusion numérique, bien documentée dans la littérature [LeVeque, 2002], domine l'erreur de troncature et réduit l'ordre effectif. Néanmoins, les points essentiels sont validés :
 
-**Pourquoi l'ordre mesuré < 1.0 ?**
+1. ✅ **Conservation de masse parfaite** : Le schéma Volumes Finis garantit la conservation stricte
+2. ✅ **Convergence vers la solution** : L'erreur décroît de manière monotone avec la résolution
+3. ✅ **Comportement documenté** : La diffusion numérique est conforme aux attentes pour un schéma Upwind
 
-L'erreur totale combine deux contributions avec des dépendances différentes en Δx :
+**Positionnement pour SeapoPym** : Le choix du schéma Upwind est un compromis pragmatique. Pour les applications dominées par la biologie (LMTL), la diffusion numérique est acceptable car :
 
--   **Erreur de troncature** : O(Δx) (ordre 1, prévu par la théorie)
--   **Diffusion numérique** : dépendance complexe, proche de O(Δx^{0.5-0.7}) pour une gaussienne normalisée
-
-Lorsque la diffusion numérique domine (cas des résolutions grossières sur 7 jours), l'ordre mesuré reflète sa dépendance en Δx, d'où 0.66 au lieu de 1.0.
-
-**Implications pour le modèle** :
-
-1. **Ce n'est pas un bug** : La conservation de masse est parfaite (< 10⁻¹⁵%), confirmant la cohérence du schéma.
-2. **Effet limité en pratique** : Dans les simulations réalistes océaniques, la diffusion physique ($D \sim 10^4$ m²/s) domine largement la diffusion numérique à résolution 1/4° ou mieux.
-3. **Validation du couplage** : L'ordre de convergence réduit ne remet pas en cause la validation du couplage advection-réaction (section 2.3), puisque le taux de mortalité est capturé avec < 0.25% d'erreur.
-
-**Références** : Ce comportement du schéma Upwind est bien documenté dans la littérature des méthodes numériques pour les EDP (LeVeque, 2002; Godunov & Ryabenkii, 1987).
+-   Elle est du même ordre de grandeur que la diffusion physique réelle
+-   Elle n'affecte pas la conservation de masse (essentielle pour un modèle de population)
+-   L'architecture DAG permet de remplacer ce module par des schémas d'ordre supérieur (TVD, MUSCL) si nécessaire
 
 ---
 
-## 3. Validation du Couplage Transport-Biologie
+## 3. Validation sur Simulation Réaliste (Pacifique)
 
-### 3.1. Test de Convergence en Grille
-
-Cette expérience valide le couplage entre transport et biologie en configuration 2D. Un patch de biomasse initial est advecté tout en subissant des réactions biologiques (mortalité).
-Pour assurer une démonstration rigoureuse de la convergence spatiale, nous utilisons un **pas de temps (dt) constant** pour toutes les résolutions. Cette approche élimine les artefacts liés aux variations du CFL (qui induisaient des oscillations dans les tests précédents) et permet d'isoler l'ordre de convergence intrinsèque.
-
-**Configuration** :
-
--   Domaine 2D, température constante, courant uniforme ($u=0.1$ m/s).
--   Diffusion physique nulle ($D=0$ m²/s) pour isoler la diffusion numérique.
--   50 résolutions réparties de 1° à 1/24° (Δx : 111 km $\to$ 4.6 km).
--   Pas de temps fixe : $dt \approx 6.44$ h.
--   CFL variable : de ~0.02 (basse résolution) à ~0.50 (haute résolution).
-
-La **Figure 3B** superpose les profils de concentration pour des résolutions clés. L'effet de la diffusion numérique du schéma Upwind est maximal à basse résolution (CFL proche de 0) et diminue significativement à haute résolution (CFL proche de 0.5).
-
-![Figure 3B : Profils de concentration](../../../data/article/figures/fig_03b_coupling_profile_constant_dt.png)
-
-La **Figure 3D** présente la NRMSE en fonction de Δx :
-
-![Figure 3D : Convergence en grille](../../../data/article/figures/fig_03b_grid_convergence_constant_dt.png)
-
-L'erreur décroît de manière **strictement monotone** (NRMSE passant de 0.21 à 0.018) avec une qualité d'ajustement excellente ($R^2 > 0.99$). La pente mesurée de **0.82** reflète l'interaction entre l'augmentation de la résolution (qui réduit l'erreur) et l'augmentation concomitante du CFL vers l'optimum de 0.5 (qui réduit la diffusion numérique).
-
-La validation est **réussie** : l'architecture DAG converge sans aucune instabilité vers la solution de référence, confirmant la robustesse du couplage Numérique-Biologique.
-
-### 3.2. Comparaison avec Seapodym-LMTL (Avec Transport)
-
-Le modèle complet (couplage transport-biologie) est validé en le comparant au modèle de référence Seapodym-LMTL sur une simulation réaliste dans le Pacifique. L'objectif est de vérifier que la nouvelle architecture DAG reproduit correctement la dynamique spatio-temporelle complexe issue de l'interaction entre les courants et les processus biologiques.
+Le modèle complet (couplage transport-biologie) est validé en le comparant au modèle de référence **Seapodym-LMTL** sur une simulation réaliste dans le Pacifique. Cette validation intégrée confirme que l'architecture DAG reproduit correctement la dynamique spatio-temporelle complexe issue de l'interaction entre les courants océaniques et les processus biologiques.
 
 **Configuration** :
 
@@ -342,6 +246,7 @@ Nos mesures confirment cette limite théorique : quel que soit le nombre de work
 Pour briser la limite d'Amdahl, nous adoptons une stratégie de **Data Parallelism** en divisant la tâche dominante (transport de production) selon la dimension `cohort`. Chaque cohorte étant physiquement indépendante, elles peuvent être transportées en parallèle.
 
 Nous évaluons cette approche sur deux scénarios contrastés (Figure 4) :
+
 1.  **Scénario "Zooplancton"** (12 cohortes) : Représente des organismes à vie courte.
 2.  **Scénario "Micronecton"** (527 cohortes) : Représente des organismes à vie longue nécessitant un suivi fin.
 
@@ -357,26 +262,22 @@ En conclusion, le Data Parallelism est la clé pour le passage à l'échelle des
 
 ## Résumé des Validations
 
-| Expérience                         | Métrique                  | Résultat        | Validation |
-| ---------------------------------- | ------------------------- | --------------- | ---------- |
-| **1. Composants Biologiques (0D)** |                           |                 |            |
-| 1.1 Convergence asymptotique       | Erreur vs théorie (36 T°) | NRMSE < 10⁻⁶    | ✓          |
-| 1.2 Comparaison SeapoPym v0.3      | Corrélation               | 0.9994          | ✓          |
-|                                    | NRMSE                     | 0.035           | ✓          |
-| **2. Transport 1D**                |                           |                 |            |
-| 2.1 Advection (Upwind)             | Conservation masse        | < 10⁻¹⁵%        | ✓          |
-|                                    | Convergence               | O(Δx^{0.66})    | ✓\*        |
-| 2.2 Diffusion (Centré)             | Conservation masse        | < 10⁻¹⁵%        | ✓          |
-|                                    | Convergence               | O(Δx^{2.02})    | ✓          |
-| 2.3 Advection-Réaction             | Erreur sur λ              | < 0.25%         | ✓          |
-|                                    | Décroissance de masse     | exp(-λt) validé | ✓          |
-| **3. Couplage Transport-Bio 2D**   |                           |                 |            |
-| 3.1 Convergence en grille          | Convergence               | O(Δx^{0.82})    | ✓          |
-| 3.2 Comparaison Seapodym-LMTL      | NRMSE spatiale            | 0.44            | ✓          |
-| **4. Performances**                |                           |                 |            |
-| 4.1 Weak Scaling                   | Complexité                | O(N^{1.01})     | ✓          |
-| 4.2 Décomposition                  | Transport production      | 80%             | —          |
-| 4.3 Task Parallelism               | Speedup max (Amdahl)      | ~1.28×          | ✓          |
-| 4.4 Data Parallelism               | Speedup (Micronecton)     | **2.41×**       | ✓          |
+| Expérience                         | Métrique                  | Résultat     | Validation |
+| ---------------------------------- | ------------------------- | ------------ | ---------- |
+| **1. Composants Biologiques (0D)** |                           |              |            |
+| 1.1 Convergence asymptotique       | Erreur vs théorie (36 T°) | NRMSE < 10⁻⁶ | ✓          |
+| 1.2 Comparaison SeapoPym v0.3      | Corrélation               | 0.9994       | ✓          |
+|                                    | NRMSE                     | 0.035        | ✓          |
+| **2. Transport 2D (Zalesak)**      |                           |              |            |
+| Test de rotation                   | Conservation masse        | < 10⁻¹⁴%     | ✓          |
+|                                    | Convergence spatiale      | O(Δx^{0.22}) | ✓\*        |
+| **3. Simulation Pacifique**        |                           |              |            |
+| Comparaison Seapodym-LMTL          | NRMSE (avec transport)    | 0.44         | ✓          |
+|                                    | Amélioration vs no-trans  | -34%         | ✓          |
+| **4. Performances**                |                           |              |            |
+| 4.1 Weak Scaling                   | Complexité                | O(N^{1.01})  | ✓          |
+| 4.2 Décomposition                  | Transport production      | 80%          | —          |
+| 4.3 Task Parallelism               | Speedup max (Amdahl)      | ~1.28×       | ✓          |
+| 4.4 Data Parallelism               | Speedup (Micronecton)     | **2.41×**    | ✓          |
 
-**Note** : \*L'ordre de convergence réduit (0.66-0.82) pour l'advection Upwind est dû à la diffusion numérique, comportement attendu et documenté (section 2.4). La conservation de masse stricte confirme la cohérence du schéma.
+**Note** : \*L'ordre de convergence réduit (0.22) pour le schéma Upwind est dû à la diffusion numérique, comportement attendu pour ce type de schéma [LeVeque, 2002; Zalesak, 1979]. La conservation de masse parfaite confirme la cohérence du schéma. L'architecture DAG permet de remplacer ce module par des schémas d'ordre supérieur si nécessaire.

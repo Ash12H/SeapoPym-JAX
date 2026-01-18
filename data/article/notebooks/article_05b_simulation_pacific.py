@@ -9,7 +9,6 @@ Cette version est ~2-3x plus rapide que la version originale.
 
 # %%
 import logging
-import os
 from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
@@ -18,7 +17,6 @@ import numpy as np
 import pint
 import xarray as xr
 
-from seapopym.blueprint import Blueprint
 from seapopym.controller import SimulationConfig, SimulationController
 from seapopym.lmtl.configuration import LMTLParams
 from seapopym.lmtl.core import (
@@ -57,7 +55,7 @@ INPUT_ZARR = DATA_DIR / "seapodym_lmtl_forcings_pacific.zarr"
 OUTPUT_TRANSPORT = DATA_DIR / "seapopym_pacific_transport_optimized.zarr"
 OUTPUT_NO_TRANSPORT = DATA_DIR / "seapopym_pacific_no_transport_optimized.zarr"
 
-print(f"✅ Imports OK")
+print("✅ Imports OK")
 print(f"📂 Data dir: {DATA_DIR}")
 
 # %% [markdown]
@@ -183,7 +181,7 @@ stability_diffusion = check_diffusion_stability(
     dt=config.timestep.total_seconds(),
 )
 
-print(f"\n=== Vérification Stabilité Diffusion ===")
+print("\n=== Vérification Stabilité Diffusion ===")
 print(f"  Coefficient de diffusion : D = {stability_diffusion['D_max']:.2f} m²/s")
 print(f"  CFL diffusion            : {stability_diffusion['cfl_diffusion']:.6f} (limite = 0.25)")
 print(f"  Marge de sécurité        : {stability_diffusion['margin']:.2f}x")
@@ -561,12 +559,111 @@ ctrl_tr.results["Zooplankton/biomass"].rename("biomass").to_zarr(OUTPUT_TRANSPOR
 # ## 6. Résumé
 
 # %%
+# Génération du summary
+SUMMARY_DIR = DATA_DIR.parent / "summary"
+SUMMARY_DIR.mkdir(exist_ok=True)
+
+FIGURE_PREFIX = "fig_05b_simulation_pacific"
+summary_filename = f"{FIGURE_PREFIX.replace('fig_', 'notebook_')}_summary.txt"
+summary_path = SUMMARY_DIR / summary_filename
+
+# Informations de la simulation
+n_timesteps = len(ds.time)
+n_lat = len(ds.latitude)
+n_lon = len(ds.longitude)
+lat_min = ds.latitude.min().item()
+lat_max = ds.latitude.max().item()
+lon_min = ds.longitude.min().item()
+lon_max = ds.longitude.max().item()
+
+# Biomasse finale
+biomass_no_transport = ctrl_no.results["Zooplankton/biomass"].isel(time=-1).mean().item()
+biomass_transport = ctrl_tr.results["Zooplankton/biomass"].isel(time=-1).mean().item()
+
+import pandas as pd
+
+with open(summary_path, "w") as f:
+    f.write("=" * 80 + "\n")
+    f.write("NOTEBOOK 05B: SIMULATION SEAPOPYM DAG - PACIFIQUE\n")
+    f.write("=" * 80 + "\n\n")
+
+    f.write("DATE: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
+
+    f.write("OBJECTIF:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Exécuter deux simulations SeapoPym sur le Pacifique (1998-2020) pour\n")
+    f.write("comparer l'impact du transport (advection + diffusion) sur la biomasse.\n")
+    f.write("Cette simulation génère les données pour la validation article 05F.\n\n")
+
+    f.write("VERSIONS UTILISÉES:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Production dynamics         : compute_production_dynamics_optimized (Numba)\n")
+    f.write("Transport                   : compute_transport_fv_optimized (Numba)\n")
+    f.write("Backend                     : Sequential (single-thread)\n\n")
+
+    f.write("CONFIGURATION SPATIALE:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Région                       : Pacifique\n")
+    f.write(f"Grille                       : {n_lat} × {n_lon} points\n")
+    f.write(f"Latitude                     : [{lat_min:.1f}°, {lat_max:.1f}°]\n")
+    f.write(f"Longitude                    : [{lon_min:.1f}°, {lon_max:.1f}°]\n\n")
+
+    f.write("CONFIGURATION TEMPORELLE:\n")
+    f.write("-" * 80 + "\n")
+    f.write(f"Période                      : {config.start_date} à {config.end_date}\n")
+    f.write(f"Pas de temps                 : {config.timestep}\n")
+    f.write(f"Nombre de pas de temps       : {n_timesteps}\n\n")
+
+    f.write("PARAMÈTRES LMTL:\n")
+    f.write("-" * 80 + "\n")
+    f.write(f"E (efficacité trophique)     : {lmtl_params.E}\n")
+    f.write(f"lambda_0 (mortalité)         : {lmtl_params.lambda_0}\n")
+    f.write(f"gamma_lambda                 : {lmtl_params.gamma_lambda}\n")
+    f.write(f"tau_r_0 (recrutement)        : {lmtl_params.tau_r_0}\n")
+    f.write(f"gamma_tau_r                  : {lmtl_params.gamma_tau_r}\n")
+    f.write(f"T_ref                        : {lmtl_params.T_ref}\n\n")
+
+    f.write("PARAMÈTRES TRANSPORT:\n")
+    f.write("-" * 80 + "\n")
+    f.write(f"Diffusion horizontale D      : {D_horizontal}\n")
+    f.write("Conditions aux limites       : Open (Nord, Sud, Est, Ouest)\n\n")
+
+    f.write("TEMPS D'EXÉCUTION:\n")
+    f.write("-" * 80 + "\n")
+    f.write(
+        f"Simulation NO-TRANSPORT      : {t_no_transport:.1f} s ({t_no_transport / 60:.1f} min)\n"
+    )
+    f.write(f"Simulation TRANSPORT         : {t_transport:.1f} s ({t_transport / 60:.1f} min)\n")
+    f.write(f"Ratio Transport/No-Transport : {t_transport / t_no_transport:.2f}x\n\n")
+
+    f.write("RÉSULTATS:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Biomasse moyenne finale (g/m²):\n")
+    f.write(f"   NO-TRANSPORT              : {biomass_no_transport:.4f}\n")
+    f.write(f"   TRANSPORT                 : {biomass_transport:.4f}\n\n")
+
+    f.write("FICHIERS GÉNÉRÉS:\n")
+    f.write("-" * 80 + "\n")
+    f.write(f"- {OUTPUT_NO_TRANSPORT.name}\n")
+    f.write(f"- {OUTPUT_TRANSPORT.name}\n")
+    f.write(f"- {summary_filename} (ce fichier)\n\n")
+
+    f.write("PROCHAINE ÉTAPE:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Exécuter article_05f_comparison_pacific.py pour comparer ces résultats\n")
+    f.write("avec le modèle de référence Seapodym-LMTL.\n\n")
+
+    f.write("=" * 80 + "\n")
+
+print(f"✅ Résumé sauvegardé : {summary_path}")
+
+# Console summary
 print("\n" + "=" * 60)
 print("RÉSUMÉ - SIMULATIONS OPTIMISÉES")
 print("=" * 60)
 print(f"Période: {config.start_date} à {config.end_date}")
 print(f"Timestep: {config.timestep}")
-print(f"")
+print("")
 print(f"NO-TRANSPORT: {t_no_transport:.1f}s")
 print(f"TRANSPORT:    {t_transport:.1f}s")
 print("=" * 60)

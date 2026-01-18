@@ -135,7 +135,7 @@ ref_cut = ref.sel(time=slice(TIME_START, TIME_END))
 dag_trans_cut = dag_trans.sel(time=slice(TIME_START, TIME_END))
 dag_no_trans_cut = dag_no_trans.sel(time=slice(TIME_START, TIME_END))
 
-print(f"\nAprès sélection temporelle:")
+print("\nAprès sélection temporelle:")
 print(f"  Référence    : {len(ref_cut.time)} pas de temps")
 print(f"  Transport    : {len(dag_trans_cut.time)} pas de temps")
 print(f"  No-Transport : {len(dag_no_trans_cut.time)} pas de temps")
@@ -166,7 +166,7 @@ dag_no_trans_daily["time"] = dag_no_trans_daily.time.dt.floor("D")
 ref_aligned, dag_trans_aligned = xr.align(ref_cut, dag_trans_daily, join="inner")
 _, dag_no_trans_aligned = xr.align(ref_aligned, dag_no_trans_daily, join="inner")
 
-print(f"\nAprès alignement:")
+print("\nAprès alignement:")
 print(f"  Période alignée : {len(ref_aligned.time)} jours")
 print(f"  Grille alignée  : {len(ref_aligned.latitude)} x {len(ref_aligned.longitude)}")
 
@@ -282,18 +282,164 @@ plt.savefig(FIGURES_DIR / "fig_05e_pacific_timeseries_zones.png", dpi=150)
 plt.show()
 print("✅ Saved: fig_05e_pacific_timeseries_zones.png")
 
-# %% Résumé
+# %% Génération du Summary
+FIGURE_PREFIX = "fig_05f_comparison_pacific"
+summary_filename = f"{FIGURE_PREFIX.replace('fig_', 'notebook_')}_summary.txt"
+summary_path = SUMMARY_DIR / summary_filename
+
+# Calculs supplémentaires pour le résumé
+n_timesteps = len(ref_aligned.time)
+n_lat = len(ref_aligned.latitude)
+n_lon = len(ref_aligned.longitude)
+lat_min = ref_aligned.latitude.min().item()
+lat_max = ref_aligned.latitude.max().item()
+lon_min = ref_aligned.longitude.min().item()
+lon_max = ref_aligned.longitude.max().item()
+
+# Amélioration relative apportée par le transport
+rmse_improvement = (
+    (metrics_no_trans["RMSE"] - metrics_trans["RMSE"]) / metrics_no_trans["RMSE"]
+) * 100
+nrmse_improvement = (
+    (metrics_no_trans["NRMSE"] - metrics_trans["NRMSE"]) / metrics_no_trans["NRMSE"]
+) * 100
+mape_improvement = (
+    (metrics_no_trans["MAPE"] - metrics_trans["MAPE"]) / metrics_no_trans["MAPE"]
+) * 100
+
+# Biomasse moyenne
+ref_mean_biomass = ref_aligned.mean().item()
+trans_mean_biomass = dag_trans_aligned.mean().item()
+no_trans_mean_biomass = dag_no_trans_aligned.mean().item()
+
+with open(summary_path, "w") as f:
+    f.write("=" * 80 + "\n")
+    f.write("NOTEBOOK 05F: COMPARAISON SEAPOPYM DAG vs SEAPODYM-LMTL (PACIFIQUE)\n")
+    f.write("=" * 80 + "\n\n")
+
+    f.write("DATE: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
+
+    f.write("OBJECTIF:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Valider le modèle SeapoPym DAG (architecture Python) contre Seapodym-LMTL\n")
+    f.write("(modèle de référence C++/Fortran) sur une simulation réaliste du Pacifique.\n")
+    f.write("Quantifier l'impact du module de transport (advection + diffusion) sur\n")
+    f.write("la distribution de biomasse micronectonique.\n\n")
+
+    f.write("DONNÉES UTILISÉES:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Référence (Seapodym-LMTL)    : seapodym_lmtl_output_pacific_ref.zarr\n")
+    f.write("SeapoPym avec transport      : seapopym_pacific_transport_optimized.zarr\n")
+    f.write("SeapoPym sans transport      : seapopym_pacific_no_transport_optimized.zarr\n\n")
+
+    f.write("CONFIGURATION SPATIALE:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Région                       : Pacifique\n")
+    f.write(f"Grille                       : {n_lat} × {n_lon} points\n")
+    f.write(f"Latitude                     : [{lat_min:.1f}°, {lat_max:.1f}°]\n")
+    f.write(f"Longitude                    : [{lon_min:.1f}°, {lon_max:.1f}°]\n\n")
+
+    f.write("CONFIGURATION TEMPORELLE:\n")
+    f.write("-" * 80 + "\n")
+    f.write(f"Période d'analyse            : {TIME_START} à {TIME_END}\n")
+    f.write("Période de spin-up exclue    : 1998-1999 (2 ans)\n")
+    f.write(f"Nombre de pas de temps       : {n_timesteps} jours\n")
+    f.write("Résolution temporelle:\n")
+    f.write("  - Référence (Seapodym)     : journalier (1D)\n")
+    f.write("  - SeapoPym                 : 3-horaire → moyenné à journalier\n\n")
+
+    f.write("MÉTRIQUES DE VALIDATION:\n")
+    f.write("-" * 80 + "\n")
+    f.write("\n1. DAG TRANSPORT vs RÉFÉRENCE (Configuration cible):\n")
+    f.write(f"   RMSE                      : {metrics_trans['RMSE']:.4f} g/m²\n")
+    f.write(f"   NRMSE (normalisé par std) : {metrics_trans['NRMSE']:.4f}\n")
+    f.write(f"   MAPE (erreur relative)    : {metrics_trans['MAPE']:.2f}%\n\n")
+
+    f.write("2. DAG NO-TRANSPORT vs RÉFÉRENCE (Baseline sans transport):\n")
+    f.write(f"   RMSE                      : {metrics_no_trans['RMSE']:.4f} g/m²\n")
+    f.write(f"   NRMSE (normalisé par std) : {metrics_no_trans['NRMSE']:.4f}\n")
+    f.write(f"   MAPE (erreur relative)    : {metrics_no_trans['MAPE']:.2f}%\n\n")
+
+    f.write("IMPACT DU TRANSPORT:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Le module de transport améliore significativement les résultats:\n")
+    f.write(f"   Réduction RMSE            : {rmse_improvement:+.1f}%\n")
+    f.write(f"   Réduction NRMSE           : {nrmse_improvement:+.1f}%\n")
+    f.write(f"   Réduction MAPE            : {mape_improvement:+.1f}%\n\n")
+
+    f.write("INTERPRÉTATION:\n")
+    f.write("-" * 80 + "\n")
+    if rmse_improvement > 0:
+        f.write("✅ Le transport AMÉLIORE la correspondance avec le modèle de référence.\n")
+        f.write("   Le transport de biomasse (advection par courants + diffusion) capture\n")
+        f.write("   des processus physiques importants pour la distribution spatiale.\n\n")
+    else:
+        f.write(
+            "⚠️ Le transport ne semble pas améliorer les résultats dans cette configuration.\n\n"
+        )
+
+    f.write("STATISTIQUES DE BIOMASSE:\n")
+    f.write("-" * 80 + "\n")
+    f.write("Biomasse moyenne (g/m²):\n")
+    f.write(f"   Référence (Seapodym)      : {ref_mean_biomass:.4f}\n")
+    f.write(f"   DAG Transport             : {trans_mean_biomass:.4f}\n")
+    f.write(f"   DAG No-Transport          : {no_trans_mean_biomass:.4f}\n\n")
+
+    f.write("ANALYSE PAR ZONE LATITUDINALE:\n")
+    f.write("-" * 80 + "\n")
+    for zone_name, (lat_min_z, lat_max_z) in zones.items():
+        ref_zone = ref_aligned.sel(latitude=slice(lat_min_z, lat_max_z))
+        trans_zone = dag_trans_aligned.sel(latitude=slice(lat_min_z, lat_max_z))
+        no_trans_zone = dag_no_trans_aligned.sel(latitude=slice(lat_min_z, lat_max_z))
+
+        zone_metrics_trans = compute_metrics(ref_zone, trans_zone)
+        zone_metrics_no_trans = compute_metrics(ref_zone, no_trans_zone)
+
+        f.write(f"\n{zone_name}:\n")
+        f.write(
+            f"   Transport - RMSE={zone_metrics_trans['RMSE']:.2f}, NRMSE={zone_metrics_trans['NRMSE']:.2f}\n"
+        )
+        f.write(
+            f"   No-Trans  - RMSE={zone_metrics_no_trans['RMSE']:.2f}, NRMSE={zone_metrics_no_trans['NRMSE']:.2f}\n"
+        )
+
+    f.write("\n\nFICHIERS GÉNÉRÉS:\n")
+    f.write("-" * 80 + "\n")
+    f.write("- fig_05e_spatial_rmse.png          : Cartes RMSE spatiales\n")
+    f.write("- fig_05e_pacific_timeseries_zones.png : Séries temporelles par zone\n")
+    f.write(f"- {summary_filename}  : Ce fichier résumé\n\n")
+
+    f.write("CONCLUSION:\n")
+    f.write("-" * 80 + "\n")
+    if metrics_trans["NRMSE"] < 0.5:
+        f.write("✅ VALIDATION RÉUSSIE\n")
+        f.write("   Le modèle SeapoPym DAG avec transport reproduit avec précision\n")
+        f.write(
+            f"   les sorties du modèle Seapodym-LMTL (NRMSE = {metrics_trans['NRMSE']:.2f} < 0.5).\n"
+        )
+        f.write("   L'architecture Python DAG est validée pour des simulations réalistes.\n")
+    else:
+        f.write("⚠️ VALIDATION PARTIELLE\n")
+        f.write(f"   NRMSE = {metrics_trans['NRMSE']:.2f} (seuil = 0.5)\n")
+        f.write("   Des écarts significatifs existent, analyse supplémentaire requise.\n")
+
+    f.write("\n" + "=" * 80 + "\n")
+
+print(f"✅ Résumé sauvegardé : {summary_path}")
+
+# %% Affichage console
 print("\n" + "=" * 70)
 print("RÉSUMÉ")
 print("=" * 70)
 print(f"Période d'analyse : {TIME_START} à {TIME_END}")
-print(f"Grille : {len(ref_aligned.latitude)} x {len(ref_aligned.longitude)}")
-print(f"\nDAG Transport vs Référence:")
+print(f"Grille : {n_lat} x {n_lon}")
+print("\nDAG Transport vs Référence:")
 print(f"  RMSE  : {metrics_trans['RMSE']:.2f}")
 print(f"  NRMSE : {metrics_trans['NRMSE']:.2f}")
 print(f"  MAPE  : {metrics_trans['MAPE']:.2f} %")
-print(f"\nDAG No-Transport vs Référence:")
+print("\nDAG No-Transport vs Référence:")
 print(f"  RMSE  : {metrics_no_trans['RMSE']:.2f}")
 print(f"  NRMSE : {metrics_no_trans['NRMSE']:.2f}")
 print(f"  MAPE  : {metrics_no_trans['MAPE']:.2f} %")
+print(f"\nImpact Transport: RMSE {rmse_improvement:+.1f}%, NRMSE {nrmse_improvement:+.1f}%")
 print("=" * 70)
