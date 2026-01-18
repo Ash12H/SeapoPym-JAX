@@ -212,7 +212,7 @@ L'architecture DAG a une complexité **linéaire** en fonction de la taille du p
 
 L'analyse de la répartition du temps de calcul par type de tâche révèle les processus dominants du modèle (voir Figure 4B).
 
-![Figure 4B : Décomposition du temps de calcul](../../data/article/figures/fig_04b_bis_time_decomposition_optimized_by_group.png)
+![Figure 4B : Décomposition du temps de calcul](../../data/article/figures/fig_04b_bis_time_decomposition_optimized_by_function.png)
 
 **Configuration** : Grille 500×500, 10 cohortes, 20 pas de temps, profilage par décorateur.
 
