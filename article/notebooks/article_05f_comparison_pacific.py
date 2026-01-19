@@ -22,10 +22,11 @@ import pandas as pd
 import xarray as xr
 
 # %% Configuration des chemins
-BASE_DIR = Path("/Users/adm-lehodey/Documents/Workspace/Projects/seapopym-message/data/article")
-DATA_DIR = BASE_DIR / "data"
-FIGURES_DIR = BASE_DIR / "figures"
-SUMMARY_DIR = BASE_DIR / "summary"
+# %% Configuration des chemins
+BASE_DIR = Path(__file__).parent if "__file__" in globals() else Path.cwd()
+DATA_DIR = BASE_DIR.parent / "data"
+FIGURES_DIR = BASE_DIR.parent / "figures"
+SUMMARY_DIR = BASE_DIR.parent / "summary"
 FIGURES_DIR.mkdir(exist_ok=True)
 SUMMARY_DIR.mkdir(exist_ok=True)
 
@@ -170,6 +171,27 @@ print("\nAprès alignement:")
 print(f"  Période alignée : {len(ref_aligned.time)} jours")
 print(f"  Grille alignée  : {len(ref_aligned.latitude)} x {len(ref_aligned.longitude)}")
 
+# %% Application du masque terre/mer
+print("\n📊 APPLICATION DU MASQUE TERRE/MER")
+print("-" * 70)
+
+# La référence utilise NaN pour la terre, les modèles DAG utilisent 0
+# On applique le masque de la référence aux modèles DAG pour une comparaison équitable
+# Le masque est 2D (latitude, longitude) - on prend le premier pas de temps
+mask_ocean = ~np.isnan(ref_aligned.isel(time=0))
+
+# Appliquer le masque: mettre NaN là où la référence a des NaN
+dag_trans_aligned = dag_trans_aligned.where(mask_ocean)
+dag_no_trans_aligned = dag_no_trans_aligned.where(mask_ocean)
+
+# Statistiques du masque
+n_total = mask_ocean.sizes["latitude"] * mask_ocean.sizes["longitude"]
+n_ocean = mask_ocean.sum().item()
+pct_ocean = (n_ocean / n_total) * 100
+
+print(f"Points océan : {n_ocean} / {n_total} ({pct_ocean:.1f}%)")
+print("✅ Masque appliqué aux modèles DAG")
+
 # %% Métriques de validation
 print("\n" + "=" * 70)
 print("MÉTRIQUES DE VALIDATION")
@@ -253,7 +275,7 @@ zones = {
 
 fig, axes = plt.subplots(3, 1, figsize=(14, 12))
 
-for ax, (zone_name, (lat_min, lat_max)) in zip(axes, zones.items()):
+for ax, (zone_name, (lat_min, lat_max)) in zip(axes, zones.items(), strict=False):
     # Sélection de la zone latitudinale avec slice explicite
     ref_zone = ref_aligned.sel(latitude=slice(lat_min, lat_max))
     trans_zone = dag_trans_aligned.sel(latitude=slice(lat_min, lat_max))

@@ -57,7 +57,7 @@ RESAMPLE_FREQ = "1W"  # 1 semaine (weekly average)
 
 # --- Paramètres de visualisation ---
 VMIN_LOG = -2  # log10(biomasse) minimum (0.01 g/m²)
-VMAX_LOG = 1   # log10(biomasse) maximum (10 g/m²)
+VMAX_LOG = 1  # log10(biomasse) maximum (10 g/m²)
 CMAP = "viridis"
 LAND_COLOR = "#DDDDDD"
 OCEAN_COLOR = "#F0F0F0"
@@ -103,7 +103,7 @@ if not FILE_NO_TRANS.exists():
     missing.append(str(FILE_NO_TRANS))
 
 if missing:
-    print(f"\n❌ Fichiers manquants:")
+    print("\n❌ Fichiers manquants:")
     for f in missing:
         print(f"   - {f}")
     print("\nVeuillez d'abord exécuter:")
@@ -195,9 +195,11 @@ print("\n✅ Configuration matplotlib et cartopy")
 print("\n🌏 CONVERSION DES LONGITUDES POUR CENTRAGE PACIFIQUE")
 print("-" * 80)
 
+
 def convert_lon_to_pacific(lon):
     """Convertit les longitudes [-180, 180] en [0, 360] pour centrer sur le Pacifique."""
     return np.where(lon < 0, lon + 360, lon)
+
 
 # Convertir les coordonnées
 ref_aligned["longitude"] = convert_lon_to_pacific(ref_aligned.longitude)
@@ -209,8 +211,12 @@ ref_aligned = ref_aligned.sortby("longitude")
 dag_trans_aligned = dag_trans_aligned.sortby("longitude")
 dag_no_trans_aligned = dag_no_trans_aligned.sortby("longitude")
 
-print(f"Longitude range : [{ref_aligned.longitude.min().values:.1f}, {ref_aligned.longitude.max().values:.1f}]")
-print(f"Latitude range  : [{ref_aligned.latitude.min().values:.1f}, {ref_aligned.latitude.max().values:.1f}]")
+print(
+    f"Longitude range : [{ref_aligned.longitude.min().values:.1f}, {ref_aligned.longitude.max().values:.1f}]"
+)
+print(
+    f"Latitude range  : [{ref_aligned.latitude.min().values:.1f}, {ref_aligned.latitude.max().values:.1f}]"
+)
 
 # %% Création de l'animation
 print("\n🎬 CRÉATION DE L'ANIMATION")
@@ -218,9 +224,10 @@ print("-" * 80)
 
 # Créer la figure avec projection centrée sur le Pacifique
 fig, axes = plt.subplots(
-    1, 3,
+    1,
+    3,
     figsize=(FIGURE_WIDTH, FIGURE_HEIGHT),
-    subplot_kw={"projection": ccrs.PlateCarree(central_longitude=180)}
+    subplot_kw={"projection": ccrs.PlateCarree(central_longitude=180)},
 )
 
 # Limites géographiques
@@ -238,12 +245,7 @@ for idx, ax in enumerate(axes):
 
     # Gridlines
     gl = ax.gridlines(
-        draw_labels=True,
-        linewidth=0.5,
-        color="gray",
-        alpha=0.5,
-        linestyle="--",
-        zorder=3
+        draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--", zorder=3
     )
     gl.top_labels = False
     gl.right_labels = False
@@ -251,11 +253,7 @@ for idx, ax in enumerate(axes):
         gl.left_labels = False
 
 # Titres des panneaux
-titles = [
-    "SEAPODYM-LMTL (Reference)",
-    "SeapoPym with Transport",
-    "SeapoPym without Transport"
-]
+titles = ["SEAPODYM-LMTL (Reference)", "SeapoPym with Transport", "SeapoPym without Transport"]
 
 for ax, title in zip(axes, titles, strict=True):
     ax.set_title(title, fontsize=11, fontweight="bold")
@@ -272,28 +270,17 @@ for ax in axes:
         vmin=VMIN_LOG,
         vmax=VMAX_LOG,
         shading="auto",
-        zorder=0
+        zorder=0,
     )
     meshes.append(mesh)
 
 # Créer la colorbar une seule fois
-cbar = fig.colorbar(
-    meshes[0],
-    ax=axes,
-    orientation="horizontal",
-    pad=0.05,
-    aspect=40,
-    shrink=0.8
-)
+cbar = fig.colorbar(meshes[0], ax=axes, orientation="horizontal", pad=0.05, aspect=40, shrink=0.8)
 cbar.set_label(r"$\log_{10}$(Biomass) [g/m²]", fontsize=10)
 
 # Titre global (sera mis à jour)
-title_text = fig.suptitle(
-    "",
-    fontsize=13,
-    fontweight="bold",
-    y=0.98
-)
+title_text = fig.suptitle("", fontsize=13, fontweight="bold", y=0.98)
+
 
 # Fonction d'initialisation
 def init():
@@ -302,6 +289,7 @@ def init():
         mesh.set_array(np.zeros((len(lats), len(lons))).ravel())
     title_text.set_text("Initializing...")
     return meshes + [title_text]
+
 
 # Fonction de mise à jour
 def update(frame_idx):
@@ -319,6 +307,10 @@ def update(frame_idx):
     trans_log = np.log10(trans_frame.where(trans_frame > 0))
     no_trans_log = np.log10(no_trans_frame.where(no_trans_frame > 0))
 
+    ref_log = ref_frame.where(ref_frame > 0)
+    trans_log = trans_frame.where(trans_frame > 0)
+    no_trans_log = no_trans_frame.where(no_trans_frame > 0)
+
     # Mettre à jour les données des meshes
     datasets = [ref_log, trans_log, no_trans_log]
     for mesh, data in zip(meshes, datasets, strict=True):
@@ -329,6 +321,7 @@ def update(frame_idx):
 
     return meshes + [title_text]
 
+
 # Créer l'animation
 print(f"Génération de {n_frames} frames...")
 anim = FuncAnimation(
@@ -337,7 +330,7 @@ anim = FuncAnimation(
     init_func=init,
     frames=tqdm(range(n_frames), desc="Rendering frames"),
     blit=True,
-    repeat=True
+    repeat=True,
 )
 
 # Sauvegarder en GIF

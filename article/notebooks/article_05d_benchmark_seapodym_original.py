@@ -8,9 +8,15 @@ import subprocess
 import time
 from pathlib import Path
 
+import pandas as pd
+
 # Configuration
+# Configuration
+BASE_DIR = Path(__file__).parent if "__file__" in globals() else Path.cwd()
+DATA_DIR = BASE_DIR.parent / "data"
+
 SEAPODYM_BIN = "/Users/adm-lehodey/Documents/Workspace/Projects/seapodym-project/seapodym-lmtl/build/bin/seapodym-lmtl"
-CONFIG_XML = "/Users/adm-lehodey/Documents/Workspace/Projects/seapopym-message/data/article/data/LMTL_Pacific_Run/pacific_run.xml"
+CONFIG_XML = DATA_DIR / "LMTL_Pacific_Run" / "pacific_run.xml"
 GROUP = "D1N1"  # Functional group to run
 N_PROCS = 1
 
@@ -48,7 +54,7 @@ def run_seapodym(mode: str, description: str) -> float:
         GROUP,
         "-V",
         "error",
-        CONFIG_XML,
+        str(CONFIG_XML),
     ]
 
     print(f"\n--- {description} ---")
@@ -83,8 +89,6 @@ if t_biomass > 0:
     timings["biomass"] = t_biomass
 
 # Résumé et génération du Summary
-import pandas as pd
-
 SUMMARY_DIR = (
     Path(__file__).parent.parent / "summary"
     if "__file__" in globals()

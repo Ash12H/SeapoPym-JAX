@@ -14,12 +14,17 @@
 # %%
 
 
+from pathlib import Path
+
 import xarray as xr
 
 # Chemins
-SOURCE_DIR = "/Users/adm-lehodey/Documents/Workspace/Projects/seapopym-message/data/article/data/LMTL_Pacific_Run/output/"
+BASE_DIR = Path(__file__).parent if "__file__" in globals() else Path.cwd()
+DATA_DIR = BASE_DIR.parent / "data"
+
+SOURCE_DIR = DATA_DIR / "LMTL_Pacific_Run" / "output"
 PATTERN = "ZPK_D1N1_biomass_*.nc"
-OUTPUT_ZARR = "/Users/adm-lehodey/Documents/Workspace/Projects/seapopym-message/data/article/data/LMTL_Pacific_Run/seapodym_lmtl_output_pacific_ref.zarr"
+OUTPUT_ZARR = DATA_DIR / "seapodym_lmtl_output_pacific_ref.zarr"
 
 
 # ## 1. Chargement (Lazy Loading)

@@ -14,6 +14,7 @@
 
 
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -21,11 +22,14 @@ import pandas as pd
 import xarray as xr
 
 # Chemins
-INPUT_ZARR = "/Users/adm-lehodey/Documents/Workspace/Projects/seapopym-message/data/article/data/seapodym_lmtl_forcings_pacific.zarr"
-EXPORT_DIR = "/Users/adm-lehodey/Documents/Workspace/Projects/seapopym-message/data/article/data/LMTL_Pacific_Run/"
+# Chemins
+BASE_DIR = Path(__file__).parent if "__file__" in globals() else Path.cwd()
+DATA_DIR = BASE_DIR.parent / "data"
+INPUT_ZARR = DATA_DIR / "seapodym_lmtl_forcings_pacific.zarr"
+EXPORT_DIR = DATA_DIR / "LMTL_Pacific_Run"
 
 # Création structure dossiers
-(Path(EXPORT_DIR) / "data").mkdir(parents=True, exist_ok=True)
+(EXPORT_DIR / "data").mkdir(parents=True, exist_ok=True)
 
 print(f"Source : {INPUT_ZARR}")
 print(f"Cible  : {EXPORT_DIR}")
@@ -48,7 +52,6 @@ for v in req_vars:
 print("Variables présentes.")
 print(f"Période : {ds.time.values[0]} -> {ds.time.values[-1]}")
 print(f"Grille : {len(ds.latitude)} lat x {len(ds.longitude)} lon")
-ds
 
 
 # ## 2. Génération du Masque (`mask.nc`)
@@ -86,9 +89,6 @@ print(f"Pourcentage Océan : {float(ocean_pct):.2f}%")
 #
 
 # %%
-
-
-import sys
 
 # Préparation du Dataset à exporter
 # On s'assure des attributs standard_name pour Seapodym

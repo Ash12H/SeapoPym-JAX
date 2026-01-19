@@ -25,7 +25,7 @@ repos:
           - numpy
           - types-networkx
         args: [--config-file=pyproject.toml]
-        exclude: ^(tests/|notebooks/|examples/|data/)
+        files: ^seapopym/
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -50,7 +50,7 @@ repos:
     hooks:
       - id: pydocstyle
         args: [--convention=google, --add-ignore=D202]
-        exclude: ^(tests/|notebooks/|data/)
+        exclude: ^(tests/|notebooks/|data/|article/)
         additional_dependencies: [tomli]
 
   # Jupyter notebook cleaning

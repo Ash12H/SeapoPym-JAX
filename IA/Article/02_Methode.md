@@ -33,8 +33,8 @@ Cette formulation unifie conceptuellement la physique et la biologie : pour le c
 
 Le domaine spatial est discrétisé par la méthode des Volumes Finis, assurant la conservation stricte de la masse.
 
--   **Advection** : Calculée via un schéma **Upwind** du premier ordre pour garantir la positivité et la stabilité (sous condition CFL).
--   **Diffusion** : Calculée via un schéma centré classique aux interfaces, représentant la dispersion turbulente sous-maille.
+- **Advection** : Calculée via un schéma **Upwind** du premier ordre pour garantir la positivité et la stabilité (sous condition CFL).
+- **Diffusion** : Calculée via un schéma centré classique aux interfaces, représentant la dispersion turbulente sous-maille.
 
 Le pas de temps est contraint par la condition de Courant-Friedrichs-Lewy (CFL) pour garantir la stabilité numérique :
 $$ \mathrm{CFL} = \frac{|\mathbf{v}| \cdot \Delta t}{\Delta x} < 1 $$
@@ -73,8 +73,4 @@ Algorithm: SEAPOPYM Simulation Lifecycle
 
 L'architecture est implémentée entièrement en Python, profitant de la richesse de son écosystème scientifique pour concilier lisibilité et performance :
 
--   **Calcul Numérique** : La majorité des opérateurs biologiques (ex: mortalité, croissance) reposent sur la vectorisation native de **`numpy`**, suffisante pour les opérations locales matricielles. L'accélération "Just-In-Time" via **`numba`** est réservée aux noyaux itératifs critiques ne pouvant être vectorisés efficacement, comme les schémas de transport flux-limiter.
--   **Orchestration Hybride et Parallélisme** : Le Contrôleur exploite la structure du DAG via le backend **`Dask`** selon une stratégie hybride :
-    1.  **Task Parallelism** : Exécution simultanée des tâches hétérogènes indépendantes (ex: advection et mortalité) pour maximiser l'occupation CPU.
-    2.  **Data Parallelism** : Pour les tâches coûteuses et homogènes (ex: transport de production), le calcul est divisé en sous-tâches indépendantes selon la dimension `cohort`. Ce "chunking" permet de paralléliser la boucle dominante du modèle, dépassant les limites théoriques (loi d'Amdahl) imposées par une approche purement basée sur les tâches.
-    Le backend supporte deux modes : le **ThreadPoolScheduler** (mémoire partagée, utilisé ici) et le **Distributed Client** (clusters multi-nœuds).
+- **Calcul Numérique** : La majorité des opérateurs biologiques (ex: mortalité, croissance) reposent sur la vectorisation native de **`numpy`**, suffisante pour les opérations locales matricielles. L'accélération "Just-In-Time" via **`numba`** est réservée aux noyaux itératifs critiques ne pouvant être vectorisés efficacement, comme les schémas de transport.

@@ -18,12 +18,15 @@
 
 
 import os
+from pathlib import Path
 
 import xarray as xr
 
 ZARR_SOURCE = "/Users/adm-lehodey/Documents/Workspace/Projects/phd_optimization/notebooks/Article_1/data/1_global/post_processed_light_global_multiyear_bgc_001_033.zarr"
-OUTPUT_DIR = "../data"
-OUTPUT_ZARR = os.path.join(OUTPUT_DIR, "seapodym_lmtl_forcings_pacific.zarr")
+
+BASE_DIR = Path(__file__).parent if "__file__" in globals() else Path.cwd()
+OUTPUT_DIR = BASE_DIR.parent / "data"
+OUTPUT_ZARR = OUTPUT_DIR / "seapodym_lmtl_forcings_pacific.zarr"
 
 print(f"Source : {ZARR_SOURCE}")
 print(f"Cible  : {OUTPUT_ZARR}")
@@ -42,7 +45,7 @@ ds = ds.rename({"T": "time", "Z": "depth", "Y": "latitude", "X": "longitude"})
 
 # Conversion Longitude -180/180 -> 0/360
 # On utilise assign_coords puis sortby pour réorganiser la grille
-ds = ds.assign_coords(longitude=(ds.longitude % 360)).sortby("longitude")
+ds = ds.assign_coords(longitude=(ds.longitude % 360)).sortby(["longitude", "latitude"])
 
 print("Longitudes converties (0-360) et triées.")
 print(f"Lon range: {ds.longitude.min().values:.1f} -> {ds.longitude.max().values:.1f}")
@@ -74,10 +77,6 @@ print(f"Time steps: {len(ds_subset.time)}")
 
 
 # %%
-
-
-ds_subset
-
 
 # ## 3. Préparation Finale
 #
@@ -118,11 +117,8 @@ ds_final.time.attrs = {}
 
 ds_final = ds_final.assign_coords({"time": ds_final.time.dt.floor("D")})
 
-ds_final
-
 
 # %%
-
 
 # Répertoire de sortie
 os.makedirs(os.path.dirname(OUTPUT_ZARR), exist_ok=True)

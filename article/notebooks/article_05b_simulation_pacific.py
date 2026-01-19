@@ -9,11 +9,13 @@ Cette version est ~2-3x plus rapide que la version originale.
 
 # %%
 import logging
+import time
 from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pint
 import xarray as xr
 
@@ -67,14 +69,15 @@ ds = xr.open_zarr(INPUT_ZARR).load()
 print(f"Forçages chargés : {ds.dims}")
 
 # Paramètres LMTL
+# Paramètres LMTL
 lmtl_params = LMTLParams(
-    day_layer=0,
-    night_layer=0,
+    day_layer=ureg.Quantity(0, ureg.dimensionless),
+    night_layer=ureg.Quantity(0, ureg.dimensionless),
     tau_r_0=10.38 * ureg.days,
     gamma_tau_r=ureg.Quantity(0.11, ureg.degC**-1),
     lambda_0=ureg.Quantity(1 / 150, ureg.day**-1),
     gamma_lambda=ureg.Quantity(0.15, ureg.degC**-1),
-    E=0.1668,
+    E=ureg.Quantity(0.1668, ureg.dimensionless),
     T_ref=ureg.Quantity(0, ureg.degC),
 )
 
@@ -132,10 +135,10 @@ ocean_mask.attrs["units"] = "dimensionless"
 ds["ocean_mask"] = ocean_mask
 
 # Boundary conditions
-ds["boundary_north"] = BoundaryType.CLOSED
-ds["boundary_south"] = BoundaryType.CLOSED
-ds["boundary_east"] = BoundaryType.CLOSED
-ds["boundary_west"] = BoundaryType.CLOSED
+ds["boundary_north"] = xr.DataArray(BoundaryType.CLOSED, attrs={"units": "dimensionless"})
+ds["boundary_south"] = xr.DataArray(BoundaryType.CLOSED, attrs={"units": "dimensionless"})
+ds["boundary_east"] = xr.DataArray(BoundaryType.CLOSED, attrs={"units": "dimensionless"})
+ds["boundary_west"] = xr.DataArray(BoundaryType.CLOSED, attrs={"units": "dimensionless"})
 
 ds["dt"] = None  # Will be set later
 
@@ -508,8 +511,6 @@ zooplankton_params_no_transport = asdict(lmtl_params)
 
 # Run No-Transport
 print("\n--- Démarrage Simulation NO-TRANSPORT ---")
-import time
-
 t0 = time.perf_counter()
 
 ctrl_no = SimulationController(config)
@@ -568,19 +569,17 @@ summary_filename = f"{FIGURE_PREFIX.replace('fig_', 'notebook_')}_summary.txt"
 summary_path = SUMMARY_DIR / summary_filename
 
 # Informations de la simulation
-n_timesteps = len(ds.time)
-n_lat = len(ds.latitude)
-n_lon = len(ds.longitude)
-lat_min = ds.latitude.min().item()
-lat_max = ds.latitude.max().item()
-lon_min = ds.longitude.min().item()
-lon_max = ds.longitude.max().item()
+n_timesteps = len(ds[Coordinates.T.value])
+n_lat = len(ds[Coordinates.Y.value])
+n_lon = len(ds[Coordinates.X.value])
+lat_min = ds[Coordinates.Y.value].min().item()
+lat_max = ds[Coordinates.Y.value].max().item()
+lon_min = ds[Coordinates.X.value].min().item()
+lon_max = ds[Coordinates.X.value].max().item()
 
 # Biomasse finale
 biomass_no_transport = ctrl_no.results["Zooplankton/biomass"].isel(time=-1).mean().item()
 biomass_transport = ctrl_tr.results["Zooplankton/biomass"].isel(time=-1).mean().item()
-
-import pandas as pd
 
 with open(summary_path, "w") as f:
     f.write("=" * 80 + "\n")

@@ -619,7 +619,7 @@ ax.legend(loc="best")
 ax.grid(True, which="both", alpha=0.3)
 
 # Annotations
-for i, r in enumerate(results):
+for r in results:
     ax.annotate(
         f"{r['grid_size'][0]}×{r['grid_size'][1]}",
         (r["n_cells"], r["time_per_step"] * 1000),

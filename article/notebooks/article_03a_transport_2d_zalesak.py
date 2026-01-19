@@ -90,7 +90,7 @@ omega = 2 * np.pi / ROTATION_PERIOD
 print("=" * 80)
 print("CONFIGURATION - TEST DE ZALESAK (1979) - SLOTTED DISK")
 print("=" * 80)
-print(f"Domaine                     : [0, 1] × [0, 1] (unitaire)")
+print("Domaine                     : [0, 1] × [0, 1] (unitaire)")
 print(f"Résolutions testées         : {GRID_RESOLUTIONS}")
 print(f"Centre du disque            : ({DISK_CENTER_X}, {DISK_CENTER_Y})")
 print(f"Rayon du disque             : {DISK_RADIUS}")
@@ -177,7 +177,7 @@ def create_slotted_disk(
     slot_bottom = disk_center_y - slot_height
     slot_top = disk_center_y  # La fente commence au centre et descend
 
-    slot = (X >= slot_left) & (X <= slot_right) & (Y >= slot_bottom) & (Y <= slot_top)
+    slot = (slot_left <= X) & (slot_right >= X) & (slot_bottom <= Y) & (slot_top >= Y)
 
     # Disque moins la fente
     slotted_disk = np.where(disk & ~slot, value, 0.0)
@@ -395,7 +395,7 @@ for i, res in enumerate(display_results):
 
 fig.colorbar(im, ax=axes, shrink=0.6, label="Concentration")
 plt.suptitle(
-    f"Test de Zalesak (1979) - Slotted Disk Rotation",
+    "Test de Zalesak (1979) - Slotted Disk Rotation",
     fontsize=12,
     fontweight="bold",
 )
@@ -552,7 +552,7 @@ with open(summary_path, "w") as f:
 
     f.write("CONFIGURATION (Zalesak 1979):\n")
     f.write("-" * 80 + "\n")
-    f.write(f"Domaine                      : [0, 1] × [0, 1] (normalisé)\n")
+    f.write("Domaine                      : [0, 1] × [0, 1] (normalisé)\n")
     f.write(f"Résolutions testées          : {GRID_RESOLUTIONS}\n")
     f.write(f"Centre du disque             : ({DISK_CENTER_X}, {DISK_CENTER_Y})\n")
     f.write(f"Rayon du disque              : {DISK_RADIUS}\n")
@@ -576,7 +576,7 @@ with open(summary_path, "w") as f:
     f.write("ANALYSE DE CONVERGENCE:\n")
     f.write("-" * 80 + "\n")
     f.write(f"Ordre de convergence mesuré  : {slope:.2f}\n")
-    f.write(f"Ordre théorique (Upwind)     : ~1.0\n")
+    f.write("Ordre théorique (Upwind)     : ~1.0\n")
     f.write(f"R² de l'ajustement           : {r_squared:.4f}\n\n")
 
     f.write("INTERPRÉTATION:\n")
