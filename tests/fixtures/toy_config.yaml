@@ -1,0 +1,21 @@
+# Toy config for testing Blueprint system
+# As per SPEC_01 Section 5
+
+model: "./toy_model.yaml"
+
+parameters:
+  growth_rate:
+    value: 0.1
+    trainable: false
+
+forcings:
+  temperature: "/data/sst.nc"
+  mask: "/data/mask.nc"
+
+initial_state:
+  biomass: "/data/biomass_init.nc"
+
+execution:
+  time_range: ["2020-01-01", "2020-01-31"]
+  dt: "1d"
+  output_path: "/results/toy_run/"
