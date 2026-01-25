@@ -230,6 +230,8 @@ Le design est **mûr pour passer en phase d'implémentation** à condition de :
 
 Une fois ces clarifications apportées, l'architecture est solide et les interfaces entre axes sont bien définies.
 
+---
+
 # Réponse utilisateur
 
 ## T1
@@ -286,3 +288,212 @@ Si une fonciton n'existe pas on retourne une erreur.
 Oui on valide effectivement les signatures des fonctions.
 Tout cela intervient lors de la création du graphe.
 J'imagine : 1. on reçoit la définition (YAML, JSON, python dict ...) du blueprint; 2. on construit le graphe (ce que j'appelle compilation) et donc on vérifie que l'ensemble est fonctionnel (nom de fonction, dimension des données et IN/OUT, unité, nommage, etc...); 3. On valide (retourne le graphe) ou informe si invalide; 4. On reçoit les données (param, forçages et états initiaux, meta-paramètres, etc...); 5. On valide les données par rapport au graphe (unité, dims, NAN ? présence de tous les objets, etc...); 6. On retourne l'objet prêt pour l'exécution.
+
+---
+
+# Commentaires de suivi (Claude)
+
+Tes réponses clarifient significativement l'architecture. Voici mon analyse point par point et quelques questions résiduelles.
+
+## Tensions Critiques : Statut
+
+### T1. Chunking vs Auto-Diff → **CLARIFIÉ**
+
+Ta vision modulaire est cohérente :
+
+- Un seul chunk = toute la simulation → mode compatible gradient
+- Chunked avec I/O → mode streaming haute performance
+- Le graphe reste identique, seul le Runner change
+
+**Question résiduelle** : Comment l'utilisateur spécifie-t-il le mode ?
+
+- Option A : Paramètre explicite `execution.mode: "gradient" | "streaming"`
+- Option B : Inférence automatique (si `trainable: true` existe → mode gradient)
+- Option C : API distincte (`model.run()` vs `model.optimize()`)
+
+Je recommande **Option C** pour la clarté, avec possibilité de forcer via config.
+
+---
+
+### T2. Dual Backend → **CLARIFIÉ**
+
+Compris : les fonctions sont écrites en **vectorisé natif** (compatible NumPy/JAX via broadcasting), avec `core_dims` explicites pour les opérations qui nécessitent des axes spécifiques.
+
+**Syntaxe proposée pour le décorateur** :
+
+```python
+@functional(
+    name="biol:aging",
+    backend="jax",           # ou "numpy", "any"
+    core_dims={"state": ["cohort"]},  # dims requises par input
+    out_dims=["cohort"]      # dims de sortie
+)
+def aging(state, dt):
+    return jnp.roll(state, shift=1, axis=-1)  # cohort = dernier axe
+```
+
+Est-ce aligné avec ta vision ?
+
+---
+
+### T3. Layout Canonique → **CLARIFIÉ**
+
+Ta proposition est solide :
+
+1. Standard de nommage : `T, Z, Y, X, C` (+ `E` pour ensemble ?)
+2. Chaque fonction déclare ses entrées/sorties attendues
+3. Le Compilateur transpose si nécessaire
+4. Renommage à la volée via mapping utilisateur
+
+**Proposition de formalisation** :
+
+```python
+CANONICAL_DIMS = {
+    "T": "time",
+    "E": "ensemble",
+    "C": "cohort",
+    "Z": "depth",
+    "Y": "latitude",
+    "X": "longitude"
+}
+```
+
+---
+
+## Zones d'Ombre : Statut
+
+### Z1. Masques → **PARTIELLEMENT CLARIFIÉ**
+
+Tu confirmes que le masque est appliqué en amont et que les fonctions sensibles doivent l'utiliser.
+
+**Question résiduelle** : Comment garantir qu'une fonction utilise le masque quand nécessaire ?
+
+- Option A : Convention documentée (responsabilité du développeur)
+- Option B : Le masque est injecté automatiquement comme argument obligatoire
+- Option C : Wrapper automatique `masked(fn)` qui applique le masque en sortie
+
+Je pense que **Option A** est suffisante pour V1, avec lint/tests pour vérifier.
+
+---
+
+### Z2. Registre bi-backend → **CLARIFIÉ**
+
+Formulation explicite avec version dans le décorateur. Exemple attendu :
+
+```python
+@functional(name="biol:growth", backend="jax")
+def growth_jax(biomass, rate): ...
+
+@functional(name="biol:growth", backend="numpy")
+def growth_numpy(biomass, rate): ...
+```
+
+Le Runner sélectionne la bonne version selon le backend actif. OK ?
+
+---
+
+### Z3. Grid vs Pointwise → **CLARIFIÉ**
+
+`@functional(core_dims=['X','Y'])` identifie les kernels stencil.
+Pas de sharding sur ces dimensions en V1. Clair.
+
+---
+
+### Z4. Dimensions dynamiques → **CLARIFIÉ**
+
+Offline uniquement. Le Chunked Runner gère les séries longues. Pas de streaming temps réel.
+
+---
+
+### Z5. Checkpointing → **CLARIFIÉ**
+
+Configurable, défaut = toute la dimension time, heuristique VRAM en V2.
+
+---
+
+### Z6. GIL → **VÉRIFIÉ**
+
+J'ai consulté la documentation JAX. Confirmation :
+
+> "The Python GIL would ordinarily pose a significant obstacle here, but to work around this, the paradigm of **Asynchronous Dispatch** adopted by JAX makes this orchestration easy to accomplish."
+> — [JAX Training Cookbook](https://github.com/jax-ml/jax/blob/main/docs/the-training-cookbook.md)
+
+**Conclusion** : JAX libère effectivement le GIL pendant l'exécution XLA. L'I/O asynchrone via `threading` fonctionnera comme prévu.
+
+---
+
+### Z7. Validation → **CLARIFIÉ**
+
+Ton pipeline en 6 étapes est clair et complet :
+
+1. Réception définition Blueprint
+2. Construction/Validation du graphe (fonctions, dims, unités)
+3. Retour graphe valide ou erreur explicite
+4. Réception des données
+5. Validation données vs graphe
+6. Retour objet exécutable
+
+---
+
+## Questions Nouvelles
+
+### Q8. Gestion des erreurs à l'exécution
+
+Que se passe-t-il si une erreur survient pendant l'exécution (ex: overflow numérique dans un kernel) ?
+
+- Le Runner s'arrête-t-il immédiatement ?
+- Y a-t-il un mécanisme de sauvegarde d'état intermédiaire (pour reprise) ?
+
+### Q9. Reproductibilité
+
+JAX a des subtilités avec la reproductibilité (ordre des opérations sur GPU).
+
+- Faut-il imposer un seed explicite dans la config ?
+- Documenter les limites de reproductibilité cross-device ?
+
+### Q10. Tests unitaires des fonctions
+
+Comment tester une fonction `@functional` de manière isolée ?
+
+- Injecter des données mock directement ?
+- Utiliser un mini-Runner de test ?
+
+---
+
+## Synthèse Actualisée
+
+| Item                     | Statut Initial | Statut Actuel                                   |
+| ------------------------ | -------------- | ----------------------------------------------- |
+| T1. Chunking vs Gradient | Bloquant       | **Clarifié** - Modularité Runner                |
+| T2. Dual Backend         | Bloquant       | **Clarifié** - Vectorisé natif + core_dims      |
+| T3. Layout Canonique     | Bloquant       | **Clarifié** - Standard T/Z/Y/X/C + déclaration |
+| Z1. Masques              | Zone d'ombre   | Partiellement clarifié                          |
+| Z2. Registre             | Zone d'ombre   | **Clarifié**                                    |
+| Z3. Grid vs Pointwise    | Zone d'ombre   | **Clarifié**                                    |
+| Z4. Dims dynamiques      | Zone d'ombre   | **Clarifié**                                    |
+| Z5. Checkpointing        | Zone d'ombre   | **Clarifié**                                    |
+| Z6. GIL                  | Zone d'ombre   | **Vérifié**                                     |
+| Z7. Validation           | Zone d'ombre   | **Clarifié**                                    |
+
+**Conclusion** : L'architecture est maintenant suffisamment clarifiée pour passer à la phase de conception détaillée. Les 3 nouvelles questions (Q8-Q10) sont importantes mais non bloquantes pour V1.
+
+---
+
+# Réponse utilisateur
+
+## Z1
+
+Je pense qu'il faut que ce soit une convention documentée. L'option A me semble bien.
+
+## Q8
+
+Si on sauvegarde depuis le début de la simulation alors on récupère ce qu'on a jusqu'à présent et on l'écrit. Puis on lève une erreur. Pas de mécanisme de reprise pour le moment.
+
+### Q9. Reproductibilité
+
+Normalement l'ordre n'importe pas dans nos opérations. Mais si c'est le cas alors il faut documenter cela. Pour le moment on ne s'occupe pas de la seed. ça pourra être un ajout futur.
+
+### Q10. Tests unitaires des fonctions
+
+On doit tester les fonctions de manière unitaire c'est très important. Si l'utilisation de données mock est suffisante alors oui on fait ainsi.
+Le mini-runner implique de possibles intéraction entre les classes de run et les fonctions.
