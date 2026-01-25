@@ -117,6 +117,8 @@ exclude = [
     "dist",
     "node_modules",
     "venv",
+    "seapopym/_legacy",
+    "tests/_legacy",
 ]
 
 [tool.ruff.lint]
@@ -188,7 +190,7 @@ known-first-party = ["seapopym"]
 
 [tool.pyright]
 include = ["seapopym", "tests"]
-exclude = ["**/node_modules", "**/__pycache__", "examples", "benchmarks"]
+exclude = ["**/node_modules", "**/__pycache__", "examples", "benchmarks", "seapopym/_legacy", "tests/_legacy"]
 venvPath = "."
 venv = ".venv"
 reportMissingImports = true
@@ -203,6 +205,7 @@ typeCheckingMode = "basic"
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
+norecursedirs = ["_legacy"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
