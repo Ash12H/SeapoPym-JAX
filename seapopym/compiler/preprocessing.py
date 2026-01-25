@@ -159,8 +159,9 @@ def prepare_array(
     if isinstance(data, xr.DataArray):
         # Apply dimension mapping (preserves DataArray type)
         mapped_data = apply_dimension_mapping(data, dimension_mapping)
-        # Type narrowing: apply_dimension_mapping preserves input type
-        assert isinstance(mapped_data, xr.DataArray)
+        if not isinstance(mapped_data, xr.DataArray):
+            msg = "apply_dimension_mapping returned unexpected type"
+            raise TypeError(msg)
 
         # Transpose to canonical order
         data = transpose_canonical(mapped_data)
