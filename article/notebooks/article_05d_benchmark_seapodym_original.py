@@ -89,11 +89,7 @@ if t_biomass > 0:
     timings["biomass"] = t_biomass
 
 # Résumé et génération du Summary
-SUMMARY_DIR = (
-    Path(__file__).parent.parent / "summary"
-    if "__file__" in globals()
-    else Path.cwd().parent / "summary"
-)
+SUMMARY_DIR = Path(__file__).parent.parent / "summary" if "__file__" in globals() else Path.cwd().parent / "summary"
 SUMMARY_DIR.mkdir(exist_ok=True)
 
 FIGURE_PREFIX = "fig_05d_benchmark_seapodym"

@@ -234,9 +234,7 @@ def configure_lmtl_full(bp):
     bp.register_forcing("face_areas_ns", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
     bp.register_forcing("dx", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
     bp.register_forcing("dy", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
-    bp.register_forcing(
-        "ocean_mask", dims=(Coordinates.Y.value, Coordinates.X.value), units="dimensionless"
-    )
+    bp.register_forcing("ocean_mask", dims=(Coordinates.Y.value, Coordinates.X.value), units="dimensionless")
     bp.register_forcing("boundary_north", units="dimensionless")
     bp.register_forcing("boundary_south", units="dimensionless")
     bp.register_forcing("boundary_east", units="dimensionless")
@@ -394,9 +392,7 @@ def run_benchmark(grid_size, n_cohorts, n_steps, backend="sequential"):
     # Cohortes
     cohorts_days = np.arange(0, n_cohorts)
     cohorts_seconds = cohorts_days * 86400.0
-    cohorts_da = xr.DataArray(
-        cohorts_seconds, dims=["cohort"], name="cohort", attrs={"units": "second"}
-    )
+    cohorts_da = xr.DataArray(cohorts_seconds, dims=["cohort"], name="cohort", attrs={"units": "second"})
 
     # Forçages (utilise les constantes globales)
     time_da = xr.DataArray(
@@ -705,12 +701,8 @@ with open(summary_path, "w") as f:
 
     f.write("OBJECTIF:\n")
     f.write("-" * 80 + "\n")
-    f.write(
-        "Démontrer que le temps de calcul croît linéairement avec la taille du problème (O(N)).\n"
-    )
-    f.write(
-        "Question posée: Si je double la taille de ma grille, le temps de calcul double-t-il ?\n\n"
-    )
+    f.write("Démontrer que le temps de calcul croît linéairement avec la taille du problème (O(N)).\n")
+    f.write("Question posée: Si je double la taille de ma grille, le temps de calcul double-t-il ?\n\n")
 
     f.write("CONFIGURATION DU BENCHMARK:\n")
     f.write("-" * 80 + "\n")

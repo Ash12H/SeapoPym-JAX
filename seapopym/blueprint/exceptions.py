@@ -83,9 +83,7 @@ class SignatureMismatchError(ValidationError):
     code = "E102"
     message = "Function signature mismatch"
 
-    def __init__(
-        self, func_name: str, missing: list[str] | None = None, extra: list[str] | None = None
-    ) -> None:
+    def __init__(self, func_name: str, missing: list[str] | None = None, extra: list[str] | None = None) -> None:
         """Initialize with function name and mismatched arguments."""
         self.func_name = func_name
         self.missing = missing or []
@@ -175,6 +173,4 @@ class OutputCountMismatchError(ValidationError):
         self.func_name = func_name
         self.expected = expected
         self.actual = actual
-        super().__init__(
-            f"Output count mismatch for '{func_name}': expected {expected}, got {actual}"
-        )
+        super().__init__(f"Output count mismatch for '{func_name}': expected {expected}, got {actual}")

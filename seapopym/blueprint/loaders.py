@@ -91,9 +91,7 @@ def load_file(path: str | Path) -> dict[str, Any]:
         try:
             return load_yaml(path)
         except yaml.YAMLError:
-            raise ValueError(
-                f"Unknown file format for '{path}'. Supported: .yaml, .yml, .json"
-            ) from None
+            raise ValueError(f"Unknown file format for '{path}'. Supported: .yaml, .yml, .json") from None
 
 
 def detect_format(source: str | Path | dict[str, Any]) -> str:

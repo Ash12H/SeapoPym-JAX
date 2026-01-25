@@ -25,9 +25,7 @@ class Blueprint:
         self._data_nodes: dict[str, DataNode] = {}  # Registre des noeuds de données
         self._group_context: str | None = None  # Pour le namespacing automatique
 
-    def register_forcing(
-        self, name: str, dims: tuple[Any, ...] | None = None, units: str | None = None
-    ) -> None:
+    def register_forcing(self, name: str, dims: tuple[Any, ...] | None = None, units: str | None = None) -> None:
         """Déclare une source de données externe (ex: température, courants).
 
         Raises:
@@ -42,9 +40,7 @@ class Blueprint:
         self.registered_variables.add(name)
         self._data_nodes[name] = node
 
-    def register_parameter(
-        self, name: str, units: str | None = None, dims: tuple[Any, ...] | None = None
-    ) -> None:
+    def register_parameter(self, name: str, units: str | None = None, dims: tuple[Any, ...] | None = None) -> None:
         """Déclare un paramètre du modèle (ex: taux de mortalité, coefficient).
 
         Args:
@@ -159,11 +155,7 @@ class Blueprint:
         for key, var_name in final_output_mapping.items():
             # Déterminer si c'est une tendance
             is_tendency_of = output_tendencies.get(key)
-            if (
-                is_tendency_of
-                and is_tendency_of not in self.registered_variables
-                and self._group_context
-            ):
+            if is_tendency_of and is_tendency_of not in self.registered_variables and self._group_context:
                 # Résolution du nom de la cible de tendance
                 # On utilise la même logique que pour les inputs :
                 # 1. Si le nom existe tel quel (global), on le garde
@@ -349,9 +341,7 @@ class Blueprint:
                 for var_name, var_spec in state_variables.items():
                     full_name = f"{group_prefix}/{var_name}" if group_prefix else var_name
                     if full_name in self.registered_variables:
-                        raise ConfigurationError(
-                            f"State variable '{full_name}' is already registered."
-                        )
+                        raise ConfigurationError(f"State variable '{full_name}' is already registered.")
 
                     node = DataNode(
                         name=full_name,
@@ -420,9 +410,7 @@ class Blueprint:
 
         # Produites = DataNodes avec in_degree > 0
         produced_vars = [
-            node.name
-            for node in self.graph.nodes
-            if isinstance(node, DataNode) and self.graph.in_degree(node) > 0
+            node.name for node in self.graph.nodes if isinstance(node, DataNode) and self.graph.in_degree(node) > 0
         ]
 
         # 4. Construction du tendency_map
@@ -491,9 +479,7 @@ class Blueprint:
         elif layout == "circular":
             pos = nx.circular_layout(self.graph)
         else:
-            raise ValueError(
-                f"Unknown layout: {layout}. Use 'hierarchical', 'spring', 'kamada_kawai', or 'circular'."
-            )
+            raise ValueError(f"Unknown layout: {layout}. Use 'hierarchical', 'spring', 'kamada_kawai', or 'circular'.")
 
         # Séparation des noeuds par type
         data_nodes = [n for n in self.graph.nodes if isinstance(n, DataNode)]
@@ -555,9 +541,7 @@ class Blueprint:
         )
 
         # Edges
-        nx.draw_networkx_edges(
-            self.graph, pos, arrowstyle="->", arrowsize=20, edge_color="gray", width=2, ax=ax
-        )
+        nx.draw_networkx_edges(self.graph, pos, arrowstyle="->", arrowsize=20, edge_color="gray", width=2, ax=ax)
 
         # Labels
         labels = {n: n.name for n in self.graph.nodes}
@@ -617,25 +601,13 @@ class Blueprint:
         lines = [f"graph {direction}"]
 
         # Styles
-        lines.append(
-            "    classDef data fill:#e1f5fe,stroke:#01579b,stroke-width:2px,rx:5,ry:5;"
-        )  # Light Blue
-        lines.append(
-            "    classDef state fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,rx:5,ry:5;"
-        )  # Light Yellow
-        lines.append(
-            "    classDef compute fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;"
-        )  # Pale Purple (inchangé)
-        lines.append(
-            "    classDef forcing fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,rx:5,ry:5;"
-        )  # Light Green
-        lines.append(
-            "    classDef tendency fill:#fff3e0,stroke:#e65100,stroke-width:2px,rx:5,ry:5;"
-        )  # Light Orange
+        lines.append("    classDef data fill:#e1f5fe,stroke:#01579b,stroke-width:2px,rx:5,ry:5;")  # Light Blue
+        lines.append("    classDef state fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,rx:5,ry:5;")  # Light Yellow
+        lines.append("    classDef compute fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;")  # Pale Purple (inchangé)
+        lines.append("    classDef forcing fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,rx:5,ry:5;")  # Light Green
+        lines.append("    classDef tendency fill:#fff3e0,stroke:#e65100,stroke-width:2px,rx:5,ry:5;")  # Light Orange
         # Modification ci-dessous : Passage au Rouge Pastel
-        lines.append(
-            "    classDef parameter fill:#ffebee,stroke:#c62828,stroke-width:2px,rx:5,ry:5;"
-        )
+        lines.append("    classDef parameter fill:#ffebee,stroke:#c62828,stroke-width:2px,rx:5,ry:5;")
 
         # Helper to generate safe IDs based on object identity (handle duplicate names)
         def get_id(node: Any) -> str:

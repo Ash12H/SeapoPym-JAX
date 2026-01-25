@@ -87,14 +87,9 @@ packages = ["seapopym"]
 # ══════════════════════════════════════════════════════════════
 
 [tool.ruff]
+line-length = 120
 target-version = "py310"
-line-length = 100
-indent-width = 4
-
-# Source directories
 src = ["seapopym", "tests"]
-
-# Exclude common directories
 exclude = [
     ".bzr",
     ".direnv",
@@ -122,7 +117,6 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-# Enable specific rule sets
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -134,8 +128,6 @@ select = [
     "ARG", # flake8-unused-arguments
     "SIM", # flake8-simplify
 ]
-
-# Ignore specific rules
 ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
@@ -180,9 +172,7 @@ line-ending = "auto"
 known-first-party = ["seapopym"]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
-"tests/**/*.py" = ["ARG"]  # Allow unused arguments in tests
-"examples/**/*.py" = ["ARG", "ANN"]  # Allow unused arguments and missing annotations in examples
+"tests/**/*.py" = ["ARG", "S101"]
 
 # ══════════════════════════════════════════════════════════════
 # PYRIGHT Configuration

@@ -256,14 +256,10 @@ def compute_theory_and_sim_params(T, NPP, params):
     T_gillooly = T_thresh / (1 + T_thresh / 273.0)
 
     # Mortalité
-    lambda_T = params.lambda_0.to("1/second").magnitude * np.exp(
-        params.gamma_lambda.magnitude * T_gillooly
-    )
+    lambda_T = params.lambda_0.to("1/second").magnitude * np.exp(params.gamma_lambda.magnitude * T_gillooly)
 
     # Âge recrutement
-    tau_r = params.tau_r_0.to("second").magnitude * np.exp(
-        -params.gamma_tau_r.magnitude * T_gillooly
-    )
+    tau_r = params.tau_r_0.to("second").magnitude * np.exp(-params.gamma_tau_r.magnitude * T_gillooly)
 
     # Equilibre
     R = params.E.magnitude * NPP
@@ -288,9 +284,7 @@ def compute_theory_and_sim_params(T, NPP, params):
 
 # Pré-calcul
 scan_config = {}
-print(
-    f"{'T [°C]':<8} {'λ [1/d]':<12} {'1/λ [d]':<12} {'Durée [d]':<12} {'dt [s]':<12} {'B_eq':<10}"
-)
+print(f"{'T [°C]':<8} {'λ [1/d]':<12} {'1/λ [d]':<12} {'Durée [d]':<12} {'dt [s]':<12} {'B_eq':<10}")
 print("-" * 70)
 
 for T in TEMPERATURES:
@@ -342,9 +336,7 @@ for i, T in enumerate(TEMPERATURES):
 
     forcings = xr.Dataset(
         {
-            "temperature": xr.DataArray(
-                np.full(n_steps, T), dims=["time"], attrs={"units": "degC"}
-            ),
+            "temperature": xr.DataArray(np.full(n_steps, T), dims=["time"], attrs={"units": "degC"}),
             "primary_production": xr.DataArray(
                 np.full(n_steps, NPP_g_m2_s), dims=["time"], attrs={"units": "g/m**2/s"}
             ),
@@ -358,9 +350,7 @@ for i, T in enumerate(TEMPERATURES):
     initial_state = xr.Dataset(
         {
             "biomass": xr.DataArray(0.0),
-            "production": xr.DataArray(
-                np.zeros(len(cohorts)), coords={"cohort": cohorts_da}, dims=["cohort"]
-            ),
+            "production": xr.DataArray(np.zeros(len(cohorts)), coords={"cohort": cohorts_da}, dims=["cohort"]),
         }
     )
 
@@ -406,9 +396,7 @@ print("✅ Scan terminé.")
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.9, 7), sharex=True)
 
 # Panel A: Biomasse absolue
-ax1.plot(
-    df_results["Temperature"], df_results["Theoretical"], "k--", label="Théorie", linewidth=1.5
-)
+ax1.plot(df_results["Temperature"], df_results["Theoretical"], "k--", label="Théorie", linewidth=1.5)
 ax1.plot(
     df_results["Temperature"],
     df_results["Simulated"],
@@ -449,9 +437,7 @@ plt.show()
 print("Statistiques d'erreur :")
 print(f"  Max Error: {df_results['Error_Percent'].max():.4f}%")
 print(f"  Mean Error: {df_results['Error_Percent'].mean():.4f}%")
-print(
-    f"  Température Max Error: {df_results.loc[df_results['Error_Percent'].idxmax(), 'Temperature']}°C"
-)
+print(f"  Température Max Error: {df_results.loc[df_results['Error_Percent'].idxmax(), 'Temperature']}°C")
 
 if df_results["Error_Percent"].max() < 0.1:
     print("\n✅ VALIDATION RÉUSSIE : L'erreur est négligeable sur toute la plage.")
@@ -527,9 +513,7 @@ with open(summary_path, "w") as f:
     f.write(f"  Min ({TEMP_MAX}°C)     : {duration_values.min():.2f} days\n")
     f.write(f"  Max (0°C)      : {duration_values.max():.1f} days\n")
     f.write("Pas de temps (dt):\n")
-    f.write(
-        f"  Min ({TEMP_MAX}°C)     : {dt_values.min():.0f} s ({dt_values.min() / 3600:.2f} h)\n"
-    )
+    f.write(f"  Min ({TEMP_MAX}°C)     : {dt_values.min():.0f} s ({dt_values.min() / 3600:.2f} h)\n")
     f.write(f"  Max (0°C)      : {dt_values.max():.0f} s ({dt_values.max() / 3600:.2f} h)\n\n")
 
     f.write("RÉSULTATS - STATISTIQUES D'ERREUR:\n")
@@ -538,9 +522,7 @@ with open(summary_path, "w") as f:
     f.write(f"Erreur maximale       : {df_results['Error_Percent'].max():.4f}%\n")
     f.write(f"Erreur moyenne        : {df_results['Error_Percent'].mean():.4f}%\n")
     f.write(f"Écart-type            : {df_results['Error_Percent'].std():.4f}%\n")
-    f.write(
-        f"Température max error : {df_results.loc[df_results['Error_Percent'].idxmax(), 'Temperature']}°C\n\n"
-    )
+    f.write(f"Température max error : {df_results.loc[df_results['Error_Percent'].idxmax(), 'Temperature']}°C\n\n")
 
     f.write("VALIDATION:\n")
     f.write("-" * 80 + "\n")

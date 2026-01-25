@@ -148,9 +148,7 @@ class Declarations(BaseModel):
 
         return result
 
-    def _flatten_category(
-        self, prefix: str, category: dict[str, Any]
-    ) -> dict[str, VariableDeclaration]:
+    def _flatten_category(self, prefix: str, category: dict[str, Any]) -> dict[str, VariableDeclaration]:
         """Recursively flatten a category dict."""
         result: dict[str, VariableDeclaration] = {}
 

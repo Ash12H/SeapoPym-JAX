@@ -52,14 +52,14 @@ class TestParameterValue:
 
     def test_trainable_with_bounds(self):
         """Test creating a trainable parameter with bounds."""
-        param = ParameterValue(value=0.1, trainable=True, bounds=[0.01, 0.5])
+        param = ParameterValue(value=0.1, trainable=True, bounds=(0.01, 0.5))
         assert param.trainable is True
         assert param.bounds == (0.01, 0.5)
 
     def test_bounds_validation(self):
         """Test that invalid bounds raise error."""
         with pytest.raises(ValueError):
-            ParameterValue(value=0.1, bounds=[1, 2, 3])
+            ParameterValue(value=0.1, bounds=(1, 2, 3))  # type: ignore
 
 
 class TestProcessStep:
@@ -238,5 +238,5 @@ class TestExecutionParams:
 
     def test_time_range_conversion(self):
         """Test time_range list to tuple conversion."""
-        params = ExecutionParams(time_range=["2020-01-01", "2020-12-31"])
+        params = ExecutionParams(time_range=("2020-01-01", "2020-12-31"))
         assert params.time_range == ("2020-01-01", "2020-12-31")

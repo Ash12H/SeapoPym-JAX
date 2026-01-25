@@ -85,7 +85,7 @@ class TestFunctionalDecorator:
         """Test that invalid backend raises error."""
         with pytest.raises(ValueError, match="Unknown backend"):
 
-            @functional(name="test:func", backend="invalid")
+            @functional(name="test:func", backend="invalid")  # type: ignore
             def bad_func(x):
                 return x
 

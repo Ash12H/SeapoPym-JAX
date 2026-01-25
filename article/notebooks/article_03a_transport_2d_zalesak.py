@@ -142,9 +142,7 @@ def save_figure(fig, name, formats=FIGURE_FORMATS):
 
 
 # %%
-def create_slotted_disk(
-    nx, ny, disk_center_x, disk_center_y, disk_radius, slot_width, slot_height, value=1.0
-):
+def create_slotted_disk(nx, ny, disk_center_x, disk_center_y, disk_radius, slot_width, slot_height, value=1.0):
     """Crée un disque avec fente rectangulaire (Zalesak slotted disk).
 
     La fente est centrée horizontalement et s'étend vers le bas depuis le centre.
@@ -292,9 +290,7 @@ for i_res, n_cells in enumerate(GRID_RESOLUTIONS, start=1):
     print(f"  Masse initiale         : {initial_mass:.6f}")
 
     # Champ de vitesse en rotation solide
-    u_field, v_field = create_solid_rotation_velocity_field(
-        nx, ny, omega, ROTATION_CENTER_X, ROTATION_CENTER_Y
-    )
+    u_field, v_field = create_solid_rotation_velocity_field(nx, ny, omega, ROTATION_CENTER_X, ROTATION_CENTER_Y)
 
     # Vitesse maximale (à la périphérie du domaine)
     # V_max = omega * distance_max_au_centre = omega * 0.5 (au coin)

@@ -127,9 +127,7 @@ print(f"\nExport terminé dans {EXPORT_DIR}/data/")
 
 
 # Vérification d'un fichier généré
-check_file = os.path.join(
-    EXPORT_DIR, "data", f"data_{pd.to_datetime(ds.time.values[0]).strftime('%Y%m%d')}.nc"
-)
+check_file = os.path.join(EXPORT_DIR, "data", f"data_{pd.to_datetime(ds.time.values[0]).strftime('%Y%m%d')}.nc")
 print(f"Vérification de {check_file} :")
 ds_check = xr.open_dataset(check_file)
 print(ds_check)

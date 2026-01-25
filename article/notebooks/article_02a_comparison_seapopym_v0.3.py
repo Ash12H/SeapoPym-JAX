@@ -81,9 +81,7 @@ COMPARISON_START = "2000"  # Début comparaison (après spin-up)
 COMPARISON_END = "2019"  # Fin comparaison
 
 # --- Chemins des Données Externes ---
-DATA_EXTERNAL_BASE = (
-    "/Users/adm-lehodey/Documents/Workspace/Projects/phd_optimization/notebooks/Article_1/data"
-)
+DATA_EXTERNAL_BASE = "/Users/adm-lehodey/Documents/Workspace/Projects/phd_optimization/notebooks/Article_1/data"
 FORCINGS_SUBPATH = "1_global/post_processed_light_global_multiyear_bgc_001_033.zarr"
 V03_RESULTS_SUBPATH = "2_global_simulation/biomass_global.zarr"
 
@@ -177,9 +175,7 @@ forcings = forcings[["primary_production", "temperature"]].load()
 
 # Création des cohortes
 cohorts = (np.arange(0, np.ceil(lmtl_params.tau_r_0.magnitude) + 1) * ureg.day).to("second")
-cohorts_da = xr.DataArray(
-    cohorts.magnitude, dims=["cohort"], name="cohort", attrs={"units": "second"}
-)
+cohorts_da = xr.DataArray(cohorts.magnitude, dims=["cohort"], name="cohort", attrs={"units": "second"})
 
 # Ajout des paramètres aux forçages
 forcings = forcings.assign_coords(cohort=cohorts_da)

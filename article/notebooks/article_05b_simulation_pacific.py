@@ -50,9 +50,7 @@ logging.basicConfig(level=logging.INFO)
 ureg = pint.get_application_registry()
 
 # Chemins
-DATA_DIR = (
-    Path(__file__).parent.parent / "data" if "__file__" in globals() else Path.cwd().parent / "data"
-)
+DATA_DIR = Path(__file__).parent.parent / "data" if "__file__" in globals() else Path.cwd().parent / "data"
 INPUT_ZARR = DATA_DIR / "seapodym_lmtl_forcings_pacific.zarr"
 OUTPUT_TRANSPORT = DATA_DIR / "seapopym_pacific_transport_optimized.zarr"
 OUTPUT_NO_TRANSPORT = DATA_DIR / "seapopym_pacific_no_transport_optimized.zarr"
@@ -83,9 +81,7 @@ lmtl_params = LMTLParams(
 
 # Cohortes
 cohorts = (np.arange(0, np.ceil(lmtl_params.tau_r_0.magnitude) + 1) * ureg.day).to("second")
-cohorts_da = xr.DataArray(
-    cohorts.magnitude, dims=["cohort"], name="cohort", attrs={"units": "second"}
-)
+cohorts_da = xr.DataArray(cohorts.magnitude, dims=["cohort"], name="cohort", attrs={"units": "second"})
 
 # Ajout aux forçages
 ds = ds.assign_coords(cohort=cohorts_da)
@@ -207,9 +203,7 @@ def configure_common(bp, with_transport=False):
         dims=(Coordinates.T.value, Coordinates.Y.value, Coordinates.X.value),
         units="g/m**2/second",
     )
-    bp.register_forcing(
-        "ocean_mask", dims=(Coordinates.Y.value, Coordinates.X.value), units="dimensionless"
-    )
+    bp.register_forcing("ocean_mask", dims=(Coordinates.Y.value, Coordinates.X.value), units="dimensionless")
     bp.register_forcing("dt")
     bp.register_forcing("cohort")
     bp.register_forcing(Coordinates.T.value)
@@ -236,15 +230,9 @@ def configure_common(bp, with_transport=False):
             ),
             units="m/s",
         )
-        bp.register_forcing(
-            "cell_areas", dims=(Coordinates.Y.value, Coordinates.X.value), units="m**2"
-        )
-        bp.register_forcing(
-            "face_areas_ew", dims=(Coordinates.Y.value, Coordinates.X.value), units="m"
-        )
-        bp.register_forcing(
-            "face_areas_ns", dims=(Coordinates.Y.value, Coordinates.X.value), units="m"
-        )
+        bp.register_forcing("cell_areas", dims=(Coordinates.Y.value, Coordinates.X.value), units="m**2")
+        bp.register_forcing("face_areas_ew", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
+        bp.register_forcing("face_areas_ns", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
         bp.register_forcing("dx", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
         bp.register_forcing("dy", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
         bp.register_forcing("boundary_north", units="dimensionless")
@@ -451,9 +439,7 @@ def configure_common(bp, with_transport=False):
             """Vérifie que la CFL d'advection reste <= 1.0."""
             stability = compute_advection_cfl(u, v, dx, dy, dt)
             if not stability["is_stable"]:
-                raise ValueError(
-                    f"Advection CFL instability detected! Max CFL = {stability['cfl_max']:.4f} (> 1.0)"
-                )
+                raise ValueError(f"Advection CFL instability detected! Max CFL = {stability['cfl_max']:.4f} (> 1.0)")
             return {}
 
         bp.register_diagnostic(
@@ -629,9 +615,7 @@ with open(summary_path, "w") as f:
 
     f.write("TEMPS D'EXÉCUTION:\n")
     f.write("-" * 80 + "\n")
-    f.write(
-        f"Simulation NO-TRANSPORT      : {t_no_transport:.1f} s ({t_no_transport / 60:.1f} min)\n"
-    )
+    f.write(f"Simulation NO-TRANSPORT      : {t_no_transport:.1f} s ({t_no_transport / 60:.1f} min)\n")
     f.write(f"Simulation TRANSPORT         : {t_transport:.1f} s ({t_transport / 60:.1f} min)\n")
     f.write(f"Ratio Transport/No-Transport : {t_transport / t_no_transport:.2f}x\n\n")
 

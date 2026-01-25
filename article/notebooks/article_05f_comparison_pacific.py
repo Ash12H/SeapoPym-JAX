@@ -68,17 +68,13 @@ print("-" * 70)
 ds_ref = xr.open_zarr(FILE_REF)
 ref = ds_ref["zooplankton"].load()
 print(f"Référence   : {ref.shape}, dims={list(ref.dims)}")
-print(
-    f"  Period    : {pd.to_datetime(ref.time.values).min()} → {pd.to_datetime(ref.time.values).max()}"
-)
+print(f"  Period    : {pd.to_datetime(ref.time.values).min()} → {pd.to_datetime(ref.time.values).max()}")
 
 # Transport (SeapoPym DAG)
 ds_trans = xr.open_zarr(FILE_TRANS)
 dag_trans = ds_trans["biomass"].load()
 print(f"Transport   : {dag_trans.shape}, dims={list(dag_trans.dims)}")
-print(
-    f"  Period    : {pd.to_datetime(dag_trans.time.values).min()} → {pd.to_datetime(dag_trans.time.values).max()}"
-)
+print(f"  Period    : {pd.to_datetime(dag_trans.time.values).min()} → {pd.to_datetime(dag_trans.time.values).max()}")
 
 # No-Transport (SeapoPym DAG)
 ds_no_trans = xr.open_zarr(FILE_NO_TRANS)
@@ -289,9 +285,7 @@ for ax, (zone_name, (lat_min, lat_max)) in zip(axes, zones.items(), strict=False
     # Tracé
     ts_ref.plot(ax=ax, label="Seapodym (Ref)", linewidth=2, color="black")
     ts_trans.plot(ax=ax, label="DAG (Transport)", linewidth=1.5, linestyle="--", color="blue")
-    ts_no_trans.plot(
-        ax=ax, label="DAG (No Transport)", linewidth=1, linestyle=":", color="grey", alpha=0.7
-    )
+    ts_no_trans.plot(ax=ax, label="DAG (No Transport)", linewidth=1, linestyle=":", color="grey", alpha=0.7)
 
     ax.set_title(f"Biomasse Moyenne - Zone {zone_name}")
     ax.set_xlabel("Temps")
@@ -319,15 +313,9 @@ lon_min = ref_aligned.longitude.min().item()
 lon_max = ref_aligned.longitude.max().item()
 
 # Amélioration relative apportée par le transport
-rmse_improvement = (
-    (metrics_no_trans["RMSE"] - metrics_trans["RMSE"]) / metrics_no_trans["RMSE"]
-) * 100
-nrmse_improvement = (
-    (metrics_no_trans["NRMSE"] - metrics_trans["NRMSE"]) / metrics_no_trans["NRMSE"]
-) * 100
-mape_improvement = (
-    (metrics_no_trans["MAPE"] - metrics_trans["MAPE"]) / metrics_no_trans["MAPE"]
-) * 100
+rmse_improvement = ((metrics_no_trans["RMSE"] - metrics_trans["RMSE"]) / metrics_no_trans["RMSE"]) * 100
+nrmse_improvement = ((metrics_no_trans["NRMSE"] - metrics_trans["NRMSE"]) / metrics_no_trans["NRMSE"]) * 100
+mape_improvement = ((metrics_no_trans["MAPE"] - metrics_trans["MAPE"]) / metrics_no_trans["MAPE"]) * 100
 
 # Biomasse moyenne
 ref_mean_biomass = ref_aligned.mean().item()
@@ -396,9 +384,7 @@ with open(summary_path, "w") as f:
         f.write("   Le transport de biomasse (advection par courants + diffusion) capture\n")
         f.write("   des processus physiques importants pour la distribution spatiale.\n\n")
     else:
-        f.write(
-            "⚠️ Le transport ne semble pas améliorer les résultats dans cette configuration.\n\n"
-        )
+        f.write("⚠️ Le transport ne semble pas améliorer les résultats dans cette configuration.\n\n")
 
     f.write("STATISTIQUES DE BIOMASSE:\n")
     f.write("-" * 80 + "\n")
@@ -418,9 +404,7 @@ with open(summary_path, "w") as f:
         zone_metrics_no_trans = compute_metrics(ref_zone, no_trans_zone)
 
         f.write(f"\n{zone_name}:\n")
-        f.write(
-            f"   Transport - RMSE={zone_metrics_trans['RMSE']:.2f}, NRMSE={zone_metrics_trans['NRMSE']:.2f}\n"
-        )
+        f.write(f"   Transport - RMSE={zone_metrics_trans['RMSE']:.2f}, NRMSE={zone_metrics_trans['NRMSE']:.2f}\n")
         f.write(
             f"   No-Trans  - RMSE={zone_metrics_no_trans['RMSE']:.2f}, NRMSE={zone_metrics_no_trans['NRMSE']:.2f}\n"
         )
@@ -436,9 +420,7 @@ with open(summary_path, "w") as f:
     if metrics_trans["NRMSE"] < 0.5:
         f.write("✅ VALIDATION RÉUSSIE\n")
         f.write("   Le modèle SeapoPym DAG avec transport reproduit avec précision\n")
-        f.write(
-            f"   les sorties du modèle Seapodym-LMTL (NRMSE = {metrics_trans['NRMSE']:.2f} < 0.5).\n"
-        )
+        f.write(f"   les sorties du modèle Seapodym-LMTL (NRMSE = {metrics_trans['NRMSE']:.2f} < 0.5).\n")
         f.write("   L'architecture Python DAG est validée pour des simulations réalistes.\n")
     else:
         f.write("⚠️ VALIDATION PARTIELLE\n")

@@ -56,11 +56,7 @@ class FunctionMetadata:
     def get_required_inputs(self) -> list[str]:
         """Return list of required input argument names (no default value)."""
         sig = self.get_signature()
-        return [
-            name
-            for name, param in sig.parameters.items()
-            if param.default is inspect.Parameter.empty
-        ]
+        return [name for name, param in sig.parameters.items() if param.default is inspect.Parameter.empty]
 
 
 # Global registry: {backend: {name: FunctionMetadata}}
@@ -121,9 +117,7 @@ def functional(
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         # Validate name format
         if ":" not in name:
-            raise ValueError(
-                f"Function name must be in format 'namespace:function_name', got '{name}'"
-            )
+            raise ValueError(f"Function name must be in format 'namespace:function_name', got '{name}'")
 
         # Validate backend
         if backend not in REGISTRY:

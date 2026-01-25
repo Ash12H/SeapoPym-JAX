@@ -138,9 +138,7 @@ class TestValidateBlueprint:
                     {
                         "func": "test:multi",  # Returns 2 outputs
                         "inputs": {"x": "state.x"},
-                        "outputs": {
-                            "out": {"target": "derived.result", "type": "derived"}
-                        },  # Only 1 declared
+                        "outputs": {"out": {"target": "derived.result", "type": "derived"}},  # Only 1 declared
                     }
                 ],
             }

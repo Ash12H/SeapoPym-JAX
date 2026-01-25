@@ -211,9 +211,7 @@ def configure_lmtl_full(bp) -> None:
     bp.register_forcing("face_areas_ns", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
     bp.register_forcing("dx", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
     bp.register_forcing("dy", dims=(Coordinates.Y.value, Coordinates.X.value), units="m")
-    bp.register_forcing(
-        "ocean_mask", dims=(Coordinates.Y.value, Coordinates.X.value), units="dimensionless"
-    )
+    bp.register_forcing("ocean_mask", dims=(Coordinates.Y.value, Coordinates.X.value), units="dimensionless")
     bp.register_forcing("boundary_north", units="dimensionless")
     bp.register_forcing("boundary_south", units="dimensionless")
     bp.register_forcing("boundary_east", units="dimensionless")
@@ -401,9 +399,7 @@ def generate_forcings_and_initial_state(
     # Cohortes
     cohorts_days = np.arange(0, n_cohorts)
     cohorts_seconds = cohorts_days * 86400.0
-    cohorts_da = xr.DataArray(
-        cohorts_seconds, dims=["cohort"], name="cohort", attrs={"units": "second"}
-    )
+    cohorts_da = xr.DataArray(cohorts_seconds, dims=["cohort"], name="cohort", attrs={"units": "second"})
 
     # Forçages - Temps
     time_da = xr.DataArray(
@@ -415,9 +411,7 @@ def generate_forcings_and_initial_state(
     Y, X = Coordinates.Y.value, Coordinates.X.value
 
     temp_data = np.full((n_steps + 1, ny, nx), TEMPERATURE_CONSTANT)
-    npp_data = np.full(
-        (n_steps + 1, ny, nx), NPP_CONSTANT / 86400.0 / 1000.0
-    )  # mg/m²/day -> g/m²/s
+    npp_data = np.full((n_steps + 1, ny, nx), NPP_CONSTANT / 86400.0 / 1000.0)  # mg/m²/day -> g/m²/s
     u_data = np.full((ny, nx), U_MAGNITUDE)
     v_data = np.full((ny, nx), 0.0)
     mask_data = np.ones((ny, nx))
@@ -523,8 +517,7 @@ forcings_bench, initial_state_bench, dt_bench = generate_forcings_and_initial_st
     n_steps=CONFIG["n_steps_benchmark"],
 )
 print(
-    f"✅ Grille {CONFIG['grid_size'][0]}×{CONFIG['grid_size'][1]}, "
-    f"{CONFIG['n_cohorts']} cohortes, dt={dt_bench:.0f}s"
+    f"✅ Grille {CONFIG['grid_size'][0]}×{CONFIG['grid_size'][1]}, {CONFIG['n_cohorts']} cohortes, dt={dt_bench:.0f}s"
 )
 
 # %% [markdown]
@@ -585,9 +578,7 @@ for group_name, group_stats in stats["by_group"].items():
             "group": group_name,
             "total_time": group_stats["total_time"],
             "mean_time": group_stats["mean_time"],
-            "percentage": (
-                group_stats["total_time"] / stats["summary"]["total_execution_time"] * 100
-            ),
+            "percentage": (group_stats["total_time"] / stats["summary"]["total_execution_time"] * 100),
         }
     )
 
@@ -653,9 +644,7 @@ for node_name, node_stats in stats["by_node"].items():
             "group": node_stats["group"],
             "total_time": node_stats["total_time"],
             "mean_time": node_stats["mean_time"],
-            "percentage": (
-                node_stats["total_time"] / stats["summary"]["total_execution_time"] * 100
-            ),
+            "percentage": (node_stats["total_time"] / stats["summary"]["total_execution_time"] * 100),
         }
     )
 
@@ -707,9 +696,7 @@ ax.grid(True, alpha=0.3)
 
 # Ligne de moyenne
 mean_time = np.mean(total_times)
-ax.axhline(
-    mean_time, linestyle="--", color=COLORS["red"], linewidth=1, label=f"Moyenne: {mean_time:.6f}s"
-)
+ax.axhline(mean_time, linestyle="--", color=COLORS["red"], linewidth=1, label=f"Moyenne: {mean_time:.6f}s")
 ax.legend()
 
 plt.tight_layout()
@@ -744,9 +731,7 @@ print("-" * 100)
 print(f"{'Groupe':<30} {'Temps Total (s)':<20} {'Temps Moyen (s)':<20} {'Pourcentage':<15}")
 print("-" * 100)
 for _, row in df_groups.iterrows():
-    print(
-        f"{row['group']:<30} {row['total_time']:<20.3f} {row['mean_time']:<20.6f} {row['percentage']:<15.1f}%"
-    )
+    print(f"{row['group']:<30} {row['total_time']:<20.3f} {row['mean_time']:<20.6f} {row['percentage']:<15.1f}%")
 
 # Top 5 des fonctions
 print("\n" + "-" * 100)
@@ -755,9 +740,7 @@ print("-" * 100)
 print(f"{'Fonction':<40} {'Groupe':<20} {'Temps Total (s)':<20} {'Pourcentage':<15}")
 print("-" * 100)
 for _, row in df_nodes.head(5).iterrows():
-    print(
-        f"{row['node']:<40} {row['group']:<20} {row['total_time']:<20.3f} {row['percentage']:<15.1f}%"
-    )
+    print(f"{row['node']:<40} {row['group']:<20} {row['total_time']:<20.3f} {row['percentage']:<15.1f}%")
 
 print("=" * 100)
 
@@ -777,9 +760,7 @@ with open(summary_path, "w") as f:
     f.write("OBJECTIF:\n")
     f.write("-" * 100 + "\n")
     f.write("Mesurer le temps alloué à chaque processus du modèle LMTL (température, transport,\n")
-    f.write(
-        "mortalité, production, etc.) pour identifier les goulots d'étranglement et optimiser\n"
-    )
+    f.write("mortalité, production, etc.) pour identifier les goulots d'étranglement et optimiser\n")
     f.write("les performances.\n\n")
 
     f.write("CONFIGURATION DU BENCHMARK:\n")
@@ -818,9 +799,7 @@ with open(summary_path, "w") as f:
     f.write(f"{'Fonction':<40} {'Groupe':<20} {'Temps Total (s)':<20} {'Pourcentage':<15}\n")
     f.write("-" * 100 + "\n")
     for _, row in df_nodes.iterrows():
-        f.write(
-            f"{row['node']:<40} {row['group']:<20} {row['total_time']:<20.3f} {row['percentage']:<15.1f}%\n"
-        )
+        f.write(f"{row['node']:<40} {row['group']:<20} {row['total_time']:<20.3f} {row['percentage']:<15.1f}%\n")
 
     f.write("\nFICHIERS GÉNÉRÉS:\n")
     f.write("-" * 100 + "\n")
@@ -833,9 +812,7 @@ with open(summary_path, "w") as f:
     f.write("CONCLUSIONS:\n")
     f.write("-" * 100 + "\n")
     f.write("1. Le MonitoringBackend permet de profiler précisément chaque fonction du modèle\n")
-    f.write(
-        "2. La décomposition temporelle révèle les processus dominants en coût computationnel\n"
-    )
+    f.write("2. La décomposition temporelle révèle les processus dominants en coût computationnel\n")
     f.write("3. Ces informations guident l'optimisation et le choix des axes de parallélisation\n")
     f.write("4. Le profiling est stable à travers les timesteps (faible variance)\n\n")
 

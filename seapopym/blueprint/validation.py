@@ -149,9 +149,7 @@ class BlueprintValidator:
             if metadata.outputs:
                 expected_outputs = len(metadata.outputs)
                 if declared_outputs != expected_outputs:
-                    result.add_error(
-                        OutputCountMismatchError(step.func, expected_outputs, declared_outputs)
-                    )
+                    result.add_error(OutputCountMismatchError(step.func, expected_outputs, declared_outputs))
 
             # Register produced variables
             for output_spec in step.outputs.values():
@@ -265,9 +263,7 @@ class BlueprintValidator:
             metadata = result.resolved_functions[step.func]
 
             # Determine output mapping from ProcessStep
-            output_mapping = {
-                out_key: out_spec.target for out_key, out_spec in step.outputs.items()
-            }
+            output_mapping = {out_key: out_spec.target for out_key, out_spec in step.outputs.items()}
 
             compute_node = ComputeNode(
                 func=metadata.func,

@@ -211,12 +211,8 @@ ref_aligned = ref_aligned.sortby("longitude")
 dag_trans_aligned = dag_trans_aligned.sortby("longitude")
 dag_no_trans_aligned = dag_no_trans_aligned.sortby("longitude")
 
-print(
-    f"Longitude range : [{ref_aligned.longitude.min().values:.1f}, {ref_aligned.longitude.max().values:.1f}]"
-)
-print(
-    f"Latitude range  : [{ref_aligned.latitude.min().values:.1f}, {ref_aligned.latitude.max().values:.1f}]"
-)
+print(f"Longitude range : [{ref_aligned.longitude.min().values:.1f}, {ref_aligned.longitude.max().values:.1f}]")
+print(f"Latitude range  : [{ref_aligned.latitude.min().values:.1f}, {ref_aligned.latitude.max().values:.1f}]")
 
 # %% Création de l'animation
 print("\n🎬 CRÉATION DE L'ANIMATION")
@@ -244,9 +240,7 @@ for idx, ax in enumerate(axes):
     ax.add_feature(cfeature.COASTLINE, linewidth=0.5, edgecolor="black", zorder=2)
 
     # Gridlines
-    gl = ax.gridlines(
-        draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--", zorder=3
-    )
+    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--", zorder=3)
     gl.top_labels = False
     gl.right_labels = False
     if idx > 0:
