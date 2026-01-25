@@ -30,41 +30,59 @@ Ce module définit la stratégie de passage à l'échelle pour les simulations m
 
 Ces axes traversent le graphe **sans interaction** entre éléments. Ils sont parallélisables trivialement.
 
-| Axe | Description | Exemple d'usage |
-|-----|-------------|-----------------|
-| `E` (ensemble) | Membres d'ensemble | Simulations stochastiques |
-| `P` (params) | Jeux de paramètres | Exploration / Calibration |
+| Axe            | Description        | Exemple d'usage           |
+| -------------- | ------------------ | ------------------------- |
+| `E` (ensemble) | Membres d'ensemble | États initiaux perturbés, simulations stochastiques |
 
 **Caractéristiques** :
+
 - Aucune communication inter-éléments
 - Parfait pour `jax.vmap`
 - Sharding multi-GPU trivial
+
+**Quand utiliser E ?**
+- États initiaux différents (perturbations pour quantifier l'incertitude)
+- Simulations avec composante stochastique (si ajoutée)
+- Forçages avec variantes (ex: scénarios climatiques)
+
+Si le modèle est purement déterministe avec les mêmes inputs, E n'a pas d'intérêt.
+
+**Exploration de paramètres (P)** :
+L'axe P n'est pas une dimension du modèle mais un axe de batch **externe** créé par le `BatchRunner`. L'utilisateur fournit une grille de paramètres et le runner fait un `vmap` implicite :
+
+```python
+# Grille de paramètres fournie au runner
+param_grid = {"growth_rate": jnp.array([0.1, 0.15, 0.2])}
+results = runner.run_batch(param_grid)  # shape (3, T, Y, X, ...)
+```
 
 ### 2.2 Axes Core (Couplés)
 
 Ces axes nécessitent une **interaction** entre éléments (voisinage, réductions).
 
-| Axe | Type d'interaction | Exemple |
-|-----|-------------------|---------|
-| `Y`, `X` (spatial) | Voisinage (stencil) | Transport, diffusion |
-| `C` (cohort) | Réduction | Prédation `sum(prey)` |
-| `Z` (depth) | Voisinage vertical | Mélange vertical |
+| Axe                | Type d'interaction  | Exemple               |
+| ------------------ | ------------------- | --------------------- |
+| `Y`, `X` (spatial) | Voisinage (stencil) | Transport, diffusion  |
+| `C` (cohort)       | Réduction           | Prédation `sum(prey)` |
+| `Z` (depth)        | Voisinage vertical  | Mélange vertical      |
 
 **Caractéristiques** :
+
 - Communication requise si shardé
 - Identifiés via `@functional(core_dims=[...])`
 - **Interdit de sharder en V1**
 
 ### 2.3 Matrice de Décision
 
-| Axe | Batchable | Shardable (V1) | Shardable (V2+) |
-|-----|-----------|----------------|-----------------|
-| `E` | Oui | Oui | Oui |
-| `T` | Non (séquentiel) | Non | Non |
-| `C` | Dépend | Non | Possible |
-| `Z` | Dépend | Non | Possible |
-| `Y` | Non | Non | Oui (halo) |
-| `X` | Non | Non | Oui (halo) |
+| Axe | Batchable        | Shardable (V1) | Shardable (V2+) |
+| --- | ---------------- | -------------- | --------------- |
+| `E` | Oui              | Oui            | Oui             |
+| `T` | Non (séquentiel) | Non            | Non             |
+| `F` | Dépend           | Non            | Possible        |
+| `C` | Dépend           | Non            | Possible        |
+| `Z` | Dépend           | Non            | Possible        |
+| `Y` | Non              | Non            | Oui (halo)      |
+| `X` | Non              | Non            | Oui (halo)      |
 
 ---
 
@@ -150,13 +168,18 @@ Le sharding est configuré dans `run.yaml` :
 ```yaml
 execution:
   device_layout:
-    mesh: [4, 1]              # 4 GPUs en ligne
+    mesh: [4, 1] # 4 GPUs en ligne
     sharding_rules:
-      ensemble: 0             # Distribué sur mesh[0]
-      params: 0               # Distribué sur mesh[0]
-      spatial: null           # Répliqué (non shardé)
-      cohort: null            # Répliqué
+      E: 0      # Distribué sur mesh[0]
+      T: null   # Répliqué (séquentiel)
+      F: null   # Répliqué
+      C: null   # Répliqué
+      Z: null   # Répliqué
+      Y: null   # Répliqué (V1)
+      X: null   # Répliqué (V1)
 ```
+
+**Note** : On utilise les noms de dimensions canoniques (E, T, F, C, Z, Y, X).
 
 ### 4.2 Implémentation JAX
 
@@ -332,11 +355,11 @@ std_forecast = jnp.std(forecasts, axis=0)
 
 ### 8.1 Ce qui N'EST PAS supporté
 
-| Feature | Raison | Horizon |
-|---------|--------|---------|
-| Sharding spatial | Nécessite halo exchange | V2 |
-| Sharding cohort | Réductions inter-cohort | V2 |
-| Multi-node | Communication réseau | V3 |
+| Feature          | Raison                  | Horizon |
+| ---------------- | ----------------------- | ------- |
+| Sharding spatial | Nécessite halo exchange | V2      |
+| Sharding cohort  | Réductions inter-cohort | V2      |
+| Multi-node       | Communication réseau    | V3      |
 
 ### 8.2 Contraintes Mémoire
 
@@ -352,6 +375,7 @@ Total approximatif: 2-4 GB par simulation
 ```
 
 Pour des domaines plus grands, options :
+
 - Réduire la résolution
 - Augmenter le nombre de chunks temporels
 - Attendre V2 (sharding spatial)
@@ -374,14 +398,15 @@ execution:
   device_layout:
     mesh: [4, 1]
     sharding_rules:
-      E: 0
-      spatial: null
+      E: 0       # Shardé
+      Y: null    # Répliqué
+      X: null    # Répliqué
 
   # I/O asynchrone
   async_io:
     enabled: true
     workers: 2
-    buffer_size: 3  # Chunks en mémoire
+    buffer_size: 3 # Chunks en mémoire
 ```
 
 ### 9.2 Auto-détection
@@ -427,28 +452,39 @@ results = runner.run_batch(
 
 ### 10.2 Méthodes Principales
 
-| Méthode | Description |
-|---------|-------------|
-| `run_batch(params)` | Simulations parallèles |
-| `setup_mesh(config)` | Configure le mesh GPU |
-| `shard(data, axis)` | Distribue les données |
+| Méthode              | Description            |
+| -------------------- | ---------------------- |
+| `run_batch(params)`  | Simulations parallèles |
+| `setup_mesh(config)` | Configure le mesh GPU  |
+| `shard(data, axis)`  | Distribue les données  |
 
 ---
 
 ## 11. Liens avec les Autres Axes
 
-| Axe | Interaction |
-|-----|-------------|
-| Axe 1 (Blueprint) | `core_dims` déclarées dans `@functional` |
-| Axe 2 (Compiler) | Ordre canonique facilite le sharding batch |
-| Axe 3 (Engine) | Runner utilise vmap/sharding |
-| Axe 5 (Auto-Diff) | `vmap` + `grad` composables |
+| Axe               | Interaction                                |
+| ----------------- | ------------------------------------------ |
+| Axe 1 (Blueprint) | `core_dims` déclarées dans `@functional`   |
+| Axe 2 (Compiler)  | Ordre canonique facilite le sharding batch |
+| Axe 3 (Engine)    | Runner utilise vmap/sharding               |
+| Axe 5 (Auto-Diff) | `vmap` + `grad` composables                |
 
 ---
 
 ## 12. Questions Ouvertes (V2+)
 
-- Sharding spatial avec halo exchange
-- Communication inter-GPU pour réductions
-- Support multi-node (MPI/NCCL)
-- Auto-tuning de la taille de batch
+### 12.A. Sharding spatial avec halo exchange
+
+Très intéressant pour les simulations avec transport. A voir si pas trop complexe à implémenter ou si ça demande pas un refactor de l'architecture ?
+
+### 12.B. Communication inter-GPU pour réductions
+
+En fonction de la complexité ? Pour le moment je propose qu'on voit ça en V2.
+
+### 12.C. Support multi-node (MPI/NCCL)
+
+Idem, en V2.
+
+### 12.D. Auto-tuning de la taille de batch
+
+ça a l'air assez simple ? A voir en fonction de la complexité, sinon en V2.

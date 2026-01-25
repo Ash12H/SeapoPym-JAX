@@ -443,7 +443,7 @@ Pour des modèles où toutes les espèces ont la même structure :
 declarations:
   state:
     biomass:
-      dims: ["Y", "X", "C", "S"] # S = species
+      dims: ["Y", "X", "C", "F"] # F = functional_group
 ```
 
 Choisir selon le cas d'usage : hiérarchie si structures hétérogènes, dimension si homogènes.
@@ -462,14 +462,14 @@ Choisir selon le cas d'usage : hiérarchie si structures hétérogènes, dimensi
 | `Z`         | `depth`     | Profondeur verticale                         |
 | `Y`         | `latitude`  | Axe latitudinal                              |
 | `X`         | `longitude` | Axe longitudinal                             |
-| `S`         | `species`   | Espèces (si dimension plutôt que hiérarchie) |
+| `F`         | `functional_group` | Groupes fonctionnels (si dimension plutôt que hiérarchie) |
 
 ### 6.2 Ordre Canonique
 
 L'ordre interne utilisé par le Compilateur (Axe 2) est :
 
 ```
-(E, T, C, Z, Y, X)
+(E, T, F, C, Z, Y, X)
 ```
 
 Les données utilisateur peuvent avoir n'importe quel ordre ; le Compilateur transpose automatiquement.
@@ -484,7 +484,7 @@ dimension_mapping:
   lon: "X"
   time: "T"
   age_class: "C"
-  functional_group: "S"
+  species: "F"
 ```
 
 ---

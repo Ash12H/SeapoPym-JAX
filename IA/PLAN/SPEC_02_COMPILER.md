@@ -41,12 +41,12 @@ Le Compilateur (Linker) transforme le graphe déclaratif (Blueprint + Config) en
 ┌─────────────────────────────────────────────────────────────────┐
 │ ÉTAPE 2 : RENOMMAGE DES DIMENSIONS                              │
 │ - Applique le mapping utilisateur (si fourni)                   │
-│ - Convertit vers les noms canoniques (T, E, C, Z, Y, X)         │
+│ - Convertit vers les noms canoniques (E, T, F, C, Z, Y, X)      │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ ÉTAPE 3 : TRANSPOSITION CANONIQUE                               │
-│ - Transpose tous les DataArrays vers l'ordre (E, T, C, Z, Y, X) │
+│ - Transpose tous les DataArrays vers l'ordre (E, T, F, C, Z, Y, X) │
 │ - Garantit la contiguïté mémoire (C-order)                      │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -96,10 +96,10 @@ def infer_shapes(config: Config) -> dict[str, int]:
 
 ### 3.2 Dimensions Statiques vs Temps
 
-| Type | Comportement | Exemple |
-|------|--------------|---------|
+| Type         | Comportement           | Exemple                  |
+| ------------ | ---------------------- | ------------------------ |
 | **Statique** | Figée à la compilation | `Y=180`, `X=360`, `C=10` |
-| **Temps** | Chunké par le Runner | `T=365` par chunk |
+| **Temps**    | Chunké par le Runner   | `T=365` par chunk        |
 
 Le temps n'est pas "infini" en V1 (offline uniquement). Le Chunked Runner (Axe 3) découpe la dimension temporelle en chunks de taille fixe.
 
@@ -112,17 +112,18 @@ Le temps n'est pas "infini" en V1 (offline uniquement). Le Chunked Runner (Axe 3
 L'ordre canonique interne est :
 
 ```
-(E, T, C, Z, Y, X)
+(E, T, F, C, Z, Y, X)
 ```
 
-| Position | Dimension | Rationale |
-|----------|-----------|-----------|
-| 0 | `E` (ensemble) | Axe de batch, parallélisable via vmap |
-| 1 | `T` (time) | Axe de scan, itéré séquentiellement |
-| 2 | `C` (cohort) | Axe biologique, core_dim fréquent |
-| 3 | `Z` (depth) | Axe vertical |
-| 4 | `Y` (latitude) | Axe spatial |
-| 5 | `X` (longitude) | Axe spatial (dernier = stride 1) |
+| Position | Dimension                | Rationale                               |
+| -------- | ------------------------ | --------------------------------------- |
+| 0        | `E` (ensemble)           | Axe de batch, parallélisable via vmap   |
+| 1        | `T` (time)               | Axe de scan, itéré séquentiellement     |
+| 2        | `F` (functional_group)   | Groupes fonctionnels (si dimension)     |
+| 3        | `C` (cohort)             | Classes d'âge/taille, core_dim fréquent |
+| 4        | `Z` (depth)              | Axe vertical                            |
+| 5        | `Y` (latitude)           | Axe spatial                             |
+| 6        | `X` (longitude)          | Axe spatial (dernier = stride 1)        |
 
 ### 4.2 Transposition Automatique
 
@@ -137,6 +138,7 @@ def transpose_canonical(da: xr.DataArray, target_dims: list[str]) -> xr.DataArra
 ### 4.3 Contiguïté Mémoire
 
 La transposition garantit que les arrays sont **C-contiguous** (row-major), optimisant :
+
 - L'accès mémoire séquentiel sur GPU
 - La coalescence des lectures VRAM
 - La compatibilité avec `jax.jit`
@@ -184,10 +186,11 @@ Le masque est traité comme un input standard du modèle :
 # Dans la Config
 forcings:
   temperature: "/data/sst.nc"
-  mask: "/data/land_mask.nc"  # Fourni par l'utilisateur
+  mask: "/data/land_mask.nc" # Fourni par l'utilisateur
 ```
 
 **Formes supportées** :
+
 - Statique : `(Y, X)` — masque terre/mer fixe
 - Dynamique : `(T, Y, X)` — masque variable (ex: glace de mer)
 
@@ -225,12 +228,14 @@ class CompiledModel:
 
 ### 6.2 Séparation des Rôles
 
-| Catégorie | Mutabilité | Exemple |
-|-----------|------------|---------|
-| `state` | Évolue à chaque pas | `biomass`, `concentration` |
-| `forcings` | Lu depuis les données | `temperature`, `current_u` |
+| Catégorie    | Mutabilité              | Exemple                    |
+| ------------ | ----------------------- | -------------------------- |
+| `state`      | Évolue à chaque pas     | `biomass`, `concentration` |
+| `forcings`   | Lu depuis les données   | `temperature`, `current_u` |
 | `parameters` | Constant pendant le run | `growth_rate`, `mortality` |
-| `mask` | Constant | `land_mask` |
+| `mask`       | Constant (ou dynamique) | `land_mask`, `ice_mask`    |
+
+**Note** : Le mask est stocké dans `forcings` pour uniformité. Il peut être statique `(Y, X)` ou dynamique `(T, Y, X)`. L'attribut `mask` dans `CompiledModel` est un raccourci vers `forcings["mask"]`.
 
 ---
 
@@ -248,6 +253,7 @@ dimension_mapping:
   time: "T"
   age_class: "C"
   member: "E"
+  species: "F"
 ```
 
 ### 7.2 Application
@@ -271,7 +277,7 @@ from seapopym.compiler import Compiler
 # Configuration du compilateur
 compiler = Compiler(
     backend="jax",
-    canonical_order=["E", "T", "C", "Z", "Y", "X"],
+    canonical_order=["E", "T", "F", "C", "Z", "Y", "X"],
     fill_nan=0.0
 )
 
@@ -285,22 +291,22 @@ forcings = compiled_model.forcings
 
 ### 8.2 Méthodes Principales
 
-| Méthode | Description |
-|---------|-------------|
-| `compile(blueprint, config)` | Pipeline complet → `CompiledModel` |
-| `infer_shapes(config)` | Lecture des métadonnées → `dict[str, int]` |
-| `prepare_arrays(dataset)` | Transpose + strip + preprocess |
+| Méthode                      | Description                                |
+| ---------------------------- | ------------------------------------------ |
+| `compile(blueprint, config)` | Pipeline complet → `CompiledModel`         |
+| `infer_shapes(config)`       | Lecture des métadonnées → `dict[str, int]` |
+| `prepare_arrays(dataset)`    | Transpose + strip + preprocess             |
 
 ---
 
 ## 9. Gestion des Erreurs
 
-| Code | Type | Description |
-|------|------|-------------|
-| `E201` | `ShapeInferenceError` | Impossible de lire les métadonnées |
-| `E202` | `GridAlignmentError` | Dimensions incohérentes entre fichiers |
-| `E203` | `MissingDimensionError` | Dimension requise absente des données |
-| `E204` | `TransposeError` | Échec de transposition |
+| Code   | Type                    | Description                            |
+| ------ | ----------------------- | -------------------------------------- |
+| `E201` | `ShapeInferenceError`   | Impossible de lire les métadonnées     |
+| `E202` | `GridAlignmentError`    | Dimensions incohérentes entre fichiers |
+| `E203` | `MissingDimensionError` | Dimension requise absente des données  |
+| `E204` | `TransposeError`        | Échec de transposition                 |
 
 ---
 
@@ -319,27 +325,38 @@ Les données ne sont effectivement chargées que lors de l'appel `.values` ou `.
 
 ### 10.2 Formats Supportés
 
-| Format | Librairie | Lazy Load |
-|--------|-----------|-----------|
-| NetCDF4 | `netcdf4` | Oui |
-| Zarr | `zarr` | Oui (recommandé pour gros volumes) |
-| GRIB | `cfgrib` | Partiel |
+| Format  | Librairie | Lazy Load                          |
+| ------- | --------- | ---------------------------------- |
+| NetCDF4 | `netcdf4` | Oui                                |
+| Zarr    | `zarr`    | Oui (recommandé pour gros volumes) |
+| GRIB    | `cfgrib`  | Partiel                            |
 
 ---
 
 ## 11. Liens avec les Autres Axes
 
-| Axe | Interaction |
-|-----|-------------|
-| Axe 1 (Blueprint) | Reçoit `Blueprint` + `Config` validés |
-| Axe 3 (Engine) | Fournit `CompiledModel` avec pytrees prêts |
+| Axe                 | Interaction                                      |
+| ------------------- | ------------------------------------------------ |
+| Axe 1 (Blueprint)   | Reçoit `Blueprint` + `Config` validés            |
+| Axe 3 (Engine)      | Fournit `CompiledModel` avec pytrees prêts       |
 | Axe 4 (Parallelism) | L'ordre canonique facilite le sharding batch (E) |
-| Axe 5 (Auto-Diff) | Identifie les `trainable_params` dans le pytree |
+| Axe 5 (Auto-Diff)   | Identifie les `trainable_params` dans le pytree  |
 
 ---
 
-## 12. Questions Ouvertes (V2+)
+## 12. Questions Ouvertes (V2+) & Orientations
 
-- Support du chargement incrémental (streaming Zarr chunk par chunk)
-- Compression/décompression à la volée
-- Cache de compilation pour éviter re-transposition
+### 12.1 Support du chargement incrémental (Streaming)
+
+- **Sujet** : Streaming Zarr chunk par chunk pour éviter de tout charger en RAM.
+- **Décision** : Validé comme une très bonne idée (Priorité V2, voir V1 si ça n'est pas trop complexe à mettre en place). Cela est nécessaire pour permettre les calculs sur de grands jeux de données historiques sans saturer la mémoire.
+
+### 12.2 Compression/décompression à la volée
+
+- **Sujet** : Optimisation des I/O et de l'empreinte mémoire.
+- **Décision** : Basse priorité. C'est une amélioration technique bienvenue, mais qui peut attendre que le besoin de performance I/O devienne critique.
+
+### 12.3 Cache de compilation
+
+- **Sujet** : Sauvegarde des arrays transposés pour éviter le recalcul.
+- **Décision** : Pas utile pour le moment. À reconsidérer lors de travaux sur des "ensembles" (simulations multiples) où le coût de redémarrage deviendrait gênant.

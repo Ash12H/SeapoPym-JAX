@@ -41,15 +41,15 @@ parameters:
   growth_rate:
     value: 0.1
     trainable: true
-    bounds: [0.0, 1.0]    # Contraintes (optionnel)
-    prior:                 # Prior bayésien (optionnel)
+    bounds: [0.0, 1.0] # Contraintes (optionnel)
+    prior: # Prior bayésien (optionnel)
       type: "normal"
       mean: 0.1
       std: 0.02
 
   # Paramètre vectoriel optimisable
   temperature_sensitivity:
-    value: [0.1, 0.2, 0.3]  # Par cohorte
+    value: [0.1, 0.2, 0.3] # Par cohorte
     trainable: true
     bounds: [0.0, 0.5]
 ```
@@ -96,12 +96,12 @@ class ParameterSet:
 
 ### 3.2 Composants
 
-| Composant | Rôle | Implémentation |
-|-----------|------|----------------|
-| **Model Forward** | Simulation complète | `GradientRunner.run()` |
-| **Loss Function** | Écart observations/simulation | Définie par l'utilisateur |
-| **Gradient** | Dérivée de la loss | `jax.grad` / `jax.value_and_grad` |
-| **Optimizer** | Mise à jour des paramètres | `optax` |
+| Composant         | Rôle                          | Implémentation                    |
+| ----------------- | ----------------------------- | --------------------------------- |
+| **Model Forward** | Simulation complète           | `GradientRunner.run()`            |
+| **Loss Function** | Écart observations/simulation | Définie par l'utilisateur         |
+| **Gradient**      | Dérivée de la loss            | `jax.grad` / `jax.value_and_grad` |
+| **Optimizer**     | Mise à jour des paramètres    | `optax`                           |
 
 ---
 
@@ -159,6 +159,17 @@ def mae_loss(predictions: Array, targets: Array, mask: Array = None) -> Array:
 def nll_loss(predictions: Array, targets: Array, sigma: Array) -> Array:
     """Negative Log-Likelihood (Gaussian)."""
     return 0.5 * jnp.mean(((predictions - targets) / sigma) ** 2 + jnp.log(sigma ** 2))
+```
+
+**Note sur le mask** : Le mask reste dans `forcings` pour le forward pass, mais il est également crucial pour la loss. La fonction `create_loss_fn` récupère le mask depuis le modèle :
+
+```python
+def create_loss_fn(model, observations):
+    def loss_fn(params):
+        outputs = model.run(params)
+        mask = model.forcings["mask"]  # Accès uniforme
+        return mse_loss(outputs["biomass"], observations, mask)
+    return loss_fn
 ```
 
 ### 4.3 Loss Composite
@@ -240,7 +251,7 @@ def checkpointed_scan(step_fn, init, xs, checkpoint_every: int = 50):
 optimization:
   checkpointing:
     enabled: true
-    interval: 50        # Checkpoint tous les 50 pas
+    interval: 50 # Checkpoint tous les 50 pas
     # Ou auto-ajustement basé sur la mémoire disponible
     auto: false
     target_memory_gb: 8.0
@@ -249,11 +260,11 @@ optimization:
 ### 5.5 Trade-off Mémoire/Calcul
 
 | Checkpoint Interval | Mémoire | Temps Forward | Temps Backward |
-|---------------------|---------|---------------|----------------|
-| 1 (tout stocker) | MAX | 1x | 1x |
-| 10 | ~10% | 1x | ~1.1x |
-| 50 | ~2% | 1x | ~1.5x |
-| 100 | ~1% | 1x | ~2x |
+| ------------------- | ------- | ------------- | -------------- |
+| 1 (tout stocker)    | MAX     | 1x            | 1x             |
+| 10                  | ~10%    | 1x            | ~1.1x          |
+| 50                  | ~2%     | 1x            | ~1.5x          |
+| 100                 | ~1%     | 1x            | ~2x            |
 
 ---
 
@@ -261,12 +272,12 @@ optimization:
 
 ### 6.1 Contrainte vs StreamingRunner
 
-| Aspect | StreamingRunner | GradientRunner |
-|--------|-----------------|----------------|
-| I/O disque | Entre chunks | Aucun |
-| Chaîne gradient | Brisée | Préservée |
-| Mémoire | Bornée par chunk | Tout en VRAM |
-| Checkpointing | Non | Obligatoire |
+| Aspect          | StreamingRunner  | GradientRunner |
+| --------------- | ---------------- | -------------- |
+| I/O disque      | Entre chunks     | Aucun          |
+| Chaîne gradient | Brisée           | Préservée      |
+| Mémoire         | Bornée par chunk | Tout en VRAM   |
+| Checkpointing   | Non              | Obligatoire    |
 
 ### 6.2 Implémentation
 
@@ -460,7 +471,7 @@ optimization:
 
   # Contraintes
   constraints:
-    method: "projection"  # ou "penalty"
+    method: "projection" # ou "penalty"
 ```
 
 ---
@@ -527,11 +538,11 @@ class OptimizationResult:
 
 ### 11.1 Ce qui N'EST PAS supporté
 
-| Feature | Raison | Horizon |
-|---------|--------|---------|
-| Inférence bayésienne | Complexité | V2 |
-| Gradients d'ordre 2 | Mémoire | V2 |
-| Adjoint continu | Implémentation | V2+ |
+| Feature              | Raison         | Horizon |
+| -------------------- | -------------- | ------- |
+| Inférence bayésienne | Complexité     | V2      |
+| Gradients d'ordre 2  | Mémoire        | V2      |
+| Adjoint continu      | Implémentation | V2+     |
 
 ### 11.2 Reproductibilité
 
@@ -543,19 +554,33 @@ La reproductibilité cross-device n'est pas garantie en V1 (ordre des opération
 
 ## 12. Liens avec les Autres Axes
 
-| Axe | Interaction |
-|-----|-------------|
-| Axe 1 (Blueprint) | Lit `trainable: true` dans Config |
-| Axe 2 (Compiler) | Sépare params fixes/trainable |
-| Axe 3 (Engine) | Utilise `GradientRunner` |
-| Axe 4 (Parallelism) | `vmap(grad)` pour batch gradient |
+| Axe                 | Interaction                       |
+| ------------------- | --------------------------------- |
+| Axe 1 (Blueprint)   | Lit `trainable: true` dans Config |
+| Axe 2 (Compiler)    | Sépare params fixes/trainable     |
+| Axe 3 (Engine)      | Utilise `GradientRunner`          |
+| Axe 4 (Parallelism) | `vmap(grad)` pour batch gradient  |
 
 ---
 
 ## 13. Questions Ouvertes (V2+)
 
-- Inférence bayésienne (MCMC, VI)
-- Gradients d'ordre 2 (Newton, L-BFGS Hessian-free)
-- Support du mode adjoint continu
-- Parallelisation du gradient sur multiple GPUs
-- Gestion automatique de la seed pour reproductibilité
+### 12.A. Inférence bayésienne (MCMC, VI)
+
+Intéressant oui. Mais pas tout de suite.
+
+### 12.B. Gradients d'ordre 2 (Newton, L-BFGS Hessian-free)
+
+Idem , c'est intéressant mais pour plus tard.
+
+### 12.C. Support du mode adjoint continu
+
+Non.
+
+### 12.D. Parallelisation du gradient sur multiple GPUs
+
+Plus tard. Moins prioritaire.
+
+### 12.E. Gestion automatique de la seed pour reproductibilité
+
+Plus tard. Moins prioritaire.

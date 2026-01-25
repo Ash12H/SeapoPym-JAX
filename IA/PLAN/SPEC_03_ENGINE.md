@@ -55,11 +55,11 @@ Le Moteur d'Exécution orchestre la boucle temporelle, gère les I/O et supporte
 
 ### 2.2 Responsabilités
 
-| Composant | Rôle |
-|-----------|------|
-| **Runner** | Orchestration haut niveau (chunking, I/O) |
+| Composant       | Rôle                                           |
+| --------------- | ---------------------------------------------- |
+| **Runner**      | Orchestration haut niveau (chunking, I/O)      |
 | **Step Kernel** | Logique d'un pas de temps (agnostique backend) |
-| **Backend** | Implémentation de la boucle (scan ou for) |
+| **Backend**     | Implémentation de la boucle (scan ou for)      |
 
 ---
 
@@ -72,7 +72,6 @@ def step_fn(
     state: dict[str, Array],
     forcings_t: dict[str, Array],
     parameters: dict[str, Array],
-    mask: Array,
     dt: float
 ) -> tuple[dict[str, Array], dict[str, Array]]:
     """
@@ -80,9 +79,8 @@ def step_fn(
 
     Args:
         state: Variables d'état au temps t
-        forcings_t: Forçages instantanés (slice temporel)
+        forcings_t: Forçages instantanés (slice temporel), inclut le mask
         parameters: Constantes du modèle
-        mask: Masque binaire
         dt: Pas de temps (secondes)
 
     Returns:
@@ -91,10 +89,15 @@ def step_fn(
     """
 ```
 
+**Note** : Le mask est inclus dans `forcings_t["mask"]` pour uniformité. Il peut être statique (broadcasté) ou dynamique (slice temporel).
+
 ### 3.2 Logique Interne
 
 ```python
-def step_fn(state, forcings_t, parameters, mask, dt):
+def step_fn(state, forcings_t, parameters, dt):
+    # Accès au mask depuis forcings
+    mask = forcings_t.get("mask", 1.0)  # Défaut: pas de masque
+
     # 1. Calcul des tendances via le graphe de processus
     tendencies = {}
     for process in graph.processes:
@@ -167,6 +170,7 @@ class StreamingRunner:
 ```
 
 **Caractéristiques** :
+
 - Chunks de taille configurable (ex: 365 jours = 1 an)
 - I/O asynchrone entre chunks (thread pool)
 - Mémoire bornée par taille du chunk
@@ -206,18 +210,19 @@ class GradientRunner:
 ```
 
 **Caractéristiques** :
+
 - Un seul appel `jax.lax.scan` (chaîne de gradient préservée)
 - Pas d'I/O intermédiaire
 - Checkpointing requis pour la mémoire (Axe 5)
 
 ### 4.3 Choix du Runner
 
-| Critère | StreamingRunner | GradientRunner |
-|---------|-----------------|----------------|
-| Simulations longues | Oui | Limité (mémoire) |
-| Optimisation | Non | Oui |
-| Écriture disque | Oui | Non |
-| Backend | JAX ou NumPy | JAX uniquement |
+| Critère             | StreamingRunner | GradientRunner   |
+| ------------------- | --------------- | ---------------- |
+| Simulations longues | Oui             | Limité (mémoire) |
+| Optimisation        | Non             | Oui              |
+| Écriture disque     | Oui             | Non              |
+| Backend             | JAX ou NumPy    | JAX uniquement   |
 
 **API** :
 
@@ -342,6 +347,7 @@ Chunk 2:                                [===COMPUTE===]
 ### 7.1 Stratégie
 
 En cas d'erreur pendant l'exécution :
+
 1. Sauvegarder tout ce qui a été calculé jusqu'à présent
 2. Écrire sur disque
 3. Lever l'exception avec contexte
@@ -370,12 +376,12 @@ La reprise depuis un checkpoint n'est pas supportée en V1. L'utilisateur doit r
 
 ### 8.1 Vocabulaire
 
-| Terme JAX | Rôle dans SeapoPym | Exemple |
-|-----------|-------------------|---------|
-| **Carry** | State (mutable) | `biomass`, `concentration` |
-| **Inputs (xs)** | Forcings (par temps) | `temperature[t]`, `current[t]` |
-| **Outputs (ys)** | Diagnostiques | `tendency`, `flux` |
-| **Static** | Parameters (closure) | `growth_rate` |
+| Terme JAX        | Rôle dans SeapoPym   | Exemple                        |
+| ---------------- | -------------------- | ------------------------------ |
+| **Carry**        | State (mutable)      | `biomass`, `concentration`     |
+| **Inputs (xs)**  | Forcings (par temps) | `temperature[t]`, `current[t]` |
+| **Outputs (ys)** | Diagnostiques        | `tendency`, `flux`             |
+| **Static**       | Parameters (closure) | `growth_rate`                  |
 
 ### 8.2 Schéma
 
@@ -398,15 +404,16 @@ final_carry, outputs = jax.lax.scan(
 ```yaml
 # Dans run.yaml
 execution:
-  backend: "jax"              # "jax" ou "numpy"
-  chunk_size: 365             # Jours par chunk (StreamingRunner)
-  async_io: true              # I/O asynchrone
-  io_workers: 2               # Threads d'écriture
+  backend: "jax" # "jax" ou "numpy"
+  chunk_size: 365 # Jours par chunk (StreamingRunner)
+  async_io: true # I/O asynchrone
+  io_workers: 2 # Threads d'écriture
 ```
 
 ### 9.2 Validation
 
 Le système vérifie automatiquement :
+
 - `chunk_size` divise `T` (ou ajuste le dernier chunk)
 - Backend disponible (JAX installé si demandé)
 - Permissions d'écriture sur `output_path`
@@ -439,28 +446,39 @@ result = model.optimize(
 
 ### 10.2 Méthodes Principales
 
-| Méthode | Runner | Description |
-|---------|--------|-------------|
-| `run(output_path, chunk_size)` | Streaming | Simulation avec écriture |
-| `optimize(loss_fn, optimizer)` | Gradient | Calibration par gradient descent |
-| `step(state, forcings_t)` | - | Un pas de temps (debug) |
+| Méthode                        | Runner    | Description                      |
+| ------------------------------ | --------- | -------------------------------- |
+| `run(output_path, chunk_size)` | Streaming | Simulation avec écriture         |
+| `optimize(loss_fn, optimizer)` | Gradient  | Calibration par gradient descent |
+| `step(state, forcings_t)`      | -         | Un pas de temps (debug)          |
 
 ---
 
 ## 11. Liens avec les Autres Axes
 
-| Axe | Interaction |
-|-----|-------------|
-| Axe 1 (Blueprint) | Résout les fonctions via le registre |
-| Axe 2 (Compiler) | Reçoit `CompiledModel` prêt |
-| Axe 4 (Parallelism) | `vmap` sur le batch axis (E) |
-| Axe 5 (Auto-Diff) | GradientRunner + checkpointing |
+| Axe                 | Interaction                          |
+| ------------------- | ------------------------------------ |
+| Axe 1 (Blueprint)   | Résout les fonctions via le registre |
+| Axe 2 (Compiler)    | Reçoit `CompiledModel` prêt          |
+| Axe 4 (Parallelism) | `vmap` sur le batch axis (E)         |
+| Axe 5 (Auto-Diff)   | GradientRunner + checkpointing       |
 
 ---
 
 ## 12. Questions Ouvertes (V2+)
 
-- Support de schémas d'intégration avancés (RK4, implicit)
-- Mécanisme de reprise depuis checkpoint
-- Adaptive time stepping
-- Streaming temps réel (online)
+### 12.A. Support de schémas d'intégration avancés (RK4, implicit)
+
+Basse priorité pour le moment.
+
+### 12.B. Mécanisme de reprise depuis checkpoint
+
+Pas une priorité non plus.
+
+### 12.C. Adaptive time stepping
+
+Pas une priorité et ça a l'air très complexe avec JAX. Mais dans le futur j'imagine qu'on pourrait adapter le time step à notre condition CFL sur le transport.
+
+### 12.D. Streaming temps réel (online)
+
+Pas une priorité.
