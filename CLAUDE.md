@@ -1,1 +1,2 @@
-Read AGENTS.md file.
+- For Python task, you can use “uv,” especially for tasks related to the environment.
+- Don't mention Claude in commit message.

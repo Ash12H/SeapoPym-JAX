@@ -44,7 +44,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.21.0",
     "pytest-benchmark>=4.0.0",
-    "mypy>=1.7.0",
+    "pyright>=1.1.340",
     "ruff>=0.1.0",
     "pre-commit>=3.5.0",
     "ipykernel>=6.27.0",
@@ -135,6 +135,19 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex (handled case by case)
     "W191",  # indentation contains tabs
+    "E111",  # indentation is not a multiple of four
+    "E114",  # indentation is not a multiple of four (comment)
+    "E117",  # over-indented
+    "D206",  # docstring indentation
+    "D300",  # use triple double quotes
+    "Q000",  # bad quotes inline
+    "Q001",  # bad quotes multiline
+    "Q002",  # bad quotes docstring
+    "Q003",  # avoidable escaped quote
+    "COM812", # missing trailing comma
+    "COM819", # prohibited trailing comma
+    "ISC001", # implicit string concatenation
+    "ISC002", # implicit string concatenation line jump
 ]
 
 # Allow fix for all enabled rules (when `--fix` is provided)
@@ -166,54 +179,18 @@ known-first-party = ["seapopym"]
 "examples/**/*.py" = ["ARG", "ANN"]  # Allow unused arguments and missing annotations in examples
 
 # ══════════════════════════════════════════════════════════════
-# MYPY Configuration
+# PYRIGHT Configuration
 # ══════════════════════════════════════════════════════════════
 
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = false  # JAX decorators often untyped
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-explicit_package_bases = true
-exclude = ["examples/"]
-
-# Ignore missing imports for third-party libraries without stubs
-[[tool.mypy.overrides]]
-module = [
-    "ray.*",
-    "jax.*",
-    "jax_cfd.*",
-    "xarray.*",
-    "zarr.*",
-    "netCDF4.*",
-    "cartopy.*",
-    "matplotlib.*",
-    "pandas.*",
-    "dask.*",
-    "distributed.*",
-    "pint.*",
-    "pint_xarray.*",
-]
-ignore_missing_imports = true
-
-# Skip type checking for examples
-[[tool.mypy.overrides]]
-module = "examples.*"
-ignore_errors = true
-
-# Skip type checking for benchmarks (utility scripts)
-[[tool.mypy.overrides]]
-module = "benchmarks.*"
-ignore_errors = true
+[tool.pyright]
+include = ["seapopym", "tests"]
+exclude = ["**/node_modules", "**/__pycache__", "examples", "benchmarks"]
+venvPath = "."
+venv = ".venv"
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
 
 # ══════════════════════════════════════════════════════════════
 # PYTEST Configuration

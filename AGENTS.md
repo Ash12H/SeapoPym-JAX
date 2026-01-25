@@ -1,2 +1,0 @@
-- For each Python task, you can use “uv,” especially for tasks related to the environment.
-- For coordinates names we use @seapopym/standard/coordinates.py enumerations.

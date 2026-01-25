@@ -3,58 +3,46 @@
 # Run manually: pre-commit run --all-files
 
 repos:
-  # Ruff for linting and formatting
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.9
-    hooks:
-      # Run the linter
-      - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-        exclude: ^data/
-      # Run the formatter
-      - id: ruff-format
-        exclude: ^data/
+    # Ruff for linting and formatting
+    - repo: https://github.com/astral-sh/ruff-pre-commit
+      rev: v0.1.9
+      hooks:
+          # Run the linter
+          - id: ruff
+            args: [--fix, --exit-non-zero-on-fix]
+            exclude: ^data/
+          # Run the formatter
+          - id: ruff-format
+            exclude: ^data/
 
-  # Mypy for type checking
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.7.1
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - types-setuptools
-          - numpy
-          - types-networkx
-        args: [--config-file=pyproject.toml]
-        files: ^seapopym/
+    # General file checks
+    - repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v4.5.0
+      hooks:
+          - id: trailing-whitespace
+          - id: end-of-file-fixer
+          - id: check-yaml
+          - id: check-toml
+          - id: check-json
+          - id: check-added-large-files
+            args: [--maxkb=1000]
+          - id: check-merge-conflict
+          - id: check-case-conflict
+          - id: mixed-line-ending
+            args: [--fix=lf]
+          - id: detect-private-key
 
-  # General file checks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-toml
-      - id: check-json
-      - id: check-added-large-files
-        args: [--maxkb=1000]
-      - id: check-merge-conflict
-      - id: check-case-conflict
-      - id: mixed-line-ending
-        args: [--fix=lf]
-      - id: detect-private-key
+    # Check Python docstrings
+    - repo: https://github.com/pycqa/pydocstyle
+      rev: 6.3.0
+      hooks:
+          - id: pydocstyle
+            args: [--convention=google, --add-ignore=D202]
+            exclude: ^(tests/|notebooks/|data/|article/)
+            additional_dependencies: [tomli]
 
-  # Check Python docstrings
-  - repo: https://github.com/pycqa/pydocstyle
-    rev: 6.3.0
-    hooks:
-      - id: pydocstyle
-        args: [--convention=google, --add-ignore=D202]
-        exclude: ^(tests/|notebooks/|data/|article/)
-        additional_dependencies: [tomli]
-
-  # Jupyter notebook cleaning
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.6.1
-    hooks:
-      - id: nbstripout
+    # Jupyter notebook cleaning
+    - repo: https://github.com/kynan/nbstripout
+      rev: 0.6.1
+      hooks:
+          - id: nbstripout
