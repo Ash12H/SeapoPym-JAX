@@ -175,6 +175,74 @@ class TestValidateBlueprint:
         assert result.graph is not None
         assert len(result.graph.nodes) > 0
 
+    def test_unit_mismatch_error(self):
+        """Test validation fails for unit mismatch (strict equality)."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {
+                        "biomass": {"units": "kg"},  # Mismatch: function expects 'g'
+                    },
+                    "parameters": {
+                        "rate": {"units": "1/d"},
+                    },
+                    "forcings": {},
+                    "derived": {},
+                },
+                "process": [
+                    {
+                        "func": "test:growth",
+                        "inputs": {"biomass": "state.biomass", "rate": "parameters.rate"},
+                        "outputs": {"out": {"target": "derived.result", "type": "derived"}},
+                    }
+                ],
+            }
+        )
+
+        result = validate_blueprint(bp, backend="jax")
+        assert not result.valid
+        # Should generate an error, not a warning
+        assert any(e.code == "E205" for e in result.errors)
+        # Check specific message content if needed
+        error_msgs = [str(e) for e in result.errors if e.code == "E205"]
+        assert any("Unit mismatch" in msg for msg in error_msgs)
+
+    def test_tendency_unit_error(self):
+        """Test validation fails if tendency lacks time dimension."""
+        # Create a dummy function returning dimensionless
+        from seapopym.blueprint import functional
+
+        @functional(name="test:bad_tendency", backend="jax", units={"return": "count"})
+        def bad_tendency(x):
+            return x
+
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"pop": {"units": "count"}},
+                    "parameters": {},
+                    "forcings": {},
+                },
+                "process": [
+                    {
+                        "func": "test:bad_tendency",
+                        "inputs": {"x": "state.pop"},
+                        "outputs": {"tendency": {"target": "tendencies.pop", "type": "tendency"}},
+                    }
+                ],
+            }
+        )
+
+        result = validate_blueprint(bp, backend="jax")
+        assert not result.valid
+        assert any(e.code == "E205" for e in result.errors)
+        error_msgs = [str(e) for e in result.errors if e.code == "E205"]
+        assert any("lacks a time dimension" in msg for msg in error_msgs)
+
 
 class TestValidateConfig:
     """Tests for validate_config."""

@@ -265,6 +265,11 @@ class ExecutionParams(BaseModel):
         time_range: Start and end dates as strings.
         dt: Timestep as string (e.g., "1d", "6h").
         output_path: Optional path for output files.
+        forcing_interpolation: Method for temporal interpolation of forcings.
+            - "constant": Broadcast static forcings (default, existing behavior)
+            - "nearest": Nearest neighbor for under-sampled forcings
+            - "linear": Linear interpolation between points
+            - "ffill": Forward fill (repeat last known value)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -272,6 +277,7 @@ class ExecutionParams(BaseModel):
     time_range: tuple[str, str] | None = None
     dt: str = "1d"
     output_path: str | None = None
+    forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
 
     @field_validator("time_range", mode="before")
     @classmethod

@@ -115,7 +115,7 @@ class TestStreamingRunner:
         runner = StreamingRunner(model, chunk_size=10)
 
         output_path = tmp_path / "output"
-        final_state = runner.run(str(output_path))
+        final_state, _ = runner.run(str(output_path))
 
         # Check final state
         assert "biomass" in final_state
@@ -135,7 +135,7 @@ class TestStreamingRunner:
         runner = StreamingRunner(model, chunk_size=10)
 
         output_path = tmp_path / "output"
-        final_state = runner.run(str(output_path))
+        final_state, _ = runner.run(str(output_path))
 
         assert "biomass" in final_state
 
@@ -199,6 +199,31 @@ class TestStreamingRunner:
 
         with pytest.raises(ChunkingError):
             runner.run(str(tmp_path / "output"))
+
+    def test_run_in_memory(self, simple_blueprint, simple_config):
+        """Test running simulation with in-memory output (no path)."""
+
+        @functional(name="test:growth", backend="numpy")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        runner = StreamingRunner(model, chunk_size=10)
+
+        final_state, outputs = runner.run(output_path=None)
+
+        # Check return signature
+        assert "biomass" in final_state
+        assert outputs is not None
+        assert "biomass" in outputs
+
+        # Check shape
+        # Input has 30 timesteps. Output should correspond.
+        assert outputs["biomass"].shape == (30, 5, 5)
+
+        # Check integrity
+        # Last output step should match final state (since output is state var 'biomass')
+        np.testing.assert_array_equal(outputs["biomass"][-1], final_state["biomass"])
 
 
 class TestGradientRunner:

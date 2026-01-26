@@ -176,18 +176,42 @@ class Compiler:
         dim_mapping: dict[str, str] | None,
         shapes: dict[str, int],
     ) -> tuple[dict[str, Array], dict[str, Array]]:
-        """Prepare forcing arrays."""
+        """Prepare forcing arrays with optional temporal interpolation.
+
+        Forcings are processed as follows:
+        1. Static forcings (no T dimension): kept as-is (broadcasted at runtime)
+        2. Temporally aligned forcings (shape[0] == n_timesteps): kept as-is
+        3. Under-sampled forcings (shape[0] < n_timesteps): interpolated
+
+        The interpolation method is specified in config.execution.forcing_interpolation.
+        """
         forcings: dict[str, Array] = {}
         coords: dict[str, Array] = {}
         coords_extracted = False
+        n_timesteps = shapes.get("T", 1)
+        interp_method = config.execution.forcing_interpolation
 
         for name, source in config.forcings.items():
-            arr, dims, mask = prepare_array(
+            arr, _dims, _mask = prepare_array(
                 source,
                 dimension_mapping=dim_mapping,
                 backend=self.backend,
                 fill_nan=self.fill_nan,
             )
+
+            # Check if temporal interpolation is needed
+            # Only interpolate if:
+            # 1. Array is valid
+            # 2. Time dimension is present (first canonical dimension)
+            # 3. Timesteps don't match
+            # 4. Interpolation is enabled
+            time_dim = "T"
+            if (
+                arr.ndim > 0 and time_dim in _dims and arr.shape[0] != n_timesteps and interp_method != "constant"
+            ):  # Forcing has a time dimension but doesn't match expected timesteps
+                # Apply interpolation
+                arr = self._interpolate_forcing(arr, arr.shape[0], n_timesteps, interp_method)
+
             forcings[name] = arr
 
             # If this is the mask, keep track of it separately
@@ -215,6 +239,67 @@ class Compiler:
 
         return forcings, coords
 
+    def _interpolate_forcing(
+        self,
+        forcing: Array,
+        source_len: int,
+        target_len: int,
+        method: str,
+    ) -> Array:
+        """Interpolate forcing data to target number of timesteps.
+
+        Args:
+            forcing: Original forcing array (shape: (T_source, ...)).
+            source_len: Source number of timesteps.
+            target_len: Target number of timesteps.
+            method: Interpolation method ("nearest", "linear", "ffill").
+
+        Returns:
+            Interpolated forcing (shape: (T_target, ...)).
+        """
+        import numpy as np
+
+        # Convert to numpy for interpolation (if JAX)
+        forcing_np = np.asarray(forcing)
+
+        # Source and target indices
+        source_indices = np.arange(source_len)
+        target_indices = np.linspace(0, source_len - 1, target_len)
+
+        if method == "nearest":
+            # Nearest neighbor interpolation
+            nearest_idx = np.round(target_indices).astype(int)
+            nearest_idx = np.clip(nearest_idx, 0, source_len - 1)
+            result = forcing_np[nearest_idx]
+
+        elif method == "linear":
+            # Linear interpolation
+            from scipy.interpolate import interp1d
+
+            # Interpolate along first axis (time)
+            # Note: fill_value="extrapolate" allows extrapolation beyond bounds
+            f = interp1d(source_indices, forcing_np, axis=0, kind="linear", fill_value="extrapolate")  # type: ignore[arg-type]
+            result = f(target_indices)
+
+        elif method == "ffill":
+            # Forward fill: repeat each value until next sample
+            # Map target indices to source indices (floor)
+            ffill_idx = np.floor(target_indices).astype(int)
+            ffill_idx = np.clip(ffill_idx, 0, source_len - 1)
+            result = forcing_np[ffill_idx]
+
+        else:
+            # Should not happen (validated by Pydantic)
+            raise ValueError(f"Unknown interpolation method: {method}")
+
+        # Convert back to target backend
+        if self.backend == "jax":
+            import jax.numpy as jnp
+
+            return jnp.asarray(result)
+        else:
+            return result
+
     def _prepare_state(
         self,
         config: Config,
@@ -232,7 +317,7 @@ class Compiler:
                     # Nested group
                     process_state(value, f"{full_name}.")
                 else:
-                    arr, dims, mask = prepare_array(
+                    arr, _dims, _mask = prepare_array(
                         value,
                         dimension_mapping=dim_mapping,
                         backend=self.backend,

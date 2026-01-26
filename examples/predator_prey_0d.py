@@ -26,7 +26,17 @@ from seapopym.engine import StreamingRunner
 # Register biological functions
 
 
-@functional(name="demo:prey_growth", backend="numpy")
+@functional(
+    name="demo:prey_growth",
+    backend="numpy",
+    units={
+        "prey": "count",
+        "growth_rate": "1/s",
+        "predator": "count",
+        "attack_rate": "1/(count*s)",
+        "return": "count/s",
+    },
+)
 def prey_growth_numpy(prey, growth_rate, predator, attack_rate):
     """Prey population change: growth - predation."""
     growth = growth_rate * prey
@@ -34,7 +44,17 @@ def prey_growth_numpy(prey, growth_rate, predator, attack_rate):
     return growth - predation
 
 
-@functional(name="demo:prey_growth", backend="jax")
+@functional(
+    name="demo:prey_growth",
+    backend="jax",
+    units={
+        "prey": "count",
+        "growth_rate": "1/s",
+        "predator": "count",
+        "attack_rate": "1/(count*s)",
+        "return": "count/s",
+    },
+)
 def prey_growth_jax(prey, growth_rate, predator, attack_rate):
     """Prey population change: growth - predation (JAX version)."""
     growth = growth_rate * prey
@@ -42,7 +62,17 @@ def prey_growth_jax(prey, growth_rate, predator, attack_rate):
     return growth - predation
 
 
-@functional(name="demo:predator_dynamics", backend="numpy")
+@functional(
+    name="demo:predator_dynamics",
+    backend="numpy",
+    units={
+        "prey": "count",
+        "predator": "count",
+        "conversion_rate": "1/(count*s)",
+        "mortality_rate": "1/s",
+        "return": "count/s",
+    },
+)
 def predator_dynamics_numpy(prey, predator, conversion_rate, mortality_rate):
     """Predator population change: conversion - mortality."""
     conversion = conversion_rate * prey * predator
@@ -50,7 +80,17 @@ def predator_dynamics_numpy(prey, predator, conversion_rate, mortality_rate):
     return conversion - mortality
 
 
-@functional(name="demo:predator_dynamics", backend="jax")
+@functional(
+    name="demo:predator_dynamics",
+    backend="jax",
+    units={
+        "prey": "count",
+        "predator": "count",
+        "conversion_rate": "1/(count*s)",
+        "mortality_rate": "1/s",
+        "return": "count/s",
+    },
+)
 def predator_dynamics_jax(prey, predator, conversion_rate, mortality_rate):
     """Predator population change: conversion - mortality (JAX version)."""
     conversion = conversion_rate * prey * predator
@@ -66,14 +106,14 @@ blueprint = Blueprint.from_dict(
         "version": "1.0.0",
         "declarations": {
             "state": {
-                "prey": {"units": "individuals"},
-                "predator": {"units": "individuals"},
+                "prey": {"units": "count"},
+                "predator": {"units": "count"},
             },
             "parameters": {
-                "prey_growth_rate": {"units": "1/d"},
-                "attack_rate": {"units": "1/(ind*d)"},
-                "conversion_rate": {"units": "1/(ind*d)"},
-                "predator_mortality": {"units": "1/d"},
+                "prey_growth_rate": {"units": "1/s"},
+                "attack_rate": {"units": "1/(count*s)"},
+                "conversion_rate": {"units": "1/(count*s)"},
+                "predator_mortality": {"units": "1/s"},
             },
             "forcings": {
                 "time_index": {"dims": ["T"]},  # Just to define time dimension
@@ -126,13 +166,16 @@ n_timesteps = int(n_days)
 config = Config.from_dict(
     {
         "parameters": {
+            # NOTE: All rates are in per-second (1/s) as per model convention
+            # Values are converted from daily rates: rate_per_day / 86400 = rate_per_second
+            #
             # Sardine-like dynamics
-            "prey_growth_rate": {"value": 0.05 / 86400},  # 5% daily growth (fast reproduction)
+            "prey_growth_rate": {"value": 0.05 / 86400},  # 5% daily growth → 5.8e-7 /s
             # Interaction
-            "attack_rate": {"value": 0.01 / 86400},  # Probability of encounter leading to predation
-            "conversion_rate": {"value": 0.001 / 86400},  # 10% efficiency (0.005 * 0.1)
+            "attack_rate": {"value": 0.01 / 86400},  # Encounter rate: 1% daily → 1.16e-7 /(ind*s)
+            "conversion_rate": {"value": 0.001 / 86400},  # Conversion efficiency: 0.1% daily → 1.16e-8 /(ind*s)
             # Tuna-like dynamics
-            "predator_mortality": {"value": 0.01 / 86400},  # 1% daily mortality
+            "predator_mortality": {"value": 0.01 / 86400},  # 1% daily mortality → 1.16e-7 /s
         },
         "forcings": {
             "time_index": xr.DataArray(

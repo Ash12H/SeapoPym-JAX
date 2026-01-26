@@ -32,6 +32,7 @@ from .exceptions import (
     MissingDimensionError,
     ShapeInferenceError,
     TransposeError,
+    UnitError,
 )
 from .inference import infer_shapes
 from .model import CANONICAL_DIMS, CompiledModel
@@ -42,6 +43,7 @@ from .transpose import (
     transpose_array,
     transpose_canonical,
 )
+from .units import UnitValidator, validate_units
 
 __all__ = [
     # Main API
@@ -61,10 +63,14 @@ __all__ = [
     "prepare_array",
     "preprocess_nan",
     "strip_xarray",
+    # Units
+    "UnitValidator",
+    "validate_units",
     # Exceptions
     "CompilerError",
     "ShapeInferenceError",
     "GridAlignmentError",
     "MissingDimensionError",
     "TransposeError",
+    "UnitError",
 ]

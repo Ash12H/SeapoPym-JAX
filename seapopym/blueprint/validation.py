@@ -195,43 +195,23 @@ class BlueprintValidator:
                         )
 
     def _validate_units(self, blueprint: Blueprint, result: ValidationResult) -> None:
-        """Step 5: Validate unit compatibility using Pint."""
-        all_vars = blueprint.declarations.get_all_variables()
+        """Step 5: Validate unit compatibility using Pint (strict checking).
 
-        for step in blueprint.process:
-            if step.func not in result.resolved_functions:
-                continue
+        This method uses UnitValidator to perform strict unit checking:
+        - Units must be exactly identical (canonical forms), not just compatible
+        - Warnings from old implementation are now ERRORS
+        - Validates entire process chain including tendencies
+        """
+        # Import here to avoid circular dependency
+        from seapopym.compiler.units import UnitValidator
 
-            metadata = result.resolved_functions[step.func]
+        validator = UnitValidator()
+        unit_errors = validator.validate_process_chain(blueprint, result.resolved_functions)
 
-            # Check input units
-            for arg_name, expected_unit in metadata.units.items():
-                if arg_name == "return":
-                    continue  # Output unit, checked separately
-
-                if arg_name not in step.inputs:
-                    continue
-
-                var_path = step.inputs[arg_name]
-                if var_path not in all_vars:
-                    continue
-
-                var_decl = all_vars[var_path]
-                if var_decl.units is None:
-                    result.add_warning(
-                        f"Variable '{var_path}' has no declared units, "
-                        f"but function '{step.func}' expects '{expected_unit}'"
-                    )
-                    continue
-
-                # Check unit compatibility (basic string check for now)
-                # Full Pint validation would require importing and checking dimensionality
-                if var_decl.units != expected_unit:
-                    # This is a warning, not an error, as Pint can convert compatible units
-                    result.add_warning(
-                        f"Unit mismatch for '{var_path}' in '{step.func}': "
-                        f"declared '{var_decl.units}', expected '{expected_unit}'"
-                    )
+        # Add all unit errors to validation result
+        for error in unit_errors:
+            # Cast to ValidationError (UnitError should inherit from it or compatible)
+            result.add_error(error)  # type: ignore[arg-type]
 
     def _build_graph(self, blueprint: Blueprint, result: ValidationResult) -> None:
         """Step 6: Build the dependency graph using NetworkX."""

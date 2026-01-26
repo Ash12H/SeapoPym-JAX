@@ -21,7 +21,17 @@ from seapopym.engine import StreamingRunner
 # =============================================================================
 
 
-@functional(name="demo:prey_growth", backend="numpy")
+@functional(
+    name="demo:prey_growth",
+    backend="numpy",
+    units={
+        "prey": "count",
+        "growth_rate": "1/s",
+        "predator": "count",
+        "attack_rate": "1/(count*s)",
+        "return": "count/s",
+    },
+)
 def prey_growth_numpy(prey, growth_rate, predator, attack_rate):
     """Prey population change: growth - predation."""
     growth = growth_rate * prey
@@ -29,7 +39,17 @@ def prey_growth_numpy(prey, growth_rate, predator, attack_rate):
     return growth - predation
 
 
-@functional(name="demo:prey_growth", backend="jax")
+@functional(
+    name="demo:prey_growth",
+    backend="jax",
+    units={
+        "prey": "count",
+        "growth_rate": "1/s",
+        "predator": "count",
+        "attack_rate": "1/(count*s)",
+        "return": "count/s",
+    },
+)
 def prey_growth_jax(prey, growth_rate, predator, attack_rate):
     """Prey population change: growth - predation (JAX version)."""
     growth = growth_rate * prey
@@ -37,7 +57,17 @@ def prey_growth_jax(prey, growth_rate, predator, attack_rate):
     return growth - predation
 
 
-@functional(name="demo:predator_dynamics", backend="numpy")
+@functional(
+    name="demo:predator_dynamics",
+    backend="numpy",
+    units={
+        "prey": "count",
+        "predator": "count",
+        "conversion_rate": "1/(count*s)",
+        "mortality_rate": "1/s",
+        "return": "count/s",
+    },
+)
 def predator_dynamics_numpy(prey, predator, conversion_rate, mortality_rate):
     """Predator population change: conversion - mortality."""
     conversion = conversion_rate * prey * predator
@@ -45,7 +75,17 @@ def predator_dynamics_numpy(prey, predator, conversion_rate, mortality_rate):
     return conversion - mortality
 
 
-@functional(name="demo:predator_dynamics", backend="jax")
+@functional(
+    name="demo:predator_dynamics",
+    backend="jax",
+    units={
+        "prey": "count",
+        "predator": "count",
+        "conversion_rate": "1/(count*s)",
+        "mortality_rate": "1/s",
+        "return": "count/s",
+    },
+)
 def predator_dynamics_jax(prey, predator, conversion_rate, mortality_rate):
     """Predator population change: conversion - mortality (JAX version)."""
     conversion = conversion_rate * prey * predator
@@ -63,14 +103,14 @@ blueprint = Blueprint.from_dict(
         "version": "1.0.0",
         "declarations": {
             "state": {
-                "prey": {"units": "individuals"},
-                "predator": {"units": "individuals"},
+                "prey": {"units": "count"},
+                "predator": {"units": "count"},
             },
             "parameters": {
-                "prey_growth_rate": {"units": "1/d"},
-                "attack_rate": {"units": "1/(ind*d)"},
-                "conversion_rate": {"units": "1/(ind*d)"},
-                "predator_mortality": {"units": "1/d"},
+                "prey_growth_rate": {"units": "1/s"},
+                "attack_rate": {"units": "1/(count*s)"},
+                "conversion_rate": {"units": "1/(count*s)"},
+                "predator_mortality": {"units": "1/s"},
             },
             "forcings": {
                 # Time dimension + Space dimensions implied by data
@@ -127,10 +167,12 @@ pred_init = pred_base + np.random.uniform(-1, 1, size=(grid_size[0], grid_size[1
 config = Config.from_dict(
     {
         "parameters": {
-            "prey_growth_rate": {"value": 0.05 / 86400},
-            "attack_rate": {"value": 0.01 / 86400},
-            "conversion_rate": {"value": 0.001 / 86400},
-            "predator_mortality": {"value": 0.01 / 86400},
+            # NOTE: All rates in per-second (1/s) as per model convention
+            # Values converted from daily rates: rate_per_day / 86400 = rate_per_second
+            "prey_growth_rate": {"value": 0.05 / 86400},  # 5% daily → 5.8e-7 /s
+            "attack_rate": {"value": 0.01 / 86400},  # 1% daily → 1.16e-7 /(count*s)
+            "conversion_rate": {"value": 0.001 / 86400},  # 0.1% daily → 1.16e-8 /(count*s)
+            "predator_mortality": {"value": 0.01 / 86400},  # 1% daily → 1.16e-7 /s
             # Parameters are scalar here (uniform over grid), but could be 2D DataArrays
         },
         "forcings": {
@@ -140,8 +182,8 @@ config = Config.from_dict(
             ),
         },
         "initial_state": {
-            "prey": xr.DataArray(prey_init, dims=["Y", "X"], coords={"Y": grid_size[0], "X": grid_size[1]}),
-            "predator": xr.DataArray(pred_init, dims=["Y", "X"], coords={"Y": grid_size[0], "X": grid_size[1]}),
+            "prey": xr.DataArray(prey_init, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+            "predator": xr.DataArray(pred_init, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
         },
         "execution": {
             "dt": "0.2d",

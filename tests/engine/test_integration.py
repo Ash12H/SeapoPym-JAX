@@ -92,7 +92,7 @@ class TestE2EBasicSimulation:
 
         # 5. Run
         runner = StreamingRunner(model, chunk_size=10)
-        final_state = runner.run(str(tmp_path / "output"))
+        final_state, _ = runner.run(str(tmp_path / "output"))
 
         # 6. Verify
         assert "biomass" in final_state
@@ -164,7 +164,7 @@ class TestE2EBasicSimulation:
 
         model = compile_model(blueprint, config, backend="jax")
         runner = StreamingRunner(model, chunk_size=10)
-        final_state = runner.run(str(tmp_path / "output"))
+        final_state, _ = runner.run(str(tmp_path / "output"))
 
         assert "biomass" in final_state
         assert jnp.all(final_state["biomass"] >= 100.0)
@@ -303,7 +303,7 @@ class TestE2EMaskBehavior:
 
         model = compile_model(blueprint, config, backend="numpy")
         runner = StreamingRunner(model, chunk_size=10)
-        final_state = runner.run(str(tmp_path / "output"))
+        final_state, _ = runner.run(str(tmp_path / "output"))
 
         # Masked regions should be zero
         np.testing.assert_array_equal(final_state["biomass"][:3, :], 0.0)
@@ -392,7 +392,7 @@ class TestE2EMultiProcess:
 
         model = compile_model(blueprint, config, backend="numpy")
         runner = StreamingRunner(model, chunk_size=15)
-        final_state = runner.run(str(tmp_path / "output"))
+        final_state, _ = runner.run(str(tmp_path / "output"))
 
         # Net growth rate is positive (0.0002 - 0.0001 = 0.0001)
         # So biomass should increase

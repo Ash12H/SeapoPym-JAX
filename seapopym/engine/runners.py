@@ -63,14 +63,14 @@ class StreamingRunner:
         self.io_workers = io_workers
         self.backend = get_backend(model.backend)
 
-    def run(self, output_path: str | Path) -> State:
+    def run(self, output_path: str | Path | None = None) -> tuple[State, Outputs | None]:
         """Execute the full simulation with streaming output.
 
         Args:
-            output_path: Path to write outputs.
+            output_path: Path to write outputs. If None, outputs are returned in memory.
 
         Returns:
-            Final state after simulation.
+            Tuple of (final_state, outputs). Outputs is None if output_path is provided.
         """
         n_timesteps = self.model.n_timesteps
 
@@ -83,7 +83,7 @@ class StreamingRunner:
         remainder = n_timesteps % self.chunk_size
         n_chunks = n_full_chunks + (1 if remainder > 0 else 0)
 
-        logger.info(f"Starting simulation: {n_timesteps} steps in {n_chunks} chunks " f"(chunk_size={self.chunk_size})")
+        logger.info(f"Starting simulation: {n_timesteps} steps in {n_chunks} chunks (chunk_size={self.chunk_size})")
 
         # Build step function
         step_fn = build_step_fn(self.model)
@@ -94,9 +94,21 @@ class StreamingRunner:
         # Get output variable names
         output_vars = list(state.keys())
 
-        # Setup async writer
-        with AsyncWriter(output_path, max_workers=self.io_workers) as writer:
-            writer.initialize(self.model.shapes, output_vars)
+        # Prepare for execution
+        accumulated_outputs: dict[str, list[Array]] | None = {} if output_path is None else None
+
+        # Setup context manager for disk usage (dummy for in-memory)
+        from contextlib import nullcontext
+
+        writer_ctx = (
+            AsyncWriter(output_path, max_workers=self.io_workers)  # type: ignore
+            if output_path is not None
+            else nullcontext()
+        )
+
+        with writer_ctx as writer:
+            if writer is not None:
+                writer.initialize(self.model.shapes, output_vars)
 
             # Process chunks
             for chunk_idx in range(n_chunks):
@@ -117,14 +129,40 @@ class StreamingRunner:
                     length=chunk_len,
                 )
 
-                # Write outputs asynchronously
-                writer.write_async(outputs, chunk_idx)
+                if writer is not None:
+                    # Write outputs asynchronously
+                    writer.write_async(outputs, chunk_idx)
+                else:
+                    # Accumulate in memory
+                    if accumulated_outputs is None:
+                        # Should not happen if writer is None (see logic above)
+                        accumulated_outputs = {}
 
-            # Ensure all writes complete
-            writer.flush()
+                    for k, v in outputs.items():
+                        if k not in accumulated_outputs:
+                            accumulated_outputs[k] = []
+                        accumulated_outputs[k].append(v)
+
+            if writer is not None:
+                # Ensure all writes complete
+                writer.flush()
+
+        # Finalize in-memory outputs
+        final_outputs: Outputs | None = None
+        if accumulated_outputs is not None and accumulated_outputs:
+            import numpy as np
+
+            if self.model.backend == "jax":
+                import jax.numpy as jnp
+
+                concat = jnp.concatenate
+            else:
+                concat = np.concatenate
+
+            final_outputs = {k: concat(v, axis=0) for k, v in accumulated_outputs.items()}
 
         logger.info("Simulation complete")
-        return state
+        return state, final_outputs
 
     def _slice_forcings(self, start: int, end: int) -> dict[str, Array]:
         """Slice forcings for a temporal chunk.
