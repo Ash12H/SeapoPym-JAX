@@ -3,6 +3,12 @@
 Provides two runners:
 - StreamingRunner: Production mode with chunking and async I/O
 - GradientRunner: Optimization mode with full scan (JAX only)
+
+Note on forcings:
+    Forcings can be dynamic (with time dimension) or static (spatial-only).
+    Static forcings (e.g., mask, bathymetry) are automatically broadcast
+    over time during execution. This supports both spatial models and
+    box models without additional configuration.
 """
 
 from __future__ import annotations
