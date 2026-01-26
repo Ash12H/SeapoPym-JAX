@@ -4,21 +4,27 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, functional
+from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import CANONICAL_DIMS, CompiledModel, Compiler, compile_model
 
 
-# Register a test function for the toy model
-@functional(name="test:simple_growth", backend="jax")
-def simple_growth(biomass, rate, temp):
-    """Simple growth function for testing."""
-    return biomass * rate * (temp / 20.0)
+@pytest.fixture(autouse=True)
+def setup_registry():
+    """Register test functions before each test."""
+    clear_registry()
 
+    @functional(name="test:simple_growth", backend="jax")
+    def simple_growth(biomass, rate, temp):
+        """Simple growth function for testing."""
+        return biomass * rate * (temp / 20.0)
 
-@functional(name="test:simple_growth", backend="numpy")
-def simple_growth_numpy(biomass, rate, temp):
-    """Simple growth function for testing (numpy)."""
-    return biomass * rate * (temp / 20.0)
+    @functional(name="test:simple_growth", backend="numpy")
+    def simple_growth_numpy(biomass, rate, temp):
+        """Simple growth function for testing (numpy)."""
+        return biomass * rate * (temp / 20.0)
+
+    yield
+    clear_registry()
 
 
 class TestCompiler:
