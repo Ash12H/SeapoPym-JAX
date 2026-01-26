@@ -191,11 +191,17 @@ class TestConfig:
             "parameters": {"growth_rate": {"value": 0.1}},
             "forcings": {"temperature": "/path/to/temp.nc"},
             "initial_state": {"biomass": "/path/to/init.nc"},
-            "execution": {"dt": "1d"},
+            "execution": {
+                "time_start": "2000-01-01",
+                "time_end": "2001-01-01",
+                "dt": "1d",
+            },
         }
 
         cfg = Config.from_dict(data)
         assert cfg.parameters["growth_rate"]["value"] == 0.1
+        assert cfg.execution.time_start == "2000-01-01"
+        assert cfg.execution.time_end == "2001-01-01"
         assert cfg.execution.dt == "1d"
 
     def test_load_from_yaml(self):
@@ -219,6 +225,10 @@ class TestConfig:
                 },
                 "forcings": {},
                 "initial_state": {},
+                "execution": {
+                    "time_start": "2000-01-01",
+                    "time_end": "2001-01-01",
+                },
             }
         )
 
@@ -231,12 +241,14 @@ class TestExecutionParams:
     """Tests for ExecutionParams."""
 
     def test_defaults(self):
-        """Test default values."""
-        params = ExecutionParams()
+        """Test default values for optional fields."""
+        params = ExecutionParams(time_start="2000-01-01", time_end="2001-01-01")
         assert params.dt == "1d"
-        assert params.time_range is None
+        assert params.batch_size is None
+        assert params.forcing_interpolation == "constant"
 
-    def test_time_range_conversion(self):
-        """Test time_range list to tuple conversion."""
-        params = ExecutionParams(time_range=("2020-01-01", "2020-12-31"))
-        assert params.time_range == ("2020-01-01", "2020-12-31")
+    def test_time_fields(self):
+        """Test time_start and time_end fields."""
+        params = ExecutionParams(time_start="2020-01-01", time_end="2020-12-31")
+        assert params.time_start == "2020-01-01"
+        assert params.time_end == "2020-12-31"

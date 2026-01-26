@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     import networkx as nx
 
     from seapopym.blueprint import Blueprint
+    from seapopym.compiler.compiler import TimeGrid
 
 # Type alias for arrays (JAX or NumPy)
 Array = Any  # jax.Array | np.ndarray
@@ -45,6 +46,8 @@ class CompiledModel:
         dt: Timestep in seconds.
         backend: Target backend ("jax" or "numpy").
         trainable_params: List of parameter names that can be optimized.
+        time_grid: Temporal grid (start, end, n_timesteps, coords). None if not using calendar.
+        batch_size: Number of timesteps per batch. None = process all at once.
     """
 
     # Source
@@ -66,6 +69,10 @@ class CompiledModel:
     # Configuration
     backend: Literal["jax", "numpy"] = "jax"
     trainable_params: list[str] = field(default_factory=list)
+
+    # Temporal configuration (Phase 4)
+    time_grid: TimeGrid | None = None
+    batch_size: int | None = None
 
     @property
     def mask(self) -> Array | None:

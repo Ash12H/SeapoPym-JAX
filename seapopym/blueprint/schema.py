@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing_extensions import Self
 
 # === Variable Declarations ===
 
@@ -262,32 +263,101 @@ class ExecutionParams(BaseModel):
     """Execution parameters for a simulation run.
 
     Attributes:
-        time_range: Start and end dates as strings.
-        dt: Timestep as string (e.g., "1d", "6h").
-        output_path: Optional path for output files.
+        time_start: Simulation start time (ISO format, e.g., "2000-01-01").
+        time_end: Simulation end time (ISO format, e.g., "2020-12-31").
+        dt: Timestep duration (e.g., "1d", "0.05d", "6h", "30m").
+        batch_size: Number of timesteps per execution batch.
+            - None (default): Process entire time range in one batch.
+            - int > 0: Split execution into batches of this size.
+
+            Purpose:
+            - Memory optimization: Limits output accumulation in RAM.
+            - Async I/O: Enables progressive writing while computing.
+            - Future: Will enable lazy loading of forcings from disk.
+
+            Recommendation:
+            - Small models (0D, notebooks): Use None for simplicity.
+            - Large models (2D/3D, long simulations): Use 1000-10000.
+
         forcing_interpolation: Method for temporal interpolation of forcings.
-            - "constant": Broadcast static forcings (default, existing behavior)
-            - "nearest": Nearest neighbor for under-sampled forcings
-            - "linear": Linear interpolation between points
-            - "ffill": Forward fill (repeat last known value)
+            - "constant": Broadcast static forcings (default).
+            - "nearest": Nearest neighbor for under-sampled forcings.
+            - "linear": Linear interpolation between points.
+            - "ffill": Forward fill (repeat last known value).
+
+        output_path: Optional path for output files (Zarr format).
+            - None: Outputs returned in memory.
+            - str/Path: Write outputs to disk asynchronously.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    time_range: tuple[str, str] | None = None
+    time_start: str
+    time_end: str
     dt: str = "1d"
-    output_path: str | None = None
+    batch_size: int | None = None
     forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
+    output_path: str | None = None
 
-    @field_validator("time_range", mode="before")
+    @field_validator("time_start", "time_end")
     @classmethod
-    def validate_time_range(cls, v: Any) -> tuple[str, str] | None:
-        """Convert list to tuple for time_range."""
-        if v is None:
-            return None
-        if isinstance(v, list | tuple) and len(v) == 2:
-            return (str(v[0]), str(v[1]))
-        raise ValueError("time_range must be a list/tuple of two date strings")
+    def validate_datetime(cls, v: str) -> str:
+        """Validate that datetime strings are parseable.
+
+        Args:
+            v: Datetime string to validate.
+
+        Returns:
+            The validated datetime string.
+
+        Raises:
+            ValueError: If the datetime string cannot be parsed.
+        """
+        import pandas as pd
+
+        try:
+            pd.to_datetime(v)
+            return v
+        except Exception as e:
+            raise ValueError(f"Invalid datetime format: {v}. Use ISO format (e.g., '2000-01-01').") from e
+
+    @field_validator("batch_size")
+    @classmethod
+    def validate_batch_size(cls, v: int | None) -> int | None:
+        """Validate that batch_size is positive if provided.
+
+        Args:
+            v: Batch size to validate.
+
+        Returns:
+            The validated batch size.
+
+        Raises:
+            ValueError: If batch_size is not positive.
+        """
+        if v is not None and v <= 0:
+            raise ValueError(f"batch_size must be positive, got {v}")
+        return v
+
+    @model_validator(mode="after")
+    def validate_time_range(self) -> Self:
+        """Validate that time_end is after time_start.
+
+        Returns:
+            The validated model instance.
+
+        Raises:
+            ValueError: If time_end <= time_start.
+        """
+        import pandas as pd
+
+        start = pd.to_datetime(self.time_start)
+        end = pd.to_datetime(self.time_end)
+
+        if end <= start:
+            raise ValueError(f"time_end ({self.time_end}) must be after time_start ({self.time_start})")
+
+        return self
 
 
 # === Config ===
@@ -314,7 +384,7 @@ class Config(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     forcings: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)
-    execution: ExecutionParams = Field(default_factory=ExecutionParams)
+    execution: ExecutionParams  # REQUIRED: time_start, time_end are mandatory
     dimension_mapping: dict[str, str] | None = None
 
     @classmethod

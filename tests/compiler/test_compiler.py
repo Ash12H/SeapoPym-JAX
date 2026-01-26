@@ -87,7 +87,11 @@ class TestCompiler:
                         dims=["Y", "X"],
                     ),
                 },
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-31",  # 30 days
+                },
             }
         )
 
@@ -187,7 +191,11 @@ class TestCompiler:
                 "initial_state": {
                     "biomass": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
                 },
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-11",  # 10 days
+                },
             }
         )
 
@@ -220,6 +228,11 @@ class TestCompileModelFunction:
                 "parameters": {"a": {"value": 1.0}},
                 "forcings": {"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
                 "initial_state": {"x": xr.DataArray(np.ones((3, 4)), dims=["Y", "X"])},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-06",  # 5 days
+                },
             }
         )
 
@@ -248,6 +261,11 @@ class TestCompiledModel:
             {
                 "forcings": {"f": xr.DataArray(np.ones((10, 5, 5)), dims=["T", "Y", "X"])},
                 "initial_state": {"x": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"])},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-11",
+                },
             }
         )
 
@@ -284,6 +302,11 @@ class TestCompiledModel:
             {
                 "forcings": {"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
                 "initial_state": {"x": xr.DataArray(np.ones((3, 4)), dims=["Y", "X"])},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-06",
+                },
             }
         )
 
@@ -328,6 +351,11 @@ class TestDimensionMapping:
                     "lat": "Y",
                     "lon": "X",
                 },
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-06",
+                },
             }
         )
 
@@ -365,6 +393,11 @@ class TestCanonicalDims:
                         np.arange(60).reshape(4, 3, 5),  # X=4, Y=3, T=5
                         dims=["X", "Y", "T"],
                     ),
+                },
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-06",
                 },
             }
         )

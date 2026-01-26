@@ -251,9 +251,8 @@ blueprint = Blueprint.from_dict(
 # Create dummy forcings (Sinusoidal seasonal cycle)
 # Use real dates: 20 years of daily data
 start_date = "2000-01-01"
-# n_days = 365 * 20
+end_date = "2020-01-01"  # 20 years exactly
 dates = pd.date_range(start=start_date, periods=365 * 20, freq="D")
-n_timesteps = len(dates)
 # Simulating 'day of year' for sine wave
 day_of_year = dates.dayofyear.values
 
@@ -280,8 +279,10 @@ config = Config.from_dict(
         "forcings": {"temperature": temp_da, "primary_production": npp_da},
         "initial_state": {"biomass": xr.DataArray(0.0), "production": xr.DataArray(np.zeros(n_cohorts), dims=["C"])},
         "execution": {
-            "dt": "0.05d",
-            "forcing_interpolation": "linear",
+            "time_start": start_date,
+            "time_end": end_date,
+            "dt": "0.05d",  # 20 timesteps per day
+            "forcing_interpolation": "linear",  # Interpolate daily forcings to 0.05d resolution
         },
     }
 )

@@ -83,6 +83,8 @@ def simple_config():
             },
             "execution": {
                 "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-31",  # 30 days
             },
         }
     )
@@ -103,6 +105,20 @@ class TestStreamingRunner:
 
         assert runner.chunk_size == 10
         assert runner.model is model
+
+    def test_batch_size_from_config(self, simple_blueprint, simple_config):
+        """Test that runner uses batch_size from model config if chunk_size not provided."""
+        # Manually set batch_size in config before compiling
+        simple_config.execution.batch_size = 15
+
+        @functional(name="test:growth", backend="numpy")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        runner = StreamingRunner(model)
+
+        assert runner.chunk_size == 15
 
     def test_run_numpy(self, simple_blueprint, simple_config, tmp_path):
         """Test running simulation with numpy backend."""
@@ -168,7 +184,11 @@ class TestStreamingRunner:
                     "mask": np.ones((5, 5)),
                 },
                 "initial_state": {"biomass": np.ones((5, 5)) * 100.0},
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-26",  # 25 days
+                },
             }
         )
 
@@ -195,7 +215,7 @@ class TestStreamingRunner:
             return biomass * rate * (temp / 20.0)
 
         model = compile_model(simple_blueprint, simple_config, backend="numpy")
-        runner = StreamingRunner(model, chunk_size=0)
+        runner = StreamingRunner(model, chunk_size=-1)
 
         with pytest.raises(ChunkingError):
             runner.run(str(tmp_path / "output"))

@@ -5,7 +5,7 @@ import pytest
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config
-from seapopym.compiler.compiler import Compiler
+from seapopym.compiler.compiler import Compiler, TimeGrid
 
 
 class TestForcingInterpolation:
@@ -43,7 +43,9 @@ class TestForcingInterpolation:
                     "time_index": xr.DataArray(np.arange(nt), dims=["T"]),
                 },
                 "execution": {
-                    "forcing_interpolation": "linear"  # Enable interpolation globally
+                    "forcing_interpolation": "linear",  # Enable interpolation globally
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
                 },
                 "initial_state": {},
             }
@@ -55,7 +57,18 @@ class TestForcingInterpolation:
         shapes = {"T": nt, "Y": ny, "X": nx}
         dim_mapping = {}
 
-        forcings, _ = compiler._prepare_forcings(config, dim_mapping, shapes)
+        forcings, _ = compiler._prepare_forcings(
+            config,
+            dim_mapping,
+            shapes,
+            time_grid=TimeGrid(
+                start=np.datetime64("2000-01-01"),
+                end=np.datetime64("2000-01-02"),
+                dt_seconds=86400,
+                n_timesteps=nt,
+                coords=np.array([]),
+            ),
+        )
 
         # Bathy should match input shape (ny, nx), NOT (nt, nx)
         assert forcings["bathy"].shape == (ny, nx)
@@ -78,14 +91,29 @@ class TestForcingInterpolation:
                     "temp": xr.DataArray(data, dims=["T", "Y", "X"]),
                     "time_index": xr.DataArray(np.arange(target_t), dims=["T"]),
                 },
-                "execution": {"forcing_interpolation": "linear"},
+                "execution": {
+                    "forcing_interpolation": "linear",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
                 "initial_state": {},
             }
         )
 
         compiler = Compiler(backend="numpy")
         shapes = {"T": target_t, "Y": 1, "X": 1}
-        forcings, _ = compiler._prepare_forcings(config, {}, shapes)
+        forcings, _ = compiler._prepare_forcings(
+            config,
+            {},
+            shapes,
+            time_grid=TimeGrid(
+                start=np.datetime64("2000-01-01"),
+                end=np.datetime64("2000-01-02"),
+                dt_seconds=86400,
+                n_timesteps=target_t,
+                coords=np.array([]),
+            ),
+        )
 
         res = forcings["temp"].flatten()
         expected = np.linspace(0, 40, target_t)
@@ -108,14 +136,29 @@ class TestForcingInterpolation:
                     "temp": xr.DataArray(data, dims=["T", "Y", "X"]),
                     "time_index": xr.DataArray(np.arange(target_t), dims=["T"]),
                 },
-                "execution": {"forcing_interpolation": "nearest"},
+                "execution": {
+                    "forcing_interpolation": "nearest",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
                 "initial_state": {},
             }
         )
 
         compiler = Compiler(backend="numpy")
         shapes = {"T": target_t, "Y": 1, "X": 1}
-        forcings, _ = compiler._prepare_forcings(config, {}, shapes)
+        forcings, _ = compiler._prepare_forcings(
+            config,
+            {},
+            shapes,
+            time_grid=TimeGrid(
+                start=np.datetime64("2000-01-01"),
+                end=np.datetime64("2000-01-02"),
+                dt_seconds=86400,
+                n_timesteps=target_t,
+                coords=np.array([]),
+            ),
+        )
 
         res = forcings["temp"].flatten()
         # indices: 0->0, 1->0.33(0), 2->0.66(1), 3->1
@@ -139,14 +182,29 @@ class TestForcingInterpolation:
                     "temp": xr.DataArray(data, dims=["T", "Y", "X"]),
                     "time_index": xr.DataArray(np.arange(target_t), dims=["T"]),
                 },
-                "execution": {"forcing_interpolation": "ffill"},
+                "execution": {
+                    "forcing_interpolation": "ffill",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
                 "initial_state": {},
             }
         )
 
         compiler = Compiler(backend="numpy")
         shapes = {"T": target_t, "Y": 1, "X": 1}
-        forcings, _ = compiler._prepare_forcings(config, {}, shapes)
+        forcings, _ = compiler._prepare_forcings(
+            config,
+            {},
+            shapes,
+            time_grid=TimeGrid(
+                start=np.datetime64("2000-01-01"),
+                end=np.datetime64("2000-01-02"),
+                dt_seconds=86400,
+                n_timesteps=target_t,
+                coords=np.array([]),
+            ),
+        )
 
         res = forcings["temp"].flatten()
         # [0, 0.33, 0.66, 1.0] -> floor -> [0, 0, 0, 1]

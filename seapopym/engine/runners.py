@@ -48,18 +48,20 @@ class StreamingRunner:
     def __init__(
         self,
         model: CompiledModel,
-        chunk_size: int = 365,
+        chunk_size: int | None = None,
         io_workers: int = 2,
     ) -> None:
         """Initialize streaming runner.
 
         Args:
             model: Compiled model to execute.
-            chunk_size: Number of timesteps per chunk.
+            chunk_size: Number of timesteps per chunk. If None, uses model.batch_size.
+                If both None, processes entire simulation in one batch.
             io_workers: Number of async I/O workers.
         """
         self.model = model
-        self.chunk_size = chunk_size
+        # Priority: chunk_size (parameter) > model.batch_size (config) > model.n_timesteps (all)
+        self.chunk_size = chunk_size or getattr(model, "batch_size", None) or model.n_timesteps
         self.io_workers = io_workers
         self.backend = get_backend(model.backend)
 

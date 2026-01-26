@@ -10,9 +10,11 @@ The Compiler orchestrates the full compilation pipeline:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
+import pandas as pd
 
 from seapopym.blueprint import Blueprint, Config, ParameterValue, validate_blueprint, validate_config
 
@@ -46,6 +48,101 @@ def _parse_dt(dt_str: str) -> float:
         return float(dt_str)
     except ValueError:
         return 86400.0  # Default: 1 day
+
+
+@dataclass
+class TimeGrid:
+    """Temporal grid configuration computed from user parameters.
+
+    This class represents the temporal discretization of a simulation,
+    computed from explicit start/end times and timestep duration.
+
+    Attributes:
+        start: Simulation start time (datetime64).
+        end: Simulation end time (datetime64).
+        dt_seconds: Timestep duration in seconds.
+        n_timesteps: Number of timesteps in the simulation.
+        coords: Temporal coordinates array (datetime64, shape: (n_timesteps,)).
+
+    Example:
+        >>> grid = TimeGrid.from_config("2000-01-01", "2000-01-10", "1d")
+        >>> grid.n_timesteps
+        9
+        >>> grid.coords[0]
+        numpy.datetime64('2000-01-01')
+    """
+
+    start: np.datetime64
+    end: np.datetime64
+    dt_seconds: float
+    n_timesteps: int
+    coords: np.ndarray  # dtype=datetime64[ns]
+
+    @classmethod
+    def from_config(cls, time_start: str, time_end: str, dt_str: str) -> TimeGrid:
+        """Compute temporal grid from configuration strings.
+
+        Args:
+            time_start: Start time (ISO format, e.g., "2000-01-01").
+            time_end: End time (ISO format, e.g., "2020-12-31").
+            dt_str: Timestep duration (e.g., "1d", "0.05d", "6h").
+
+        Returns:
+            TimeGrid instance with computed n_timesteps and coordinates.
+
+        Raises:
+            ValueError: If time_end <= time_start, or if time range is not
+                evenly divisible by dt (remainder > 1 second).
+
+        Example:
+            >>> grid = TimeGrid.from_config("2000-01-01", "2000-01-10", "1d")
+            >>> grid.n_timesteps
+            9
+        """
+        # 1. Parse dates
+        start_pd = pd.to_datetime(time_start)
+        end_pd = pd.to_datetime(time_end)
+
+        if end_pd <= start_pd:
+            raise ValueError(f"time_end ({time_end}) must be after time_start ({time_start})")
+
+        start_dt64 = start_pd.to_datetime64()
+        end_dt64 = end_pd.to_datetime64()
+
+        # 2. Parse timestep
+        dt_seconds = _parse_dt(dt_str)
+        dt_td = pd.Timedelta(seconds=dt_seconds)
+
+        # 3. Compute number of timesteps
+        duration = end_pd - start_pd
+        n_timesteps_float = duration / dt_td
+
+        # Round to nearest integer
+        n_timesteps = int(np.round(n_timesteps_float))
+
+        # 4. Validate: remainder should be negligible (< 1 second)
+        expected_duration = n_timesteps * dt_td
+        remainder = abs(duration - expected_duration)
+
+        if remainder > pd.Timedelta(seconds=1):
+            raise ValueError(
+                f"Time range [{time_start}, {time_end}] is not evenly divisible by dt={dt_str}. "
+                f"Duration: {duration}, n_timesteps*dt: {expected_duration}, remainder: {remainder}. "
+                f"Adjust time_end or dt to ensure exact alignment."
+            )
+
+        # 5. Generate temporal coordinates
+        # Use freq instead of periods to avoid inclusive end (want [start, end))
+        # Generate exactly n_timesteps starting from start with spacing dt
+        coords = pd.date_range(start=start_pd, periods=n_timesteps, freq=dt_td).to_numpy()
+
+        return cls(
+            start=start_dt64,
+            end=end_dt64,
+            dt_seconds=dt_seconds,
+            n_timesteps=n_timesteps,
+            coords=coords,
+        )
 
 
 Backend = Literal["jax", "numpy"]
@@ -123,19 +220,26 @@ class Compiler:
         if graph is None:
             raise ValueError("Failed to build dependency graph")
 
-        # Step 2: Build dims mapping from blueprint
+        # Step 2: Compute temporal grid from execution params
+        time_grid = TimeGrid.from_config(
+            config.execution.time_start,
+            config.execution.time_end,
+            config.execution.dt,
+        )
+
+        # Step 3: Build dims mapping from blueprint
         blueprint_dims = self._extract_blueprint_dims(blueprint)
 
-        # Step 3: Infer shapes from data
-        shapes = infer_shapes(config, blueprint_dims)
+        # Step 4: Infer shapes from data (with time_grid priority for T dimension)
+        shapes = infer_shapes(config, blueprint_dims, time_grid=time_grid)
 
-        # Step 4: Get dimension mapping from config and apply to shapes
+        # Step 5: Get dimension mapping from config and apply to shapes
         dim_mapping = config.dimension_mapping
         if dim_mapping:
             shapes = {dim_mapping.get(k, k): v for k, v in shapes.items()}
 
-        # Step 5: Prepare forcings
-        forcings, coords = self._prepare_forcings(config, dim_mapping, shapes)
+        # Step 6: Prepare forcings (with temporal validation)
+        forcings, coords = self._prepare_forcings(config, dim_mapping, shapes, time_grid)
 
         # Step 6: Prepare initial state
         state = self._prepare_state(config, blueprint, dim_mapping)
@@ -158,6 +262,8 @@ class Compiler:
             dt=dt,
             backend=self.backend,
             trainable_params=trainable,
+            time_grid=time_grid,
+            batch_size=config.execution.batch_size,
         )
 
     def _extract_blueprint_dims(self, blueprint: Blueprint) -> dict[str, list[str] | None]:
@@ -175,8 +281,9 @@ class Compiler:
         config: Config,
         dim_mapping: dict[str, str] | None,
         shapes: dict[str, int],
+        time_grid: TimeGrid,
     ) -> tuple[dict[str, Array], dict[str, Array]]:
-        """Prepare forcing arrays with optional temporal interpolation.
+        """Prepare forcing arrays with temporal validation and interpolation.
 
         Forcings are processed as follows:
         1. Static forcings (no T dimension): kept as-is (broadcasted at runtime)
@@ -184,6 +291,19 @@ class Compiler:
         3. Under-sampled forcings (shape[0] < n_timesteps): interpolated
 
         The interpolation method is specified in config.execution.forcing_interpolation.
+
+        Args:
+            config: Configuration with forcings data.
+            dim_mapping: Optional dimension renaming map.
+            shapes: Inferred dimension sizes (including T from time_grid).
+            time_grid: Temporal grid for validation and coord generation.
+
+        Returns:
+            Tuple of (forcings dict, coords dict) with temporal coords added.
+
+        Raises:
+            ValueError: If a forcing's temporal range does not cover the
+                simulation range defined by time_grid.
         """
         forcings: dict[str, Array] = {}
         coords: dict[str, Array] = {}
@@ -199,6 +319,20 @@ class Compiler:
                 fill_nan=self.fill_nan,
             )
 
+            # Validate temporal range if forcing has time coordinates
+            if hasattr(source, "coords") and "T" in source.coords:
+                forcing_coords = source.coords["T"]
+                forcing_start = forcing_coords.values[0]
+                forcing_end = forcing_coords.values[-1]
+
+                # Check if forcing covers simulation range
+                if time_grid.start < forcing_start or time_grid.end > forcing_end:
+                    raise ValueError(
+                        f"Forcing '{name}' temporal range [{forcing_start}, {forcing_end}] "
+                        f"does not cover simulation range [{time_grid.start}, {time_grid.end}]. "
+                        f"Ensure forcing data spans the entire simulation period."
+                    )
+
             # Check if temporal interpolation is needed
             # Only interpolate if:
             # 1. Array is valid
@@ -213,9 +347,6 @@ class Compiler:
                 arr = self._interpolate_forcing(arr, arr.shape[0], n_timesteps, interp_method)
 
             forcings[name] = arr
-
-            # If this is the mask, keep track of it separately
-            # (it's also in forcings for uniformity)
 
             # Extract coords from first file source
             if not coords_extracted and isinstance(source, str):
@@ -236,6 +367,9 @@ class Compiler:
                     forcings["mask"] = jnp.ones(mask_shape, dtype=jnp.bool_)
                 else:
                     forcings["mask"] = np.ones(mask_shape, dtype=np.bool_)
+
+        # Add temporal coordinates from time_grid
+        coords["T"] = time_grid.coords
 
         return forcings, coords
 

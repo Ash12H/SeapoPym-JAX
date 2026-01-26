@@ -52,6 +52,11 @@ class TestInferShapes:
         config = Config.from_dict(
             {
                 "forcings": {"temperature": da},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
             }
         )
         result = infer_shapes(config)
@@ -67,6 +72,11 @@ class TestInferShapes:
                 "forcings": {
                     "temperature": temp,
                     "mask": mask,
+                },
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
                 },
             }
         )
@@ -84,6 +94,11 @@ class TestInferShapes:
                     "temperature": temp,
                     "salinity": salt,
                 },
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
             }
         )
 
@@ -99,6 +114,11 @@ class TestInferShapes:
         config = Config.from_dict(
             {
                 "initial_state": {"biomass": biomass},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
             }
         )
         result = infer_shapes(config)
@@ -111,6 +131,11 @@ class TestInferShapes:
         config = Config.from_dict(
             {
                 "forcings": {"temperature": arr},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
             }
         )
 
@@ -127,6 +152,11 @@ class TestInferShapes:
                 "initial_state": {
                     "tuna": {"biomass": tuna_biomass},
                 },
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
             }
         )
         result = infer_shapes(config)
@@ -134,7 +164,16 @@ class TestInferShapes:
 
     def test_empty_config(self):
         """Test with empty config."""
-        config = Config.from_dict({})
+        """Test with empty config."""
+        config = Config.from_dict(
+            {
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                }
+            }
+        )
         result = infer_shapes(config)
         assert result == {}
 
@@ -147,6 +186,11 @@ class TestInferShapes:
             {
                 "forcings": {"temperature": temp},
                 "initial_state": {"biomass": biomass},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-02",
+                },
             }
         )
         result = infer_shapes(config)

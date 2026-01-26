@@ -81,6 +81,8 @@ def simple_config():
             },
             "execution": {
                 "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-11",
             },
         }
     )

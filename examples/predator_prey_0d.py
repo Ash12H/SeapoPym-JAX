@@ -14,6 +14,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 import zarr
 from scipy.signal import find_peaks
@@ -159,9 +160,11 @@ print()
 # %%
 # Configure the model
 # Scenario: Sardine (Prey) vs Tuna (Predator)
-# Scale: 2 years simulation (shorter for demo, but stable)
+# Duration: ~49 years (30 days/month * 12 months/year * 50 years = 18000 days)
 n_days = 30 * 12 * 50
-n_timesteps = int(n_days)
+start_date = "2000-01-01"
+end_date = pd.to_datetime(start_date) + pd.Timedelta(days=n_days)
+end_date_str = end_date.strftime("%Y-%m-%d")
 
 config = Config.from_dict(
     {
@@ -177,18 +180,15 @@ config = Config.from_dict(
             # Tuna-like dynamics
             "predator_mortality": {"value": 0.01 / 86400},  # 1% daily mortality → 1.16e-7 /s
         },
-        "forcings": {
-            "time_index": xr.DataArray(
-                np.arange(n_timesteps),
-                dims=["T"],
-            ),
-        },
+        "forcings": {},  # No forcings needed for 0D model (time coords auto-generated)
         "initial_state": {
             "prey": xr.DataArray(22.0),  # Slightly off-equilibrium (20.0) to start oscillations
             "predator": xr.DataArray(10.0),  # Equilibrium: P* = r/a = 0.05/0.005 = 10
         },
         "execution": {
-            "dt": "0.2d",  # 0.02 day timestep (small dt to avoid negative population overshoot)
+            "time_start": start_date,
+            "time_end": end_date_str,
+            "dt": "0.2d",  # 0.2 day timestep (small dt to avoid negative population overshoot)
         },
     }
 )
@@ -196,7 +196,9 @@ config = Config.from_dict(
 print("Configuration (Sardine/Tuna Scenario):")
 print(f"  Initial prey: {config.initial_state['prey'].values:.1f} (rel. biomass)")
 print(f"  Initial predator: {config.initial_state['predator'].values:.1f} (rel. biomass)")
-print(f"  Timesteps: {n_timesteps} (dt = {config.execution.dt})")
+print(f"  Time range: {start_date} to {end_date_str} ({n_days} days)")
+print(f"  dt: {config.execution.dt}")
+print(f"  Expected timesteps: {int(n_days / 0.2)}")
 print(f"  Duration: {n_days / 365:.1f} years ({n_days} days)")
 print()
 
@@ -241,7 +243,7 @@ print()
 
 # %%
 # Compute time in days
-time_days = np.linspace(0, n_days, n_timesteps)
+time_days = np.linspace(0, n_days, compiled.n_timesteps)
 
 # Plot time series
 fig, axes = plt.subplots(3, 1, figsize=(12, 10))

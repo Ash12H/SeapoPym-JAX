@@ -79,7 +79,11 @@ class TestE2EBasicSimulation:
                 "initial_state": {
                     "biomass": np.ones((ny, nx)) * 100.0,
                 },
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-31",
+                },
             }
         )
 
@@ -158,7 +162,11 @@ class TestE2EBasicSimulation:
                 "initial_state": {
                     "biomass": np.ones((ny, nx)) * 100.0,
                 },
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-21",
+                },
             }
         )
 
@@ -227,7 +235,11 @@ class TestE2EBasicSimulation:
                 "initial_state": {
                     "biomass": np.ones((ny, nx)) * 100.0,
                 },
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-11",
+                },
             }
         )
 
@@ -297,7 +309,11 @@ class TestE2EMaskBehavior:
                 "initial_state": {
                     "biomass": np.ones((10, 10)) * 100.0,
                 },
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-21",
+                },
             }
         )
 
@@ -386,7 +402,11 @@ class TestE2EMultiProcess:
                 "initial_state": {
                     "biomass": np.ones((5, 5)) * 100.0,
                 },
-                "execution": {"dt": "1d"},
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-31",
+                },
             }
         )
 

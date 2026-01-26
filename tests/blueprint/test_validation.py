@@ -268,6 +268,7 @@ class TestValidateConfig:
                 "parameters": {"rate": {"value": 0.1}},
                 "forcings": {"temp": "/path/to/temp.nc"},
                 "initial_state": {"biomass": "/path/to/init.nc"},
+                "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31"},
             }
         )
 
@@ -295,6 +296,7 @@ class TestValidateConfig:
                 "parameters": {},  # Missing required_param
                 "forcings": {},
                 "initial_state": {},
+                "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31"},
             }
         )
 
@@ -323,6 +325,7 @@ class TestValidateConfig:
                 "parameters": {},
                 "forcings": {},  # Missing temperature
                 "initial_state": {},
+                "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31"},
             }
         )
 
@@ -350,6 +353,7 @@ class TestValidateConfig:
                 "parameters": {},
                 "forcings": {},
                 "initial_state": {},  # Missing biomass
+                "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31"},
             }
         )
 

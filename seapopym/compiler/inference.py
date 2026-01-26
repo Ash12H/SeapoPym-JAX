@@ -63,15 +63,26 @@ def infer_shapes_from_array(arr: np.ndarray | Any, dims: list[str] | None) -> di
     return dict(zip(dims, arr.shape, strict=True))
 
 
-def infer_shapes(config: Config, blueprint_dims: dict[str, list[str] | None] | None = None) -> dict[str, int]:
+def infer_shapes(
+    config: Config,
+    blueprint_dims: dict[str, list[str] | None] | None = None,
+    time_grid: Any | None = None,  # TimeGrid from compiler.py (avoid circular import)
+) -> dict[str, int]:
     """Infer all dimension sizes from config data sources.
 
     Reads metadata from files (lazy) and in-memory arrays to build
     a complete mapping of dimension names to sizes.
 
+    If time_grid is provided, the time dimension "T" is computed from the
+    temporal grid configuration rather than inferred from data sources.
+    This enables temporal super-sampling (finer dt than forcing resolution).
+
     Args:
         config: Configuration with forcings and initial_state.
         blueprint_dims: Optional mapping of variable names to their declared dims.
+        time_grid: Optional TimeGrid with computed n_timesteps. If provided,
+            shapes["T"] will be set to time_grid.n_timesteps instead of being
+            inferred from data sources.
 
     Returns:
         Dict mapping dimension names to sizes.
@@ -83,8 +94,18 @@ def infer_shapes(config: Config, blueprint_dims: dict[str, list[str] | None] | N
     shapes: dict[str, int] = {}
     size_sources: dict[str, dict[str, int]] = {}  # dim -> {source: size}
 
+    # If time_grid provided, set T dimension from it (priority over data inference)
+    if time_grid is not None:
+        shapes["T"] = time_grid.n_timesteps
+        size_sources["T"] = {"time_grid": time_grid.n_timesteps}
+
     def record_shape(source_name: str, dim: str, size: int) -> None:
         """Record a dimension size and check for conflicts."""
+        # If time_grid is provided, T is fixed by the grid, so we ignore data sizes for T.
+        # This allows temporal interpolation (e.g. data has T=10, grid has T=100).
+        if dim == "T" and time_grid is not None:
+            return
+
         if dim not in size_sources:
             size_sources[dim] = {}
         size_sources[dim][source_name] = size
