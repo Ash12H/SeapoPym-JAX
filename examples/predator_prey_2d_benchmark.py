@@ -4,10 +4,7 @@ Grid size: 10x10 cells.
 Dynamics: Independent Lotka-Volterra in each cell (no transport).
 """
 
-import shutil
-import tempfile
 import time
-from pathlib import Path
 
 import numpy as np
 import xarray as xr
@@ -147,9 +144,10 @@ blueprint = Blueprint.from_dict(
 )
 
 # Configuration
-n_days = 30 * 2  # 50 years
+n_days = 30 * 3  # 50 years
 n_timesteps = int(n_days)
 grid_size = (180 * 12, 360 * 12)
+# grid_size = (1, 1)
 
 # Create spatial grid with slightly randomized initial conditions
 lat = np.arange(grid_size[0])
@@ -196,7 +194,7 @@ config = Config.from_dict(
 # =============================================================================
 
 
-def benchmark_backend(backend, iterations=10):
+def benchmark_backend(backend, iterations=5):
     """Benchmark a backend with multiple iterations.
 
     Args:
@@ -217,35 +215,38 @@ def benchmark_backend(backend, iterations=10):
     times = []
 
     # Temporary directory
-    tmp_dir = Path(tempfile.mkdtemp(prefix=f"seapopym_bench_2d_{backend}_"))
-    output_zarr = tmp_dir / "output.zarr"
+    # tmp_dir = Path(tempfile.mkdtemp(prefix=f"seapopym_bench_2d_{backend}_"))
+    # output_zarr = tmp_dir / "output.zarr"
 
     try:
         # Warmup
         if backend == "jax":
             print("Warming up (JIT compilation)...")
             runner = StreamingRunner(compiled, chunk_size=compiled.n_timesteps)
-            runner.run(str(output_zarr))
-            shutil.rmtree(tmp_dir)
-            tmp_dir = Path(tempfile.mkdtemp(prefix=f"seapopym_bench_2d_{backend}_"))
-            output_zarr = tmp_dir / "output.zarr"
+            # runner.run(str(output_zarr))
+            runner.run()
+            # shutil.rmtree(tmp_dir)
+            # tmp_dir = Path(tempfile.mkdtemp(prefix=f"seapopym_bench_2d_{backend}_"))
+            # output_zarr = tmp_dir / "output.zarr"
 
         for i in range(iterations):
             # Single chunk for max throughput measurement
             runner = StreamingRunner(compiled, chunk_size=compiled.n_timesteps)
 
             t0 = time.perf_counter()
-            runner.run(str(output_zarr))
+            # runner.run(str(output_zarr))
+            runner.run()  # str(output_zarr))
             t1 = time.perf_counter()
 
             times.append(t1 - t0)
             print(f"  Run {i + 1}: {times[-1]:.4f}s")
 
-            shutil.rmtree(output_zarr)
+            # shutil.rmtree(output_zarr)
 
     finally:
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
+        pass
+        # if tmp_dir.exists():
+        #     shutil.rmtree(tmp_dir)
 
     avg_time = np.mean(times)
     std_time = np.std(times)

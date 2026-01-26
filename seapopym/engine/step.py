@@ -164,30 +164,49 @@ def _handle_compute_outputs(
     """Handle ComputeNode outputs based on target path.
 
     Args:
-        result: Function return value (single array).
-        output_mapping: Mapping from output key to target path (e.g., 'tendencies.biomass').
+        result: Function return value (single array or tuple of arrays).
+        output_mapping: Mapping from output key to target path.
         tendencies: Dict to accumulate tendencies.
         intermediates: Dict to store intermediate results.
     """
-    # For single-output functions (most common case)
-    # output_mapping is like {'tendency': 'tendencies.biomass'}
-    for _out_key, target in output_mapping.items():
-        parts = target.split(".")
+    output_items = list(output_mapping.items())
 
-        if len(parts) >= 2 and parts[0] == "tendencies":
-            # It's a tendency - parse state variable from target
-            # "tendencies.biomass" -> state_var = "biomass"
-            # "tendencies.biomass_growth" -> state_var = "biomass"
-            var_name = parts[1]
-            state_var = var_name.split("_")[0] if "_" in var_name else var_name
+    # If multiple outputs, result MUST be a tuple/list matching the mapping order
+    if len(output_items) > 1:
+        if not isinstance(result, tuple | list):
+            raise TypeError(f"Function returned {type(result)} but expected tuple for {len(output_items)} outputs.")
+        if len(result) != len(output_items):
+            raise ValueError(f"Function returned {len(result)} items but expected {len(output_items)}.")
 
-            if state_var not in tendencies:
-                tendencies[state_var] = []
-            tendencies[state_var].append(result)
-        else:
-            # It's a derived/diagnostic value
-            var_name = parts[-1] if len(parts) > 1 else target
-            intermediates[var_name] = result
+        for idx, (_out_key, target) in enumerate(output_items):
+            val = result[idx]
+            _dispatch_single_output(val, target, tendencies, intermediates)
+    else:
+        # Single output
+        target = output_items[0][1]
+        _dispatch_single_output(result, target, tendencies, intermediates)
+
+
+def _dispatch_single_output(
+    val: Array, target: str, tendencies: dict[str, list[Array]], intermediates: dict[str, Array]
+) -> None:
+    """Helper to dispatch a single value to tendencies or intermediates."""
+    parts = target.split(".")
+
+    if len(parts) >= 2 and parts[0] == "tendencies":
+        # It's a tendency - parse state variable from target
+        # "tendencies.biomass" -> state_var = "biomass"
+        # "tendencies.biomass_growth" -> state_var = "biomass"
+        var_name = parts[1]
+        state_var = var_name.split("_")[0] if "_" in var_name else var_name
+
+        if state_var not in tendencies:
+            tendencies[state_var] = []
+        tendencies[state_var].append(val)
+    else:
+        # It's a derived/diagnostic value
+        var_name = parts[-1] if len(parts) > 1 else target
+        intermediates[var_name] = val
 
 
 def _integrate_euler(
