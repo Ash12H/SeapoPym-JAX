@@ -31,12 +31,13 @@ Array = Any  # np.ndarray | jax.Array
 class OutputWriter(Protocol):
     """Interface for simulation output writers."""
 
-    def initialize(self, shapes: dict[str, int], variables: list[str]) -> None:
+    def initialize(self, shapes: dict[str, int], variables: list[str], coords: dict[str, Array] | None = None) -> None:
         """Initialize the writer.
 
         Args:
             shapes: Dimension sizes.
             variables: List of variable names to write/keep.
+            coords: Coordinate arrays for dimensions (includes real accumulated timestamps).
         """
         ...
 
@@ -92,13 +93,15 @@ class DiskWriter:
         self.store: Any = None  # zarr.Group at runtime
         self._write_lock = threading.Lock()  # Thread safety for zarr writes
 
-    def initialize(self, shapes: dict[str, int], variables: list[str]) -> None:
+    def initialize(self, shapes: dict[str, int], variables: list[str], coords: dict[str, Array] | None = None) -> None:
         """Initialize output storage structure.
 
         Args:
             shapes: Dimension sizes.
             variables: List of variable names to write.
+            coords: Coordinate arrays (unused for now, for future metadata support).
         """
+        del coords  # Unused for now
         self.output_path.mkdir(parents=True, exist_ok=True)
 
         if self.format == "zarr":
@@ -232,12 +235,26 @@ class MemoryWriter:
         self.model = model
         self.variables: list[str] = []
         self._accumulator: dict[str, list[np.ndarray]] = {}
+        self._coords: dict[str, Array] = {}
 
-    def initialize(self, shapes: dict[str, int], variables: list[str]) -> None:  # noqa: ARG002
-        """Initialize accumulator."""
+    def initialize(self, shapes: dict[str, int], variables: list[str], coords: dict[str, Array] | None = None) -> None:
+        """Initialize accumulator.
+
+        Args:
+            shapes: Dimension sizes (unused, kept for protocol compatibility).
+            variables: List of variable names to accumulate.
+            coords: Coordinate arrays for dimensions (includes accumulated timestamps).
+        """
+        del shapes  # Unused, kept for protocol compatibility
         self.variables = variables
         for var in variables:
             self._accumulator[var] = []
+
+        # Store coords (fallback to model coords if not provided)
+        if coords is not None:
+            self._coords = {k: np.asarray(v) for k, v in coords.items()}
+        else:
+            self._coords = {k: np.asarray(v) for k, v in self.model.coords.items()}
 
     def append(self, data: dict[str, Array], chunk_index: int) -> None:  # noqa: ARG002
         """Append chunk to memory."""
@@ -255,31 +272,41 @@ class MemoryWriter:
 
         import xarray as xr
 
-        # 1. Contatenate arrays along time axis
+        from seapopym.compiler.transpose import get_canonical_order
+
+        # 1. Concatenate arrays along time axis
         merged_data = {}
         for var_name, chunks in self._accumulator.items():
             if not chunks:
                 continue
             merged_data[var_name] = np.concatenate(chunks, axis=0)
 
-        # 2. Resolve coordinates and dimensions
-        coords = {k: np.asarray(v) for k, v in self.model.coords.items()}
-
-        # We need to map variable names to their dimensions
-        # This requires searching the graph for the DataNode
+        # 2. Resolve dimensions from graph
         var_dims = self._resolve_variable_dims()
+
+        # 3. Use stored coords (includes real accumulated timestamps)
+        coords = self._coords
+
+        # Try to infer time dimension name from coords
+        time_dim = next((d for d in ["T", "time", "t"] if d in coords), "T")
 
         data_vars = {}
         for var_name, data in merged_data.items():
             dims = var_dims.get(var_name, None)
 
-            # Fallback if dims not found or rank mismatch
-            if dims is None or len(dims) != data.ndim:
-                # Try to guess standard dims based on rank if possible,
-                # otherwise use default names dim_0, dim_1...
-                # But typically valid variables should be in graph.
-                # Standard JAX output is (T, ...)
-                pass
+            # Fallback if dims not found
+            if dims is None:
+                continue
+
+            # Add time dimension if needed (accumulated data has extra dimension)
+            if len(dims) + 1 == data.ndim:
+                dims = (time_dim,) + dims
+            elif len(dims) != data.ndim:
+                # Dimension mismatch - skip this variable
+                continue
+
+            # Apply canonical order
+            dims = get_canonical_order(dims)
 
             data_vars[var_name] = (dims, data)
 
@@ -298,8 +325,19 @@ class MemoryWriter:
 
         # We scan graph nodes. This is fast enough for initialization.
         for node in self.model.graph.nodes:
-            if isinstance(node, DataNode) and node.name in self.variables and node.dims is not None:
+            if not isinstance(node, DataNode) or node.dims is None:
+                continue
+
+            # Check if node name matches any requested variable
+            # Handle both short names ("biomass") and fully qualified names ("state.biomass")
+            node_short_name = node.name.split(".")[-1] if "." in node.name else node.name
+
+            if node.name in self.variables:
+                # Exact match with full name
                 resolved[node.name] = tuple(d for d in node.dims)
+            elif node_short_name in self.variables:
+                # Match with short name
+                resolved[node_short_name] = tuple(d for d in node.dims)
 
         return resolved
 

@@ -210,7 +210,7 @@ def recruitment_flow(production, cohort_ages, rec_age):
 # 3. BLUEPRINT CONFIGURATION
 # =============================================================================
 
-max_age_days = int(np.ceil(LMTL_TAU_R_0) + 5)
+max_age_days = int(np.ceil(LMTL_TAU_R_0))
 cohort_ages_days = np.arange(0, max_age_days + 1)
 cohort_ages_sec = cohort_ages_days * 86400.0
 n_cohorts = len(cohort_ages_sec)
@@ -307,7 +307,7 @@ blueprint = Blueprint.from_dict(
 
 # Simulation Time
 start_date = "2000-01-01"
-end_date = "2001-01-01"  # 2 years
+end_date = "2020-01-01"  # 2 years
 dt = "3h"
 
 # Generate dates covering [start, end] inclusive
@@ -326,7 +326,7 @@ lon = np.arange(nx)
 # Forcing Data Generation
 # Temperature: 20C mean, +/- 5C seasonal amplitude
 day_of_year = dates.dayofyear.values
-temp_c = 20.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
+temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 # Broadcast to (T, Y, X)
 temp_3d = np.broadcast_to(temp_c[:, None, None], (len(dates), ny, nx))
 temp_da = xr.DataArray(temp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
@@ -361,7 +361,7 @@ config = Config.from_dict(
             "time_end": end_date,
             "dt": dt,
             "forcing_interpolation": "linear",
-            "batch_size": None,
+            "batch_size": 100,
         },
     }
 )
@@ -375,9 +375,9 @@ model = compile_model(blueprint, config, backend="jax")
 print(f"Model compiled. Backend: {model.backend}")
 
 runner = StreamingRunner(model)
-print(f"Running simulation on {grid_size} grid for {len(dates)} steps...")
+print(f"Running simulation on {grid_size} grid for {len(dates)} days...")
 t_start = time.time()
-state, outputs = runner.run()
+state, outputs = runner.run(export_variables=["biomass"])
 t_end = time.time()
 print(f"Simulation completed in {t_end - t_start:.2f} seconds.")
 
@@ -385,15 +385,18 @@ print(f"Simulation completed in {t_end - t_start:.2f} seconds.")
 # 6. VISUALIZATION
 # =============================================================================
 
-# Calculate mean biomass over the grid
-biomass_mean = outputs["biomass"].mean(axis=(1, 2))  # Mean over Y, X
+# Calculate mean biomass over the grid (using xarray dimensions)
+biomass_mean = outputs["biomass"].mean(dim=("Y", "X"))  # Mean over Y, X
 
-# Recalculate time axis based on outputs length
-n_output_steps = len(biomass_mean)
-plot_dates = pd.date_range(start=start_pd, periods=n_output_steps, freq=dt)
+print(f"Number of timestep : {len(biomass_mean)}")
 
-# Slice forcing data to match output length for plotting
-temp_c_plot = temp_c[:n_output_steps]
+# Use time coordinates from the Dataset
+plot_dates = biomass_mean.coords["T"].values
+
+# Interpolate temperature data to match simulation timesteps
+# (temp_c is daily, simulation is at dt="3h")
+temp_da_sim = temp_da.interp(T=plot_dates, method="linear")
+temp_c_plot = temp_da_sim.mean(dim=("Y", "X")).values
 
 # Plot results
 fig, ax1 = plt.subplots(figsize=(10, 6))

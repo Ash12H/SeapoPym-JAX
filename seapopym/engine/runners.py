@@ -103,6 +103,13 @@ class StreamingRunner:
         # Determine variables to export
         output_vars = export_variables if export_variables is not None else list(state.keys())
 
+        # Prepare coordinates for writer (with real timestamps from time_grid)
+        writer_coords = dict(self.model.coords)
+        if self.model.time_grid is not None:
+            # Use the full time coordinates from time_grid
+            # (sliced to n_timesteps in case of any discrepancy)
+            writer_coords["T"] = self.model.time_grid.coords[:n_timesteps]
+
         # Initialize Writer Strategy
         writer: OutputWriter
         writer = (
@@ -112,7 +119,7 @@ class StreamingRunner:
         )
 
         try:
-            writer.initialize(self.model.shapes, output_vars)
+            writer.initialize(self.model.shapes, output_vars, coords=writer_coords)
 
             # Process chunks
             for chunk_idx in range(n_chunks):

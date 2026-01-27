@@ -23,6 +23,7 @@ Refonte de la gestion des sorties (Outputs) dans le `StreamingRunner` pour optim
     - Au lieu d'une liste de tableaux concaténés, le système doit retourner un objet structuré (idéalement `xarray.Dataset` ou dictionnaire de tableaux dimensionnés CORRECTEMENT avec (Time, ...)) mimant la structure finale du Zarr.
 
 3. **Symétrie** : La gestion des "Outputs" (Mémoire) et du "Writer" (Disque) doit être harmonisée.
+    - **Note** : Ajout automatique de la dimension 'time' (T) pour les sorties accumulées.
 
 ## Décisions d'architecture
 
@@ -130,7 +131,3 @@ Refonte de la gestion des sorties (Outputs) dans le `StreamingRunner` pour optim
 | ✅ Passés  | 1      |
 | ❌ Échoués | 0      |
 | **Total**  | 1      |
-
-```
-
-```
