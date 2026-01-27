@@ -319,7 +319,7 @@ class Compiler:
                 fill_nan=self.fill_nan,
             )
 
-            # Validate temporal range if forcing has time coordinates
+            # Validate and slice temporal range if forcing has time coordinates
             if hasattr(source, "coords") and "T" in source.coords:
                 forcing_coords = source.coords["T"]
                 forcing_start = forcing_coords.values[0]
@@ -332,6 +332,28 @@ class Compiler:
                         f"does not cover simulation range [{time_grid.start}, {time_grid.end}]. "
                         f"Ensure forcing data spans the entire simulation period."
                     )
+
+                # Slice forcing to simulation temporal range
+                # Strategy: keep points within [start, end) plus boundary points for interpolation
+                forcing_times = forcing_coords.values
+                sim_start = time_grid.start
+                sim_end = time_grid.end
+
+                # Find bracket indices: points at or after start, before end
+                start_idx = np.searchsorted(forcing_times, sim_start, side="left")
+                end_idx = np.searchsorted(forcing_times, sim_end, side="left")
+
+                # Ensure we have at least 2 points for interpolation
+                # Expand to include boundary points if needed
+                if end_idx - start_idx < 2:
+                    # Very sparse forcing: expand to include neighbors
+                    if start_idx > 0:
+                        start_idx -= 1
+                    if end_idx < len(forcing_times):
+                        end_idx += 1
+
+                # Slice the forcing data along time dimension (first axis)
+                arr = arr[start_idx:end_idx]
 
             # Check if temporal interpolation is needed
             # Only interpolate if:

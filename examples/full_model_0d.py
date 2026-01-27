@@ -10,6 +10,8 @@ It implements the full LMTL (Low/Mid Trophic Level) dynamics:
 - Mortality
 """
 
+import time
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -103,57 +105,55 @@ def production_dynamics(production, cohort_ages, rec_age, npp, efficiency):
     2. Aging (flux C -> C+1)
     3. Recruitment (flux C -> Biomass if age > rec_age)
     """
+    # --- Shape Handling for Broadcasting ---
+    # production: (C, Y, X) or (C,)
+    # cohort_ages: (C,)
+    # We need to align C dimension.
+    spatial_ndim = production.ndim - 1
+    c_shape_broadcast = (production.shape[0],) + (1,) * spatial_ndim
+
     # --- 1. Pre-compute Cohort Durations (d_tau) ---
-    # diffs = ages[1:] - ages[:-1]
-    # In Seapopym legacy, last cohort duration repeats previous
     d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
-    last_d_tau = d_tau_raw[-1:]  # Keep dims
+    last_d_tau = d_tau_raw[-1:]
     d_tau = jnp.concatenate([d_tau_raw, last_d_tau])
 
     aging_rate = 1.0 / d_tau
+    # Broadcast (C,) -> (C, 1, 1)
+    aging_rate = aging_rate.reshape(c_shape_broadcast)
 
     # --- 2. Outflow from each cohort (Aging) ---
     outflow = production * aging_rate
 
     # --- 3. Influx logic ---
-    # Influx to [0]: From NPP
-    # Influx to [i > 0]: From Outflow[i-1] * (1 - is_recruited[i-1])
-
     source_flux = npp * efficiency
+    # Expand source to (1, Y, X) for concatenation
+    source_flux = jnp.expand_dims(source_flux, axis=0)
 
-    # Shift outflow to get influx from previous
     # [O0, O1, O2] -> [Source, O0, O1]
-    influx_from_prev = jnp.concatenate(
-        [
-            jnp.array([source_flux]),  # Index 0 gets NPP source
-            outflow[:-1],  # Indices 1..N get prev outflow
-        ]
-    )
+    # Concatenate along C axis (axis 0)
+    influx_from_prev = jnp.concatenate([source_flux, outflow[:-1]], axis=0)
 
     # --- 4. Recruitment Logic ---
-    is_recruited = cohort_ages >= rec_age
+    # Broadcast cohort_ages for comparison with rec_age(Y,X)
+    cohort_ages_grid = cohort_ages.reshape(c_shape_broadcast)
+    # (C, 1, 1) >= (Y, X) -> (C, Y, X)
+    is_recruited = cohort_ages_grid >= rec_age
 
-    # If C-1 was recruited, it emptied into biomass, so it does NOT flow to C.
-    # "is_recruited" is boolean vector.
-    # Standard shift for 'prev_is_recruited': [False, rec[0], rec[1]...]
-    # (Cohort 0 never has a "previous recruited" blocking it, since input is external NPP)
+    # Shifted recursion logic for prev_recruited
+    # Vector [False] expanded to matching spatial shape
+    false_slice = jnp.zeros((1,) + production.shape[1:], dtype=bool)
+    prev_recruited = jnp.concatenate([false_slice, is_recruited[:-1]], axis=0)
 
-    # prev_is_recruited logic:
-    # Vector [False] + is_recruited[:-1]
-    prev_recruited = jnp.concatenate([jnp.array([False]), is_recruited[:-1]])
-
-    # Filter influx: If prev was recruited, influx is 0 (it went to biomass instead)
+    # Filter influx
     effective_influx = jnp.where(prev_recruited, 0.0, influx_from_prev)
 
-    # Tendency = Influx - Outflow
-    # Note: Outflow always happens (either to next cohort or to biomass/senescence)
+    # Tendency
     prod_tendency = effective_influx - outflow
 
-    # --- 5. Biomass Source (Recruitment) ---
-    # Sum of outflows from recruited cohorts
-    # If a cohort is recruited, its outflow goes to Biomass.
+    # --- 5. Biomass Source ---
+    # Sum over Cohorts (axis 0)
     recruitment_flux = jnp.where(is_recruited, outflow, 0.0)
-    biomass_source_val = jnp.sum(recruitment_flux)
+    biomass_source_val = jnp.sum(recruitment_flux, axis=0)
 
     return prod_tendency, biomass_source_val
 
@@ -176,7 +176,10 @@ blueprint = Blueprint.from_dict(
         "id": "lmtl-0d-full",
         "version": "1.0",
         "declarations": {
-            "state": {"biomass": {"units": "g/m^2"}, "production": {"units": "g/m^2", "dims": ["C"]}},
+            "state": {
+                "biomass": {"units": "g/m^2", "dims": ["Y", "X"]},
+                "production": {"units": "g/m^2", "dims": ["Y", "X", "C"]},
+            },
             "parameters": {
                 # LMTL params
                 "lambda_0": {"units": "1/s"},
@@ -189,8 +192,8 @@ blueprint = Blueprint.from_dict(
                 "cohort_ages": {"units": "s", "dims": ["C"]},
             },
             "forcings": {
-                "temperature": {"units": "degC", "dims": ["T"]},
-                "primary_production": {"units": "g/m^2/s", "dims": ["T"]},
+                "temperature": {"units": "degC", "dims": ["T", "Y", "X"]},
+                "primary_production": {"units": "g/m^2/s", "dims": ["T", "Y", "X"]},
             },
         },
         "process": [
@@ -251,19 +254,30 @@ blueprint = Blueprint.from_dict(
 # Create dummy forcings (Sinusoidal seasonal cycle)
 # Use real dates: 20 years of daily data
 start_date = "2000-01-01"
-end_date = "2020-01-01"  # 20 years exactly
-dates = pd.date_range(start=start_date, periods=365 * 20, freq="D")
+end_date = "2020-01-01"  # 1 year simulation
+dates = pd.date_range(start=start_date, periods=366 * 20, freq="D")
 # Simulating 'day of year' for sine wave
 day_of_year = dates.dayofyear.values
 
+# Define grid
+grid_size = (120, 180)  # (Y, X)
+ny, nx = grid_size
+lat = np.arange(ny)
+lon = np.arange(nx)
+
 # Temperature: 20C mean, +/- 5C amplitude
-temp_c = 20.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
-temp_da = xr.DataArray(temp_c, dims=["T"], coords={"T": dates})
+temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
+# Broadcast to (T, Y, X)
+temp_3d = np.broadcast_to(temp_c[:, None, None], (len(dates), ny, nx))
+temp_da = xr.DataArray(temp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
 # NPP: 1.0 mean, +/- 0.5 amplitude (in g/m^2/day -> convert to /s)
 npp_day = 1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)
 npp_sec = npp_day / 86400.0
-npp_da = xr.DataArray(npp_sec, dims=["T"], coords={"T": dates})
+# Broadcast to (T, Y, X)
+npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
+npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+
 
 config = Config.from_dict(
     {
@@ -277,12 +291,18 @@ config = Config.from_dict(
             "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
         },
         "forcings": {"temperature": temp_da, "primary_production": npp_da},
-        "initial_state": {"biomass": xr.DataArray(0.0), "production": xr.DataArray(np.zeros(n_cohorts), dims=["C"])},
+        "initial_state": {
+            "biomass": xr.DataArray(np.zeros((ny, nx)), dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+            "production": xr.DataArray(
+                np.zeros((ny, nx, n_cohorts)), dims=["Y", "X", "C"], coords={"Y": lat, "X": lon}
+            ),
+        },
         "execution": {
             "time_start": start_date,
             "time_end": end_date,
-            "dt": "0.05d",  # 20 timesteps per day
-            "forcing_interpolation": "linear",  # Interpolate daily forcings to 0.05d resolution
+            "dt": "3h",
+            "forcing_interpolation": "linear",
+            "batch_size": 1000,
         },
     }
 )
@@ -292,23 +312,29 @@ config = Config.from_dict(
 # =============================================================================
 
 print("Compiling model (Full LMTL 0D)...")
+time_start = time.time()
 model = compile_model(blueprint, config, backend="jax")
+time_end = time.time()
+print(f"Backend compilation time: {time_end - time_start:.2f} seconds")
 print(f"Model compiled. Backend: {model.backend}")
 
 runner = StreamingRunner(model)
 print("Running simulation...")
+time_start = time.time()
 start_state, outputs = runner.run(output_path=None)
-
+time_end = time.time()
+print(f"Simulation time: {time_end - time_start:.2f} seconds")
 # =============================================================================
 # 6. VISUALIZATION
 # =============================================================================
 
-biomass_ts = outputs["biomass"]
+# Calculate spatial mean for plotting
+time_start = time.time()
+biomass_ts = outputs["biomass"].mean(axis=(1, 2))  # Mean over Y, X
+time_end = time.time()
+print(f"Mean calculation time: {time_end - time_start:.2f} seconds")
 
-# Check if we have production output (if requested in blueprint... wait, outputs contains state generally)
-# The StreamingRunner returns state variables.
-# production_ts = outputs["production"] # Should be (T, C)
-
+time_start = time.time()
 # Determine dt in seconds for plotting axis
 dt_str = config.execution.dt
 # Simple parsing logic mirroring compiler
@@ -332,7 +358,7 @@ fig, ax1 = plt.subplots(figsize=(10, 6))
 
 color = "tab:red"
 ax1.set_xlabel("Date")
-ax1.set_ylabel("Biomass (g/m^2)", color=color)
+ax1.set_ylabel("Mean Biomass (g/m^2)", color=color)
 ax1.plot(time_axis, biomass_ts, color=color, linewidth=2)
 ax1.tick_params(axis="y", labelcolor=color)
 ax1.grid(True, alpha=0.3)
@@ -346,7 +372,14 @@ ax2.set_ylabel("Temperature (°C)", color=color)  # we already handled the x-lab
 ax2.plot(dates, temp_c, color=color, linestyle="--", alpha=0.6)
 ax2.tick_params(axis="y", labelcolor=color)
 
-plt.title("LMTL 0D Simulation: Biomass (dt=0.05d) & Daily Temperature")
+plt.title(f"LMTL 2D Simulation ({ny}x{nx}): Mean Biomass (dt={dt_str})")
 plt.tight_layout()
-plt.savefig("lmtl_0d_results_interpolated_dates.png")
-print("Plot saved to lmtl_0d_results_interpolated_dates.png")
+time_end = time.time()
+print(f"Plotting time: {time_end - time_start:.2f} seconds")
+
+time_start = time.time()
+plt.savefig("lmtl_2d_results.png")
+print("Plot saved to lmtl_2d_results.png")
+
+time_end = time.time()
+print(f"Saving plot time: {time_end - time_start:.2f} seconds")

@@ -560,7 +560,7 @@ print("=" * 80)
 
 # %%
 # Récupérer les statistiques du backend
-assert isinstance(controller.backend, MonitoringBackend)
+assert isinstance(controller.backend, MonitoringBackend)  # noqa: S101
 stats = controller.backend.get_statistics()
 
 # Afficher le résumé formaté

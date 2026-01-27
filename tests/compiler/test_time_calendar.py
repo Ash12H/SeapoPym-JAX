@@ -328,3 +328,53 @@ class TestCompileTimeGrid:
         expected = np.linspace(0, 10, 4)
 
         np.testing.assert_allclose(result, expected, atol=1e-5)
+
+    def test_temporal_slicing(self, blueprint):
+        """Test that forcings are sliced to simulation temporal range before interpolation."""
+        # Forcing: 20 years of data (2001-2021, non-leap start year for simplicity)
+        # Simulation: 1 year (2001-2002)
+        # Should slice forcing to 1 year first, then interpolate if needed
+
+        forcing_start = "2001-01-01"
+        forcing_end = "2021-01-01"
+        forcing_dates = pd.date_range(forcing_start, forcing_end, freq="1d", inclusive="left")
+
+        # Create a forcing with a clear pattern: value = day_of_year
+        # This way we can verify we only get days 1-365
+        forcing_values = np.array([d.dayofyear for d in forcing_dates], dtype=float)
+
+        config = Config.from_dict(
+            {
+                "parameters": {},
+                "forcings": {
+                    "temp": xr.DataArray(
+                        forcing_values.reshape(-1, 1, 1),
+                        dims=["T", "Y", "X"],
+                        coords={"T": forcing_dates},
+                    )
+                },
+                "execution": {
+                    "time_start": "2001-01-01",
+                    "time_end": "2002-01-01",
+                    "dt": "1d",
+                    "forcing_interpolation": "linear",
+                },
+                "initial_state": {},
+            }
+        )
+
+        compiler = Compiler(backend="numpy")
+        model = compiler.compile(blueprint, config)
+
+        # Should have 365 timesteps (1 non-leap year)
+        assert model.n_timesteps == 365
+
+        # Forcing should be sliced to 365 values
+        assert model.forcings["temp"].shape[0] == 365
+
+        # Values should be day_of_year from 1 to 365 (first year only)
+        # NOT values from 20 years compressed
+        result = model.forcings["temp"].flatten()
+        expected = np.arange(1, 366, dtype=float)  # Days 1-365
+
+        np.testing.assert_allclose(result, expected, atol=1e-5)
