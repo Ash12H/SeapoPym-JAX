@@ -10,9 +10,15 @@ import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import xarray as xr
+
+    from seapopym.compiler import CompiledModel
+
 
 from .exceptions import EngineIOError
 
@@ -22,17 +28,47 @@ logger = logging.getLogger(__name__)
 Array = Any  # np.ndarray | jax.Array
 
 
-class AsyncWriter:
+class OutputWriter(Protocol):
+    """Interface for simulation output writers."""
+
+    def initialize(self, shapes: dict[str, int], variables: list[str]) -> None:
+        """Initialize the writer.
+
+        Args:
+            shapes: Dimension sizes.
+            variables: List of variable names to write/keep.
+        """
+        ...
+
+    def append(self, data: dict[str, Array], chunk_index: int) -> None:
+        """Append a chunk of data.
+
+        Args:
+            data: Dictionary of arrays for the chunk.
+            chunk_index: Index of the current chunk.
+        """
+        ...
+
+    def finalize(self) -> Any:
+        """Finalize writing and return result (if any)."""
+        ...
+
+    def close(self) -> None:
+        """Close resources."""
+        ...
+
+
+class DiskWriter:
     """Asynchronous writer for simulation outputs.
 
     Uses a thread pool to write chunks in parallel with computation.
     The GIL is released during JAX execution, allowing true parallelism.
 
     Example:
-        >>> writer = AsyncWriter(output_path="/results/sim/", max_workers=2)
-        >>> writer.write_async({"biomass": arr}, chunk_id=0)
-        >>> writer.write_async({"biomass": arr}, chunk_id=1)
-        >>> writer.flush()  # Wait for all writes to complete
+        >>> writer = DiskWriter(output_path="/results/sim/", max_workers=2)
+        >>> writer.append({"biomass": arr}, chunk_index=0)
+        >>> writer.append({"biomass": arr}, chunk_index=1)
+        >>> writer.finalize()  # Wait for all writes to complete
     """
 
     def __init__(
@@ -101,16 +137,16 @@ class AsyncWriter:
         # NetCDF support can be added later
         raise EngineIOError(str(self.output_path), "NetCDF format not yet implemented")
 
-    def write_async(
+    def append(
         self,
         data: dict[str, Array],
-        chunk_id: int,
+        chunk_index: int,
     ) -> None:
         """Submit a chunk for asynchronous writing.
 
         Args:
             data: Dict mapping variable names to arrays.
-            chunk_id: Chunk index (for ordering).
+            chunk_index: Chunk index (for ordering).
         """
         if not self._initialized:
             raise EngineIOError(str(self.output_path), "Writer not initialized")
@@ -118,7 +154,7 @@ class AsyncWriter:
         # Convert JAX arrays to numpy before submitting
         data_np = {k: np.asarray(v) for k, v in data.items()}
 
-        future = self.executor.submit(self._write_chunk, data_np, chunk_id)
+        future = self.executor.submit(self._write_chunk, data_np, chunk_index)
         self.futures.append(future)
 
     def _write_chunk(self, data: dict[str, np.ndarray], chunk_id: int) -> None:
@@ -147,15 +183,13 @@ class AsyncWriter:
         # Use lock to ensure thread safety when resizing and writing
         with self._write_lock:
             for var_name, arr in data.items():
-                if var_name in self.store:
+                if var_name in self.store and isinstance(existing := self.store[var_name], zarr.Array):
                     # Append along time axis
-                    existing = self.store[var_name]
-                    if isinstance(existing, zarr.Array):
-                        new_shape = (existing.shape[0] + arr.shape[0],) + existing.shape[1:]
-                        existing.resize(new_shape)
-                        existing[-arr.shape[0] :] = arr
+                    new_shape = (existing.shape[0] + arr.shape[0],) + existing.shape[1:]
+                    existing.resize(new_shape)
+                    existing[-arr.shape[0] :] = arr
 
-    def flush(self) -> None:
+    def finalize(self) -> None:
         """Wait for all pending writes to complete."""
         errors = []
         for future in self.futures:
@@ -174,13 +208,101 @@ class AsyncWriter:
 
     def close(self) -> None:
         """Close the writer and release resources."""
-        self.flush()
+        self.finalize()
         self.executor.shutdown(wait=True)
 
-    def __enter__(self) -> AsyncWriter:
+    def __enter__(self) -> DiskWriter:
         """Context manager entry."""
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
         self.close()
+
+
+class MemoryWriter:
+    """In-memory writer that builds an xarray Dataset from chunks."""
+
+    def __init__(self, model: CompiledModel) -> None:
+        """Initialize memory writer.
+
+        Args:
+            model: Compiled model (needed for metadata: graph, coords, etc.)
+        """
+        self.model = model
+        self.variables: list[str] = []
+        self._accumulator: dict[str, list[np.ndarray]] = {}
+
+    def initialize(self, shapes: dict[str, int], variables: list[str]) -> None:  # noqa: ARG002
+        """Initialize accumulator."""
+        self.variables = variables
+        for var in variables:
+            self._accumulator[var] = []
+
+    def append(self, data: dict[str, Array], chunk_index: int) -> None:  # noqa: ARG002
+        """Append chunk to memory."""
+        # We accumulate specific variables
+        for var_name in self.variables:
+            if var_name in data:
+                # Ensure numpy array
+                arr = np.asarray(data[var_name])
+                self._accumulator[var_name].append(arr)
+
+    def finalize(self) -> xr.Dataset | None:
+        """Construct and return the xarray Dataset."""
+        if not self.variables:
+            return None
+
+        import xarray as xr
+
+        # 1. Contatenate arrays along time axis
+        merged_data = {}
+        for var_name, chunks in self._accumulator.items():
+            if not chunks:
+                continue
+            merged_data[var_name] = np.concatenate(chunks, axis=0)
+
+        # 2. Resolve coordinates and dimensions
+        coords = {k: np.asarray(v) for k, v in self.model.coords.items()}
+
+        # We need to map variable names to their dimensions
+        # This requires searching the graph for the DataNode
+        var_dims = self._resolve_variable_dims()
+
+        data_vars = {}
+        for var_name, data in merged_data.items():
+            dims = var_dims.get(var_name, None)
+
+            # Fallback if dims not found or rank mismatch
+            if dims is None or len(dims) != data.ndim:
+                # Try to guess standard dims based on rank if possible,
+                # otherwise use default names dim_0, dim_1...
+                # But typically valid variables should be in graph.
+                # Standard JAX output is (T, ...)
+                pass
+
+            data_vars[var_name] = (dims, data)
+
+        return xr.Dataset(data_vars=data_vars, coords=coords)
+
+    def close(self) -> None:
+        """Release resources (no-op for memory writer)."""
+        pass
+
+    def _resolve_variable_dims(self) -> dict[str, tuple[str, ...]]:
+        """Resolve dimensions for all requested variables using the graph."""
+        from seapopym.blueprint.nodes import DataNode
+
+        # Map var_name -> dims tuple
+        resolved = {}
+
+        # We scan graph nodes. This is fast enough for initialization.
+        for node in self.model.graph.nodes:
+            if isinstance(node, DataNode) and node.name in self.variables and node.dims is not None:
+                resolved[node.name] = tuple(d for d in node.dims)
+
+        return resolved
+
+
+# Alias for backward compatibility
+AsyncWriter = DiskWriter

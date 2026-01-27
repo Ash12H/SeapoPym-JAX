@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from .backends import get_backend
 from .exceptions import BackendError, ChunkingError
-from .io import AsyncWriter
+from .io import DiskWriter, MemoryWriter, OutputWriter
 from .step import build_step_fn
 
 if TYPE_CHECKING:
@@ -65,14 +65,21 @@ class StreamingRunner:
         self.io_workers = io_workers
         self.backend = get_backend(model.backend)
 
-    def run(self, output_path: str | Path | None = None) -> tuple[State, Outputs | None]:
+    def run(
+        self,
+        output_path: str | Path | None = None,
+        export_variables: list[str] | None = None,
+    ) -> tuple[State, Any | None]:
         """Execute the full simulation with streaming output.
 
         Args:
-            output_path: Path to write outputs. If None, outputs are returned in memory.
+            output_path: Path to write outputs. If None, outputs are returned in memory as xarray.Dataset.
+            export_variables: List of variables to export/keep. If None, defaults to state variables.
 
         Returns:
-            Tuple of (final_state, outputs). Outputs is None if output_path is provided.
+            Tuple of (final_state, outputs).
+            - If output_path is set, outputs is None (data written to disk).
+            - If output_path is None, outputs is an xarray.Dataset containing requested variables.
         """
         n_timesteps = self.model.n_timesteps
 
@@ -93,24 +100,19 @@ class StreamingRunner:
         # Initialize state
         state = dict(self.model.state)  # Copy to avoid modifying original
 
-        # Get output variable names
-        output_vars = list(state.keys())
+        # Determine variables to export
+        output_vars = export_variables if export_variables is not None else list(state.keys())
 
-        # Prepare for execution
-        accumulated_outputs: dict[str, list[Array]] | None = {} if output_path is None else None
-
-        # Setup context manager for disk usage (dummy for in-memory)
-        from contextlib import nullcontext
-
-        writer_ctx = (
-            AsyncWriter(output_path, max_workers=self.io_workers)  # type: ignore
+        # Initialize Writer Strategy
+        writer: OutputWriter
+        writer = (
+            DiskWriter(output_path, max_workers=self.io_workers)
             if output_path is not None
-            else nullcontext()
+            else MemoryWriter(self.model)
         )
 
-        with writer_ctx as writer:
-            if writer is not None:
-                writer.initialize(self.model.shapes, output_vars)
+        try:
+            writer.initialize(self.model.shapes, output_vars)
 
             # Process chunks
             for chunk_idx in range(n_chunks):
@@ -131,40 +133,20 @@ class StreamingRunner:
                     length=chunk_len,
                 )
 
-                if writer is not None:
-                    # Write outputs asynchronously
-                    writer.write_async(outputs, chunk_idx)
-                else:
-                    # Accumulate in memory
-                    if accumulated_outputs is None:
-                        # Should not happen if writer is None (see logic above)
-                        accumulated_outputs = {}
+                # Append outputs to writer (it will filter what it needs)
+                # Note: 'outputs' from JAX contains state + derived variables
+                writer.append(outputs, chunk_idx)
 
-                    for k, v in outputs.items():
-                        if k not in accumulated_outputs:
-                            accumulated_outputs[k] = []
-                        accumulated_outputs[k].append(v)
+            # Finalize and get results
+            final_results = writer.finalize()
 
-            if writer is not None:
-                # Ensure all writes complete
-                writer.flush()
-
-        # Finalize in-memory outputs
-        final_outputs: Outputs | None = None
-        if accumulated_outputs is not None and accumulated_outputs:
-            import numpy as np
-
-            if self.model.backend == "jax":
-                import jax.numpy as jnp
-
-                concat = jnp.concatenate
-            else:
-                concat = np.concatenate
-
-            final_outputs = {k: concat(v, axis=0) for k, v in accumulated_outputs.items()}
+        finally:
+            # Ensure resources are released (e.g. thread pool)
+            if hasattr(writer, "close"):
+                writer.close()
 
         logger.info("Simulation complete")
-        return state, final_outputs
+        return state, final_results
 
     def _slice_forcings(self, start: int, end: int) -> dict[str, Array]:
         """Slice forcings for a temporal chunk.

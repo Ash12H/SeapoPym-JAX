@@ -29,8 +29,8 @@ class TestAsyncWriter:
 
         # Write a chunk
         data = {"biomass": np.ones((10, 5, 5)) * 100.0}
-        writer.write_async(data, chunk_id=0)
-        writer.flush()
+        writer.append(data, chunk_index=0)
+        writer.finalize()
         writer.close()
 
         # Verify data was written
@@ -49,9 +49,9 @@ class TestAsyncWriter:
         # Write multiple chunks
         for i in range(3):
             data = {"biomass": np.ones((5, 5, 5)) * (i + 1)}
-            writer.write_async(data, chunk_id=i)
+            writer.append(data, chunk_index=i)
 
-        writer.flush()
+        writer.finalize()
         writer.close()
 
         # Verify all data was written
@@ -70,8 +70,8 @@ class TestAsyncWriter:
             "biomass": np.ones((5, 5, 5)) * 100.0,
             "temperature": np.ones((5, 5, 5)) * 20.0,
         }
-        writer.write_async(data, chunk_id=0)
-        writer.flush()
+        writer.append(data, chunk_index=0)
+        writer.finalize()
         writer.close()
 
         import zarr
@@ -87,7 +87,7 @@ class TestAsyncWriter:
         with AsyncWriter(output_path) as writer:
             writer.initialize({"Y": 5, "X": 5}, ["biomass"])
             data = {"biomass": np.ones((5, 5, 5)) * 100.0}
-            writer.write_async(data, chunk_id=0)
+            writer.append(data, chunk_index=0)
 
         # Should have flushed and closed
         import zarr
@@ -101,7 +101,7 @@ class TestAsyncWriter:
         writer = AsyncWriter(output_path)
 
         with pytest.raises(EngineIOError):
-            writer.write_async({"biomass": np.ones((5, 5, 5))}, chunk_id=0)
+            writer.append({"biomass": np.ones((5, 5, 5))}, chunk_index=0)
 
         writer.close()
 
@@ -116,7 +116,7 @@ class TestAsyncWriter:
 
             # Use JAX array
             data = {"biomass": jnp.ones((5, 5, 5)) * 100.0}
-            writer.write_async(data, chunk_id=0)
+            writer.append(data, chunk_index=0)
 
         # Should have been converted and written
         import zarr
@@ -137,10 +137,10 @@ class TestAsyncWriterConcurrency:
         # Submit multiple writes quickly
         for i in range(5):
             data = {"biomass": np.random.rand(10, 10, 10)}
-            writer.write_async(data, chunk_id=i)
+            writer.append(data, chunk_index=i)
 
         # Flush should wait for all
-        writer.flush()
+        writer.finalize()
         writer.close()
 
         # Verify all data written

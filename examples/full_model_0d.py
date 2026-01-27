@@ -1,13 +1,15 @@
-"""0D LMTL Model Implementation (Full Biological Complexity).
+"""0D LMTL Model Implementation (Decomposed Dynamics).
 
-This script replicates the logic of 'article/notebooks/article_02a_comparison_seapopym_v0.3.py'
-using the new Seapopym v1 Engine (JAX/NumPy).
+This script implements the full LMTL (Low/Mid Trophic Level) dynamics using a
+decomposed approach where each physical process is a separate function.
 
-It implements the full LMTL (Low/Mid Trophic Level) dynamics:
-- Temperature-dependent development (Gillooly)
-- Cohort-based production (Aging)
-- Recruitment to biomass
-- Mortality
+Processes:
+1. NPP Injection -> Cohort 0
+2. Aging Flux -> Transfer between cohorts (C -> C+1)
+3. Recruitment Flux -> Transfer from eligible cohorts to Biomass
+4. Natural Mortality -> Loss from Biomass
+
+This version supports 2D grid simulation.
 """
 
 import time
@@ -23,11 +25,11 @@ from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
 from seapopym.engine import StreamingRunner
 
-# Initialize Pint registry for unit definition
+# Initialize Pint registry
 ureg = pint.get_application_registry()
 
 # =============================================================================
-# 1. PARAMETERS (From Notebook 02A)
+# 1. PARAMETERS
 # =============================================================================
 
 # LMTL Biological Parameters
@@ -38,15 +40,15 @@ LMTL_TAU_R_0 = 10.38  # days
 LMTL_GAMMA_TAU_R = 0.11  # 1/degC
 LMTL_T_REF = 0.0  # degC
 
+
 # =============================================================================
-# 2. FUNCTION DEFINITIONS (JAX/NumPy Compatible)
+# 2. DECOMPOSED FUNCTIONS (JAX)
 # =============================================================================
 
 
 @functional(name="lmtl:gillooly_temperature", backend="jax", units={"temp": "degC", "return": "degC"})
 def gillooly_temperature(temp):
     """Normalize temperature using Gillooly et al. (2001)."""
-    # T_norm = T / (1 + T/273)
     return temp / (1.0 + temp / 273.0)
 
 
@@ -57,8 +59,6 @@ def gillooly_temperature(temp):
 )
 def recruitment_age(temp, tau_r_0, gamma, t_ref):
     """Compute recruitment age (time to recruitment)."""
-
-    # tau = tau_0 * exp(-gamma * (T - T_ref))
     return tau_r_0 * jnp.exp(-gamma * (temp - t_ref))
 
 
@@ -75,105 +75,149 @@ def recruitment_age(temp, tau_r_0, gamma, t_ref):
     },
 )
 def mortality_tendency(biomass, temp, lambda_0, gamma, t_ref):
-    """Compute mortality loss."""
-
-    # rate = lambda_0 * exp(gamma * (T - T_ref))
+    """Compute mortality loss for biomass."""
     rate = lambda_0 * jnp.exp(gamma * (temp - t_ref))
-    # Tendency = -rate * B
     return -rate * biomass
 
 
+# --- Decomposed Production Dynamics ---
+
+
 @functional(
-    name="lmtl:production_dynamics",
+    name="lmtl:npp_injection",
     backend="jax",
-    core_dims={"production": ["C"], "cohort_ages": ["C"]},
-    outputs=["prod_tendency", "biomass_source"],
+    core_dims={"production": ["C"]},
     units={
-        "production": "g/m^2",
-        "cohort_ages": "s",
-        "rec_age": "s",
         "npp": "g/m^2/s",
         "efficiency": "dimensionless",
-        "prod_tendency": "g/m^2/s",
-        "biomass_source": "g/m^2/s",
+        "production": "g/m^2",
+        "return": "g/m^2/s",
     },
 )
-def production_dynamics(production, cohort_ages, rec_age, npp, efficiency):
-    """Combined dynamics for Production cohorts.
+def npp_injection(npp, efficiency, production):
+    """Inject Primary Production into the first cohort (0)."""
+    # npp is (Y, X) or (T, Y, X)
+    # production is (C, Y, X)
 
-    1. Input from NPP (into cohort 0)
-    2. Aging (flux C -> C+1)
-    3. Recruitment (flux C -> Biomass if age > rec_age)
+    source_flux = npp * efficiency
+
+    # Create tendencies tensor matching production shape
+    tendency = jnp.zeros_like(production)
+
+    # Add source flux to the first cohort
+    # Use .at[0, ...].set() for JAX array update
+    tendency = tendency.at[0, ...].set(source_flux)
+
+    return tendency
+
+
+@functional(
+    name="lmtl:aging_flow",
+    backend="jax",
+    core_dims={"production": ["C"], "cohort_ages": ["C"]},
+    units={"production": "g/m^2", "cohort_ages": "s", "rec_age": "s", "return": "g/m^2/s"},
+)
+def aging_flow(production, cohort_ages, rec_age):
+    """Compute aging flux (transfer from C to C+1).
+
+    Logic:
+    - Calculates flow based on cohort duration.
+    - If a cohort is recruited (Age > RecAge), it does NOT flow to C+1 (it goes to Biomass).
+    - The last cohort does NOT flow out (accumulation/plus group).
     """
-    # --- Shape Handling for Broadcasting ---
-    # production: (C, Y, X) or (C,)
-    # cohort_ages: (C,)
-    # We need to align C dimension.
+    # Handle Broadcasting: (C, Y, X)
     spatial_ndim = production.ndim - 1
-    c_shape_broadcast = (production.shape[0],) + (1,) * spatial_ndim
+    c_broadcast = (production.shape[0],) + (1,) * spatial_ndim
 
-    # --- 1. Pre-compute Cohort Durations (d_tau) ---
+    # Cohort durations
     d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
     last_d_tau = d_tau_raw[-1:]
     d_tau = jnp.concatenate([d_tau_raw, last_d_tau])
 
-    aging_rate = 1.0 / d_tau
-    # Broadcast (C,) -> (C, 1, 1)
-    aging_rate = aging_rate.reshape(c_shape_broadcast)
+    # Aging rate
+    aging_coef = (1.0 / d_tau).reshape(c_broadcast)
 
-    # --- 2. Outflow from each cohort (Aging) ---
-    outflow = production * aging_rate
+    # Base Outflow
+    base_outflow = production * aging_coef
 
-    # --- 3. Influx logic ---
-    source_flux = npp * efficiency
-    # Expand source to (1, Y, X) for concatenation
-    source_flux = jnp.expand_dims(source_flux, axis=0)
+    # 1. Recruitment Filter
+    # If recruited, flow is diverted to biomass, so it's 0 for aging.
+    cohort_ages_grid = cohort_ages.reshape(c_broadcast)
+    is_recruited = cohort_ages_grid >= rec_age
+    aging_outflow = jnp.where(is_recruited, 0.0, base_outflow)
 
-    # [O0, O1, O2] -> [Source, O0, O1]
-    # Concatenate along C axis (axis 0)
-    influx_from_prev = jnp.concatenate([source_flux, outflow[:-1]], axis=0)
+    # 2. Last Cohort Filter (Accumulation)
+    # Prevent outflow from the last cohort
+    aging_outflow = aging_outflow.at[-1, ...].set(0.0)
 
-    # --- 4. Recruitment Logic ---
-    # Broadcast cohort_ages for comparison with rec_age(Y,X)
-    cohort_ages_grid = cohort_ages.reshape(c_shape_broadcast)
-    # (C, 1, 1) >= (Y, X) -> (C, Y, X)
+    # 3. Balance (Loss + Gain from prev)
+    loss = -aging_outflow
+
+    # Gain for cohort i comes from outflow of i-1
+    # Cohort 0 has no aging input
+    gain = jnp.concatenate(
+        [
+            jnp.zeros((1,) + production.shape[1:]),
+            aging_outflow[:-1],
+        ],
+        axis=0,
+    )
+
+    return loss + gain
+
+
+@functional(
+    name="lmtl:recruitment_flow",
+    backend="jax",
+    core_dims={"production": ["C"], "cohort_ages": ["C"]},
+    outputs=["prod_loss", "biomass_gain"],
+    units={
+        "production": "g/m^2",
+        "cohort_ages": "s",
+        "rec_age": "s",
+        "prod_loss": "g/m^2/s",
+        "biomass_gain": "g/m^2/s",
+    },
+)
+def recruitment_flow(production, cohort_ages, rec_age):
+    """Compute recruitment flux (transfer from C to Biomass)."""
+    spatial_ndim = production.ndim - 1
+    c_broadcast = (production.shape[0],) + (1,) * spatial_ndim
+
+    d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
+    last_d_tau = d_tau_raw[-1:]
+    d_tau = jnp.concatenate([d_tau_raw, last_d_tau])
+
+    aging_coef = (1.0 / d_tau).reshape(c_broadcast)
+    base_outflow = production * aging_coef
+
+    # Filter: Keep ONLY recruited fluxes
+    cohort_ages_grid = cohort_ages.reshape(c_broadcast)
     is_recruited = cohort_ages_grid >= rec_age
 
-    # Shifted recursion logic for prev_recruited
-    # Vector [False] expanded to matching spatial shape
-    false_slice = jnp.zeros((1,) + production.shape[1:], dtype=bool)
-    prev_recruited = jnp.concatenate([false_slice, is_recruited[:-1]], axis=0)
+    flux_to_biomass = jnp.where(is_recruited, base_outflow, 0.0)
 
-    # Filter influx
-    effective_influx = jnp.where(prev_recruited, 0.0, influx_from_prev)
+    # 1. Loss from Production
+    prod_loss = -flux_to_biomass
 
-    # Tendency
-    prod_tendency = effective_influx - outflow
+    # 2. Gain to Biomass (Sum over all contributing cohorts)
+    biomass_gain = jnp.sum(flux_to_biomass, axis=0)
 
-    # --- 5. Biomass Source ---
-    # Sum over Cohorts (axis 0)
-    recruitment_flux = jnp.where(is_recruited, outflow, 0.0)
-    biomass_source_val = jnp.sum(recruitment_flux, axis=0)
-
-    return prod_tendency, biomass_source_val
+    return prod_loss, biomass_gain
 
 
 # =============================================================================
 # 3. BLUEPRINT CONFIGURATION
 # =============================================================================
 
-# Define Cohorts
-# Logic from legacy: np.arange(0, ceil(tau_r_0) + 1) * day
-# MAX_AGE: LMTL_TAU_R_0 + 1 days.
-
-max_age_days = int(np.ceil(LMTL_TAU_R_0) + 1)
+max_age_days = int(np.ceil(LMTL_TAU_R_0) + 5)
 cohort_ages_days = np.arange(0, max_age_days + 1)
 cohort_ages_sec = cohort_ages_days * 86400.0
 n_cohorts = len(cohort_ages_sec)
 
 blueprint = Blueprint.from_dict(
     {
-        "id": "lmtl-0d-full",
+        "id": "lmtl-0d-decomposed",
         "version": "1.0",
         "declarations": {
             "state": {
@@ -181,14 +225,12 @@ blueprint = Blueprint.from_dict(
                 "production": {"units": "g/m^2", "dims": ["Y", "X", "C"]},
             },
             "parameters": {
-                # LMTL params
                 "lambda_0": {"units": "1/s"},
                 "gamma_lambda": {"units": "1/delta_degC"},
                 "tau_r_0": {"units": "s"},
                 "gamma_tau_r": {"units": "1/delta_degC"},
                 "t_ref": {"units": "degC"},
                 "efficiency": {"units": "dimensionless"},
-                # Grids
                 "cohort_ages": {"units": "s", "dims": ["C"]},
             },
             "forcings": {
@@ -197,41 +239,53 @@ blueprint = Blueprint.from_dict(
             },
         },
         "process": [
-            # 1. Compute Temperature transformations
-            # (Could be done inline inputs but explicit is nicer if re-used)
+            # 1. Derived Variables
             {
                 "func": "lmtl:gillooly_temperature",
                 "inputs": {"temp": "forcings.temperature"},
                 "outputs": {"return": {"target": "derived.temp_norm", "type": "derived"}},
             },
-            # 2. Compute Dynamic Recruitment Age
             {
                 "func": "lmtl:recruitment_age",
                 "inputs": {
-                    "temp": "derived.temp_norm",  # Use normalized T!
+                    "temp": "derived.temp_norm",
                     "tau_r_0": "parameters.tau_r_0",
                     "gamma": "parameters.gamma_tau_r",
                     "t_ref": "parameters.t_ref",
                 },
                 "outputs": {"return": {"target": "derived.rec_age", "type": "derived"}},
             },
-            # 3. Production Dynamics (Aging + Recruitment)
+            # 2. Dynamics (Decomposed)
             {
-                "func": "lmtl:production_dynamics",
+                "func": "lmtl:npp_injection",
+                "inputs": {
+                    "npp": "forcings.primary_production",
+                    "efficiency": "parameters.efficiency",
+                    "production": "state.production",
+                },
+                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
+            },
+            {
+                "func": "lmtl:aging_flow",
                 "inputs": {
                     "production": "state.production",
                     "cohort_ages": "parameters.cohort_ages",
                     "rec_age": "derived.rec_age",
-                    "npp": "forcings.primary_production",
-                    "efficiency": "parameters.efficiency",
                 },
-                # Func returns (prod_tendency, biomass_source)
+                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
+            },
+            {
+                "func": "lmtl:recruitment_flow",
+                "inputs": {
+                    "production": "state.production",
+                    "cohort_ages": "parameters.cohort_ages",
+                    "rec_age": "derived.rec_age",
+                },
                 "outputs": {
-                    "prod_tendency": {"target": "tendencies.production", "type": "tendency"},
-                    "biomass_source": {"target": "tendencies.biomass_recruitment", "type": "tendency"},
+                    "prod_loss": {"target": "tendencies.production", "type": "tendency"},
+                    "biomass_gain": {"target": "tendencies.biomass", "type": "tendency"},
                 },
             },
-            # 4. Biomass Mortality
             {
                 "func": "lmtl:mortality",
                 "inputs": {
@@ -241,40 +295,45 @@ blueprint = Blueprint.from_dict(
                     "gamma": "parameters.gamma_lambda",
                     "t_ref": "parameters.t_ref",
                 },
-                "outputs": {"return": {"target": "tendencies.biomass_mortality", "type": "tendency"}},
+                "outputs": {"return": {"target": "tendencies.biomass", "type": "tendency"}},
             },
         ],
     }
 )
 
 # =============================================================================
-# 4. CONFIGURATION (Data)
+# 4. CONFIGURATION (2D Grid Simulation)
 # =============================================================================
 
-# Create dummy forcings (Sinusoidal seasonal cycle)
-# Use real dates: 20 years of daily data
+# Simulation Time
 start_date = "2000-01-01"
-end_date = "2020-01-01"  # 1 year simulation
-dates = pd.date_range(start=start_date, periods=366 * 20, freq="D")
-# Simulating 'day of year' for sine wave
-day_of_year = dates.dayofyear.values
+end_date = "2001-01-01"  # 2 years
+dt = "3h"
 
-# Define grid
-grid_size = (120, 180)  # (Y, X)
+# Generate dates covering [start, end] inclusive
+start_pd = pd.to_datetime(start_date)
+end_pd = pd.to_datetime(end_date)
+n_days = (end_pd - start_pd).days + 5  # Add margin to cover end_date safely
+
+dates = pd.date_range(start=start_pd, periods=n_days, freq="D")
+
+# Grid (2D)
+grid_size = (180, 360)
 ny, nx = grid_size
 lat = np.arange(ny)
 lon = np.arange(nx)
 
-# Temperature: 20C mean, +/- 5C amplitude
-temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
+# Forcing Data Generation
+# Temperature: 20C mean, +/- 5C seasonal amplitude
+day_of_year = dates.dayofyear.values
+temp_c = 20.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 # Broadcast to (T, Y, X)
 temp_3d = np.broadcast_to(temp_c[:, None, None], (len(dates), ny, nx))
 temp_da = xr.DataArray(temp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
-# NPP: 1.0 mean, +/- 0.5 amplitude (in g/m^2/day -> convert to /s)
+# NPP: 1.0 mean, +/- 0.5 seasonal amplitude (g/m^2/day)
 npp_day = 1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)
 npp_sec = npp_day / 86400.0
-# Broadcast to (T, Y, X)
 npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
 npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
@@ -282,9 +341,9 @@ npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat
 config = Config.from_dict(
     {
         "parameters": {
-            "lambda_0": {"value": LMTL_LAMBDA_0 / 86400.0},  # Convert day^-1 to s^-1
+            "lambda_0": {"value": LMTL_LAMBDA_0 / 86400.0},
             "gamma_lambda": {"value": LMTL_GAMMA_LAMBDA},
-            "tau_r_0": {"value": LMTL_TAU_R_0 * 86400.0},  # Convert days to s
+            "tau_r_0": {"value": LMTL_TAU_R_0 * 86400.0},
             "gamma_tau_r": {"value": LMTL_GAMMA_TAU_R},
             "t_ref": {"value": LMTL_T_REF},
             "efficiency": {"value": LMTL_E},
@@ -300,9 +359,9 @@ config = Config.from_dict(
         "execution": {
             "time_start": start_date,
             "time_end": end_date,
-            "dt": "3h",
+            "dt": dt,
             "forcing_interpolation": "linear",
-            "batch_size": 1000,
+            "batch_size": None,
         },
     }
 )
@@ -311,75 +370,49 @@ config = Config.from_dict(
 # 5. EXECUTION
 # =============================================================================
 
-print("Compiling model (Full LMTL 0D)...")
-time_start = time.time()
+print("Compiling model (Decomposed LMTL 2D)...")
 model = compile_model(blueprint, config, backend="jax")
-time_end = time.time()
-print(f"Backend compilation time: {time_end - time_start:.2f} seconds")
 print(f"Model compiled. Backend: {model.backend}")
 
 runner = StreamingRunner(model)
-print("Running simulation...")
-time_start = time.time()
-start_state, outputs = runner.run(output_path=None)
-time_end = time.time()
-print(f"Simulation time: {time_end - time_start:.2f} seconds")
+print(f"Running simulation on {grid_size} grid for {len(dates)} steps...")
+t_start = time.time()
+state, outputs = runner.run()
+t_end = time.time()
+print(f"Simulation completed in {t_end - t_start:.2f} seconds.")
+
 # =============================================================================
 # 6. VISUALIZATION
 # =============================================================================
 
-# Calculate spatial mean for plotting
-time_start = time.time()
-biomass_ts = outputs["biomass"].mean(axis=(1, 2))  # Mean over Y, X
-time_end = time.time()
-print(f"Mean calculation time: {time_end - time_start:.2f} seconds")
+# Calculate mean biomass over the grid
+biomass_mean = outputs["biomass"].mean(axis=(1, 2))  # Mean over Y, X
 
-time_start = time.time()
-# Determine dt in seconds for plotting axis
-dt_str = config.execution.dt
-# Simple parsing logic mirroring compiler
-if dt_str.endswith("d"):
-    dt_seconds = float(dt_str[:-1]) * 86400
-elif dt_str.endswith("h"):
-    dt_seconds = float(dt_str[:-1]) * 3600
-elif dt_str.endswith("m"):
-    dt_seconds = float(dt_str[:-1]) * 60
-elif dt_str.endswith("s"):
-    dt_seconds = float(dt_str[:-1])
-else:
-    dt_seconds = float(dt_str)
+# Recalculate time axis based on outputs length
+n_output_steps = len(biomass_mean)
+plot_dates = pd.date_range(start=start_pd, periods=n_output_steps, freq=dt)
 
-# Robust time axis construction
-start_ts = pd.Timestamp(start_date)
-time_deltas = pd.to_timedelta(np.arange(len(biomass_ts)) * dt_seconds, unit="s")
-time_axis = start_ts + time_deltas
+# Slice forcing data to match output length for plotting
+temp_c_plot = temp_c[:n_output_steps]
 
+# Plot results
 fig, ax1 = plt.subplots(figsize=(10, 6))
 
-color = "tab:red"
+color = "tab:green"
 ax1.set_xlabel("Date")
 ax1.set_ylabel("Mean Biomass (g/m^2)", color=color)
-ax1.plot(time_axis, biomass_ts, color=color, linewidth=2)
+ax1.plot(plot_dates, biomass_mean, color=color, linewidth=2, label="Biomass")
 ax1.tick_params(axis="y", labelcolor=color)
 ax1.grid(True, alpha=0.3)
-# Rotate date labels
-plt.setp(ax1.get_xticklabels(), rotation=45, ha="right")
 
-ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-color = "tab:blue"
-ax2.set_ylabel("Temperature (°C)", color=color)  # we already handled the x-label with ax1
-# Plot temp on original daily axis (using dates from forcings)
-ax2.plot(dates, temp_c, color=color, linestyle="--", alpha=0.6)
+# Add Temperature on twin axis
+ax2 = ax1.twinx()
+color = "tab:red"
+ax2.set_ylabel("Temperature (°C)", color=color)
+ax2.plot(plot_dates, temp_c_plot, color=color, linestyle="--", alpha=0.5, label="Temp")
 ax2.tick_params(axis="y", labelcolor=color)
 
-plt.title(f"LMTL 2D Simulation ({ny}x{nx}): Mean Biomass (dt={dt_str})")
-plt.tight_layout()
-time_end = time.time()
-print(f"Plotting time: {time_end - time_start:.2f} seconds")
-
-time_start = time.time()
-plt.savefig("lmtl_2d_results.png")
-print("Plot saved to lmtl_2d_results.png")
-
-time_end = time.time()
-print(f"Saving plot time: {time_end - time_start:.2f} seconds")
+plt.title("LMTL Decomposed Model - 2D Simulation Results")
+fig.tight_layout()
+plt.savefig("lmtl_decomposed_2d_results.png")
+print("Plot saved to lmtl_decomposed_2d_results.png")
