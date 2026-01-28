@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from seapopym.blueprint.nodes import ComputeNode
+from seapopym.engine.vectorize import wrap_with_vmap
 
 if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
@@ -53,6 +54,22 @@ def build_step_fn(
 
     compute_nodes: list[ComputeNode] = [node for node in nx.topological_sort(graph) if isinstance(node, ComputeNode)]
 
+    # Pre-compute vmapped functions for nodes with core_dims
+    vmapped_funcs: dict[str, Callable[..., Any]] = {}
+    for compute_node in compute_nodes:
+        if compute_node.core_dims:
+            # Get argument order from input_mapping keys
+            arg_order = list(compute_node.input_mapping.keys())
+            vmapped_funcs[compute_node.name] = wrap_with_vmap(
+                compute_node.func,
+                compute_node.input_dims,
+                compute_node.core_dims,
+                arg_order,
+            )
+        else:
+            # No core_dims, use original function (element-wise broadcasting)
+            vmapped_funcs[compute_node.name] = compute_node.func
+
     def step_fn(state: State, forcings_t: Forcings) -> tuple[State, Outputs]:
         """Execute one timestep.
 
@@ -77,8 +94,9 @@ def build_step_fn(
             # Build function inputs from state, forcings, parameters, intermediates
             func_inputs = _resolve_inputs(compute_node.input_mapping, state, forcings_t, parameters, intermediates)
 
-            # Call the function directly from the node
-            result = compute_node.func(**func_inputs)
+            # Call the vmapped function (or original if no core_dims)
+            func = vmapped_funcs[compute_node.name]
+            result = func(**func_inputs)
 
             # Handle outputs using the node's output_mapping
             _handle_compute_outputs(result, compute_node.output_mapping, tendencies, intermediates)

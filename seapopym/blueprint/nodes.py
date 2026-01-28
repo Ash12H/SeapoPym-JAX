@@ -34,6 +34,10 @@ class ComputeNode:
         input_mapping: Mapping des entrées.
         scope: Portée de l'unité.
         group: Nom du groupe fonctionnel auquel appartient cette unité.
+        core_dims: Dimensions sur lesquelles la fonction opère (non broadcastées).
+                   Format: {"input_name": ["dim1", "dim2"]}.
+        input_dims: Dimensions réelles de chaque input après transposition canonique.
+                    Format: {"input_name": ("C", "Y", "X")}.
     """
 
     func: Callable[..., Any]
@@ -42,6 +46,8 @@ class ComputeNode:
     input_mapping: dict[str, str] = field(default_factory=dict)  # arg_name -> graph_var_name
     scope: str = "local"  # 'local' ou 'global'
     group: str | None = None  # Nom du groupe fonctionnel (ex: 'Tuna')
+    core_dims: dict[str, list[str]] = field(default_factory=dict)
+    input_dims: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __hash__(self) -> int:
         """Return hash based on node name."""

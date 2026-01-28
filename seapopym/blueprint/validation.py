@@ -245,11 +245,24 @@ class BlueprintValidator:
             # Determine output mapping from ProcessStep
             output_mapping = {out_key: out_spec.target for out_key, out_spec in step.outputs.items()}
 
+            # Resolve input dimensions from DataNodes
+            input_dims: dict[str, tuple[str, ...]] = {}
+            for arg_name, var_path in step.inputs.items():
+                node_dims = data_nodes.get(var_path, DataNode(name=var_path)).dims
+                if node_dims is not None:
+                    # Cast to tuple[str, ...] since dims is tuple[Any, ...]
+                    input_dims[arg_name] = tuple(str(d) for d in node_dims)
+                else:
+                    # Scalar or unknown dimensions
+                    input_dims[arg_name] = ()
+
             compute_node = ComputeNode(
                 func=metadata.func,
                 name=step.func,
                 output_mapping=output_mapping,
                 input_mapping=dict(step.inputs),
+                core_dims=metadata.core_dims,
+                input_dims=input_dims,
             )
             graph.add_node(compute_node)
 

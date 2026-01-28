@@ -58,23 +58,26 @@ def simple_growth(
 def growth(
     biomass: jnp.ndarray,
     rate: float | jnp.ndarray,
-    temp: jnp.ndarray,
+    temp: float | jnp.ndarray,
 ) -> jnp.ndarray:
     """Exponential growth with temperature dependence.
 
     Computes growth tendency with Arrhenius-like temperature response.
 
+    This function is written for core_dims only. vmap handles broadcasting
+    over spatial dimensions (Y, X).
+
     Args:
-        biomass: Current biomass values with cohort dimension.
-        rate: Growth rate (per day).
-        temp: Temperature values (degrees Celsius).
+        biomass: Biomass values with shape (C,) - cohort dimension only.
+        rate: Growth rate (per day), scalar.
+        temp: Temperature value (degrees Celsius), scalar after vmap.
 
     Returns:
-        Growth tendency (g/d).
+        Growth tendency (g/d) with shape (C,).
     """
-    # Expand temp to broadcast with cohort dimension
-    temp_expanded = temp[..., jnp.newaxis]
-    return biomass * rate * jnp.exp(temp_expanded / 10.0)
+    # With vmap, temp is already a scalar for each (y, x) point
+    # No manual broadcasting needed
+    return biomass * rate * jnp.exp(temp / 10.0)
 
 
 @functional(
