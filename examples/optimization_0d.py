@@ -180,14 +180,16 @@ observations = SparseObservations(
     values=obs_values_noisy,
 )
 
-# Create optimizer with bounds
+# Create optimizer with bounds and scaling
+# Note: scaling="bounds" normalizes parameters to [0,1], enabling normal learning rates
 optimizer = Optimizer(
     algorithm="adam",
-    learning_rate=1e-9,  # Small LR for stability (units are per-second)
+    learning_rate=0.1,
     bounds={
         "growth_rate": (0.01 / 86400.0, 0.5 / 86400.0),
         "mortality_rate": (0.01 / 86400.0, 0.5 / 86400.0),
     },
+    scaling="bounds",
 )
 
 print("\nStarting optimization...")
@@ -224,40 +226,30 @@ def loss_fn_0d(params):
     return jnp.mean((pred_at_obs - obs_values_noisy) ** 2)
 
 
-# Manual optimization loop since the 0D case is special
-import jax  # noqa: E402
-
-params = {
+# Initial parameters
+initial_params = {
     "growth_rate": jnp.array(INITIAL_GROWTH_RATE),
     "mortality_rate": jnp.array(INITIAL_MORTALITY_RATE),
 }
 
-# Initialize optimizer
-optimizer.init(params)
-
-# Optimization loop
-n_steps = 200
-loss_history = []
-
-value_and_grad = jax.value_and_grad(loss_fn_0d)
-
+# Run optimization using optimizer.run() - scaling is handled automatically
 print("\nOptimization progress:")
-for i in range(n_steps):
-    loss, grads = value_and_grad(params)
-    loss_history.append(float(loss))
+result = optimizer.run(
+    loss_fn=loss_fn_0d,
+    initial_params=initial_params,
+    n_steps=200,
+    verbose=True,
+)
 
-    params = optimizer.step(params, grads)
+params = result.params
+loss_history = result.loss_history
 
-    if i % 20 == 0:
-        print(
-            f"  Step {i}: loss={loss:.6f}, growth={params['growth_rate'] * 86400:.4f}/day, mortality={params['mortality_rate'] * 86400:.4f}/day"
-        )
-
-print(f"\nFinal loss: {loss_history[-1]:.6f}")
+print(f"\nFinal loss: {result.loss:.6f}")
 print(
     f"Optimized parameters: growth={params['growth_rate'] * 86400:.4f}/day, mortality={params['mortality_rate'] * 86400:.4f}/day"
 )
 print(f"True parameters: growth={TRUE_GROWTH_RATE * 86400:.4f}/day, mortality={TRUE_MORTALITY_RATE * 86400:.4f}/day")
+print(f"Converged: {result.converged} ({result.message})")
 
 # =============================================================================
 # 6. VISUALIZATION

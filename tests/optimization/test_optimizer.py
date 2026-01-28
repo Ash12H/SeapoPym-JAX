@@ -175,3 +175,127 @@ class TestOptimizeResult:
         assert result.n_iterations == 3
         assert result.converged is True
         assert result.message == "Converged"
+
+
+class TestScaling:
+    """Tests for parameter scaling functionality."""
+
+    def test_scaling_none_is_default(self):
+        """Default scaling should be 'none'."""
+        opt = Optimizer()
+        assert opt.scaling == "none"
+
+    def test_scaling_bounds_requires_bounds(self):
+        """scaling='bounds' should require bounds parameter."""
+        with pytest.raises(ValueError, match="requires bounds"):
+            Optimizer(scaling="bounds")
+
+    def test_scaling_bounds_accepted_with_bounds(self):
+        """scaling='bounds' should work when bounds provided."""
+        opt = Optimizer(scaling="bounds", bounds={"x": (0.0, 1.0)})
+        assert opt.scaling == "bounds"
+
+    def test_normalize_bounds(self):
+        """_normalize should map to [0, 1] with bounds scaling."""
+        opt = Optimizer(scaling="bounds", bounds={"x": (0.0, 10.0)})
+        params = {"x": jnp.array(5.0)}
+
+        normalized = opt._normalize(params)
+
+        assert float(normalized["x"]) == pytest.approx(0.5, abs=1e-6)
+
+    def test_denormalize_bounds(self):
+        """_denormalize should map from [0, 1] with bounds scaling."""
+        opt = Optimizer(scaling="bounds", bounds={"x": (0.0, 10.0)})
+        params_norm = {"x": jnp.array(0.5)}
+
+        denormalized = opt._denormalize(params_norm)
+
+        assert float(denormalized["x"]) == pytest.approx(5.0, abs=1e-6)
+
+    def test_normalize_denormalize_roundtrip(self):
+        """normalize then denormalize should return original value."""
+        opt = Optimizer(scaling="bounds", bounds={"x": (2.0, 8.0), "y": (-1.0, 1.0)})
+        params = {"x": jnp.array(4.0), "y": jnp.array(0.5)}
+
+        roundtrip = opt._denormalize(opt._normalize(params))
+
+        assert float(roundtrip["x"]) == pytest.approx(4.0, abs=1e-6)
+        assert float(roundtrip["y"]) == pytest.approx(0.5, abs=1e-6)
+
+    def test_scaling_log(self):
+        """Log scaling should use log/exp transforms."""
+        opt = Optimizer(scaling="log")
+        params = {"x": jnp.array(10.0)}
+
+        normalized = opt._normalize(params)
+        assert float(normalized["x"]) == pytest.approx(jnp.log(10.0), abs=1e-6)
+
+        denormalized = opt._denormalize(normalized)
+        assert float(denormalized["x"]) == pytest.approx(10.0, abs=1e-6)
+
+    def test_run_with_bounds_scaling(self):
+        """Optimizer should converge with bounds scaling."""
+
+        def loss_fn(params):
+            x = params["x"]
+            return (x - 5.0) ** 2  # Minimum at x=5
+
+        # Use bounds that include the minimum
+        opt = Optimizer(
+            algorithm="adam",
+            learning_rate=0.1,  # Normal LR works with scaling
+            bounds={"x": (0.0, 10.0)},
+            scaling="bounds",
+        )
+        initial_params = {"x": jnp.array(1.0)}
+
+        result = opt.run(loss_fn, initial_params, n_steps=100)
+
+        assert float(result.params["x"]) == pytest.approx(5.0, abs=0.1)
+
+    def test_scaling_reduces_loss(self):
+        """Bounds scaling should reduce loss even with small params."""
+
+        def loss_fn(params):
+            rate = params["rate"]
+            target = 5e-6
+            return (rate - target) ** 2
+
+        opt = Optimizer(
+            algorithm="adam",
+            learning_rate=0.1,
+            bounds={"rate": (1e-7, 1e-5)},
+            scaling="bounds",
+        )
+        initial_params = {"rate": jnp.array(1e-6)}
+        initial_loss = float(loss_fn(initial_params))
+
+        result = opt.run(loss_fn, initial_params, n_steps=50)
+
+        # Loss should decrease
+        assert result.loss < initial_loss
+
+    def test_callback_receives_denormalized_params(self):
+        """Callback should receive params in original space."""
+        received_params = []
+
+        def callback(_i, params, _loss):
+            received_params.append(float(params["x"]))
+
+        def loss_fn(params):
+            return (params["x"] - 5.0) ** 2
+
+        opt = Optimizer(
+            algorithm="adam",
+            learning_rate=0.1,
+            bounds={"x": (0.0, 10.0)},
+            scaling="bounds",
+        )
+        initial_params = {"x": jnp.array(2.0)}
+
+        opt.run(loss_fn, initial_params, n_steps=5, callback=callback)
+
+        # All received values should be in original space [0, 10], not [0, 1]
+        for val in received_params:
+            assert 0.0 <= val <= 10.0

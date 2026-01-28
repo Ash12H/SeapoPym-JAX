@@ -43,15 +43,16 @@ class OptimizeResult:
 class Optimizer:
     """Unified optimizer interface wrapping Optax algorithms.
 
-    Supports gradient-based optimization with optional parameter bounds.
-    Bounds are enforced by projecting parameters after each update.
+    Supports gradient-based optimization with optional parameter bounds
+    and automatic parameter scaling for better conditioning.
 
     Example:
         >>> optimizer = Optimizer(algorithm="adam", learning_rate=0.01)
         >>> optimizer = Optimizer(
         ...     algorithm="adam",
         ...     learning_rate=0.01,
-        ...     bounds={"rate": (0.0, 1.0), "scale": (0.1, 10.0)}
+        ...     bounds={"rate": (0.0, 1.0), "scale": (0.1, 10.0)},
+        ...     scaling="bounds",  # Normalize parameters to [0, 1]
         ... )
     """
 
@@ -67,6 +68,7 @@ class Optimizer:
         algorithm: Literal["adam", "sgd", "rmsprop", "adagrad"] = "adam",
         learning_rate: float = 0.01,
         bounds: dict[str, tuple[float, float]] | None = None,
+        scaling: Literal["none", "bounds", "log"] = "none",
         **kwargs: Any,
     ) -> None:
         """Initialize the optimizer.
@@ -75,14 +77,22 @@ class Optimizer:
             algorithm: Optimization algorithm name.
             learning_rate: Learning rate (step size).
             bounds: Optional parameter bounds as {param_name: (min, max)}.
+            scaling: Parameter scaling mode:
+                - "none": No scaling (default, backward compatible)
+                - "bounds": Normalize to [0, 1] using bounds (requires bounds)
+                - "log": Use log-space for positive parameters
             **kwargs: Additional arguments passed to the Optax optimizer.
         """
         if algorithm not in self.ALGORITHMS:
             raise ValueError(f"Unknown algorithm '{algorithm}'. Available: {list(self.ALGORITHMS.keys())}")
 
+        if scaling == "bounds" and not bounds:
+            raise ValueError("scaling='bounds' requires bounds to be provided")
+
         self.algorithm = algorithm
         self.learning_rate = learning_rate
         self.bounds = bounds or {}
+        self.scaling = scaling
 
         # Create Optax optimizer
         optimizer_fn = self.ALGORITHMS[algorithm]
@@ -144,6 +154,107 @@ class Optimizer:
 
         return new_params
 
+    def _normalize(self, params: Params) -> Params:
+        """Transform parameters to normalized space.
+
+        Args:
+            params: Parameter values in original space.
+
+        Returns:
+            Parameter values in normalized space.
+        """
+        if self.scaling == "none":
+            return params
+
+        new_params = {}
+        for name, value in params.items():
+            if self.scaling == "bounds" and name in self.bounds:
+                low, high = self.bounds[name]
+                # Normalize to [0, 1]
+                new_params[name] = (value - low) / (high - low)
+            elif self.scaling == "log":
+                # Log transform for positive parameters
+                new_params[name] = jnp.log(value)
+            else:
+                new_params[name] = value
+
+        return new_params
+
+    def _denormalize(self, params: Params) -> Params:
+        """Transform parameters back to original space.
+
+        Args:
+            params: Parameter values in normalized space.
+
+        Returns:
+            Parameter values in original space.
+        """
+        if self.scaling == "none":
+            return params
+
+        new_params = {}
+        for name, value in params.items():
+            if self.scaling == "bounds" and name in self.bounds:
+                low, high = self.bounds[name]
+                # Denormalize from [0, 1]
+                new_params[name] = value * (high - low) + low
+            elif self.scaling == "log":
+                # Exp transform back
+                new_params[name] = jnp.exp(value)
+            else:
+                new_params[name] = value
+
+        return new_params
+
+    def _step_normalized(self, params_norm: Params, grads: Params) -> Params:
+        """Perform one optimization step in normalized space.
+
+        Args:
+            params_norm: Current parameter values in normalized space.
+            grads: Gradients in normalized space.
+
+        Returns:
+            Updated parameter values in normalized space.
+        """
+        if self._opt_state is None:
+            self.init(params_norm)
+
+        # Compute updates
+        updates, self._opt_state = self._optimizer.update(grads, self._opt_state, params_norm)
+
+        # Apply updates
+        new_params = optax.apply_updates(params_norm, updates)
+
+        # Apply bounds in normalized space
+        new_params = self._apply_bounds_normalized(new_params)  # type: ignore[arg-type]
+
+        return new_params
+
+    def _apply_bounds_normalized(self, params_norm: Params) -> Params:
+        """Apply bounds in normalized space.
+
+        Args:
+            params_norm: Parameter values in normalized space.
+
+        Returns:
+            Bounded parameter values in normalized space.
+        """
+        if self.scaling == "bounds":
+            # In normalized space, bounds are [0, 1]
+            new_params = {}
+            for name, value in params_norm.items():
+                if name in self.bounds:
+                    new_params[name] = jnp.clip(value, 0.0, 1.0)
+                else:
+                    new_params[name] = value
+            return new_params
+        elif self.scaling == "none" and self.bounds:
+            # Apply original bounds
+            return self._apply_bounds(params_norm)
+        else:
+            # No bounds to apply (log scaling has no natural bounds)
+            return params_norm
+
     def run(
         self,
         loss_fn: Callable[[Params], Array],
@@ -161,25 +272,31 @@ class Optimizer:
             n_steps: Maximum number of optimization steps.
             tolerance: Convergence tolerance (stop if loss change < tolerance).
             callback: Optional function called at each step with (iteration, params, loss).
+                Note: callback receives denormalized (original space) params.
             verbose: If True, print progress every 10 iterations.
 
         Returns:
             OptimizeResult with optimized parameters and diagnostics.
         """
-        # Initialize
-        params = initial_params
-        self.init(params)
+        # Normalize initial params
+        params_norm = self._normalize(initial_params)
+        self.init(params_norm)
+
+        # Wrap loss_fn to denormalize before evaluation
+        def scaled_loss_fn(params_norm: Params) -> Array:
+            params_orig = self._denormalize(params_norm)
+            return loss_fn(params_orig)
 
         # Create gradient function
-        value_and_grad_fn = jax.value_and_grad(loss_fn)
+        value_and_grad_fn = jax.value_and_grad(scaled_loss_fn)
 
         loss_history: list[float] = []
         prev_loss = float("inf")
         converged = False
 
         for i in range(n_steps):
-            # Compute loss and gradients
-            loss, grads = value_and_grad_fn(params)
+            # Compute loss and gradients (in normalized space)
+            loss, grads = value_and_grad_fn(params_norm)
             loss_val = float(loss)
             loss_history.append(loss_val)
 
@@ -190,12 +307,12 @@ class Optimizer:
                     print(f"Converged at iteration {i} with loss {loss_val:.6e}")
                 break
 
-            # Update parameters
-            params = self.step(params, grads)
+            # Update parameters (in normalized space)
+            params_norm = self._step_normalized(params_norm, grads)
 
-            # Callback
+            # Callback with denormalized params
             if callback is not None:
-                callback(i, params, loss_val)
+                callback(i, self._denormalize(params_norm), loss_val)
 
             # Verbose output
             if verbose and i % 10 == 0:
@@ -203,11 +320,14 @@ class Optimizer:
 
             prev_loss = loss_val
 
+        # Denormalize final params
+        final_params = self._denormalize(params_norm)
+
         # Final evaluation
-        final_loss = float(loss_fn(params))
+        final_loss = float(loss_fn(final_params))
 
         return OptimizeResult(
-            params=params,
+            params=final_params,
             loss=final_loss,
             loss_history=loss_history,
             n_iterations=len(loss_history),
