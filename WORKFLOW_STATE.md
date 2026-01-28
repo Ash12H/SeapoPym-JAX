@@ -31,6 +31,8 @@ Utiliser `jax.vmap` pour vectoriser automatiquement les fonctions sur les dimens
 | ☑ | T4 | Intégrer vmap dans step | Modifier `seapopym/engine/step.py` | T2, T3 | Fonctions vmappées utilisées |
 | ☑ | T5 | Refactorer biology.py | Simplifier `growth()` | T4 | Broadcasting manuel supprimé |
 | ☑ | T6 | Test unitaire vmap | Créer `tests/engine/test_vectorize.py` | T4 | 15 tests créés et passés |
+| ☑ | T7 | Refactorer lmtl_2d.py | Ajouter `out_dims` et corriger dimensions | T4 | Simulation 2D fonctionne |
+| ☑ | T8 | Transposition outputs | Transposer outputs vmap vers ordre canonique | T7 | Tendances correctement ajoutées |
 
 ## Tests
 
@@ -66,3 +68,4 @@ Le test `test_io_memory_writer.py::test_memory_writer_lifecycle` échouait déj�
 | 5. Execution | 6. Revue | Tâches T1-T5 complétées | 2025-01-28 |
 | 6. Revue | 8. Test | 0 issues | 2025-01-28 |
 | 8. Test | 9. Finalisation | Tests passés | 2025-01-28 |
+| 9. Finalisation | Complété | Simulation 2D validée | 2026-01-28 |
