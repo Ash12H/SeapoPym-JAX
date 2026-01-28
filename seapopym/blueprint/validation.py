@@ -246,12 +246,20 @@ class BlueprintValidator:
             output_mapping = {out_key: out_spec.target for out_key, out_spec in step.outputs.items()}
 
             # Resolve input dimensions from DataNodes
+            # Note: Dimensions are sorted to canonical order (the runtime order after transpose)
+            # Also: For forcings, remove T dimension since they're time-sliced at runtime
+            from seapopym.compiler.transpose import get_canonical_order
+
             input_dims: dict[str, tuple[str, ...]] = {}
             for arg_name, var_path in step.inputs.items():
                 node_dims = data_nodes.get(var_path, DataNode(name=var_path)).dims
                 if node_dims is not None:
-                    # Cast to tuple[str, ...] since dims is tuple[Any, ...]
-                    input_dims[arg_name] = tuple(str(d) for d in node_dims)
+                    # Cast to tuple[str, ...] and filter out T for forcings
+                    dims_list = [str(d) for d in node_dims]
+                    if var_path.startswith("forcings.") and "T" in dims_list:
+                        dims_list.remove("T")
+                    # Sort to canonical order (runtime order after transpose)
+                    input_dims[arg_name] = get_canonical_order(dims_list)
                 else:
                     # Scalar or unknown dimensions
                     input_dims[arg_name] = ()
@@ -263,6 +271,7 @@ class BlueprintValidator:
                 input_mapping=dict(step.inputs),
                 core_dims=metadata.core_dims,
                 input_dims=input_dims,
+                out_dims=metadata.out_dims,
             )
             graph.add_node(compute_node)
 
@@ -270,6 +279,25 @@ class BlueprintValidator:
             for _arg_name, var_path in step.inputs.items():
                 if var_path in data_nodes:
                     graph.add_edge(data_nodes[var_path], compute_node)
+
+            # Infer output dimensions from inputs
+            # For functions without core_dims: output has broadcast dims of all inputs
+            # For functions with core_dims: output has broadcast_dims + out_dims
+            all_input_dims: set[str] = set()
+            for dims in input_dims.values():
+                all_input_dims.update(dims)
+            # Remove core_dims from all inputs to get broadcast dims
+            all_core_dims: set[str] = set()
+            for core in metadata.core_dims.values():
+                all_core_dims.update(core)
+            broadcast_dims_set = all_input_dims - all_core_dims
+            # Sort to canonical order
+            inferred_broadcast_dims = get_canonical_order(list(broadcast_dims_set))
+            # Add out_dims if specified
+            if metadata.out_dims:
+                inferred_output_dims = inferred_broadcast_dims + tuple(metadata.out_dims)
+            else:
+                inferred_output_dims = inferred_broadcast_dims
 
             # Create output DataNodes and add edges
             for _out_key, out_spec in step.outputs.items():
@@ -283,6 +311,7 @@ class BlueprintValidator:
                 out_node = DataNode(
                     name=out_spec.target,
                     is_tendency_of=is_tendency_of,
+                    dims=inferred_output_dims if inferred_output_dims else None,
                 )
                 graph.add_node(out_node)
                 data_nodes[out_spec.target] = out_node

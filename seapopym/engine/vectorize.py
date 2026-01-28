@@ -125,6 +125,43 @@ def remove_dim_from_inputs(
     return new_dims
 
 
+def compute_output_transpose_axes(
+    broadcast_dims: list[str],
+    out_dims: list[str] | None,
+) -> tuple[int, ...] | None:
+    """Compute transpose axes to convert vmap output order to canonical order.
+
+    After vmap, output has shape (broadcast_dims..., out_dims...).
+    Canonical order places dimensions like C before Y, X.
+
+    Args:
+        broadcast_dims: Dimensions that were vmapped over (in canonical order).
+        out_dims: Output core dimensions (from function metadata).
+
+    Returns:
+        Tuple of axes for transposition, or None if no transpose needed.
+    """
+    if not out_dims:
+        # No core dims in output, just broadcast dims (already canonical)
+        return None
+
+    # vmap output order: (broadcast_dims..., out_dims...)
+    # Example: broadcast_dims = [Y, X], out_dims = [C]
+    # vmap output order: (Y, X, C)
+    # canonical order: (C, Y, X)
+    vmap_order = list(broadcast_dims) + list(out_dims)
+
+    # Get canonical order for these dims
+    canonical_order = [d for d in CANONICAL_DIMS if d in vmap_order]
+
+    if vmap_order == canonical_order:
+        return None
+
+    # Compute permutation: for each dim in canonical_order, find its position in vmap_order
+    axes = tuple(vmap_order.index(d) for d in canonical_order)
+    return axes
+
+
 def wrap_with_vmap(
     func: Callable[..., Any],
     input_dims: dict[str, tuple[str, ...]],

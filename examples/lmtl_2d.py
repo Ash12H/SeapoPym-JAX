@@ -87,6 +87,7 @@ def mortality_tendency(biomass, temp, lambda_0, gamma, t_ref):
     name="lmtl:npp_injection",
     backend="jax",
     core_dims={"production": ["C"]},
+    out_dims=["C"],
     units={
         "npp": "g/m^2/s",
         "efficiency": "dimensionless",
@@ -95,18 +96,20 @@ def mortality_tendency(biomass, temp, lambda_0, gamma, t_ref):
     },
 )
 def npp_injection(npp, efficiency, production):
-    """Inject Primary Production into the first cohort (0)."""
-    # npp is (Y, X) or (T, Y, X)
-    # production is (C, Y, X)
+    """Inject Primary Production into the first cohort (0).
 
+    With vmap, this function receives:
+    - npp: scalar (for each spatial point)
+    - efficiency: scalar
+    - production: (C,) - cohort dimension only
+    """
     source_flux = npp * efficiency
 
-    # Create tendencies tensor matching production shape
+    # Create tendencies matching production shape (C,)
     tendency = jnp.zeros_like(production)
 
-    # Add source flux to the first cohort
-    # Use .at[0, ...].set() for JAX array update
-    tendency = tendency.at[0, ...].set(source_flux)
+    # Add source flux to the first cohort only
+    tendency = tendency.at[0].set(source_flux)
 
     return tendency
 
@@ -115,53 +118,48 @@ def npp_injection(npp, efficiency, production):
     name="lmtl:aging_flow",
     backend="jax",
     core_dims={"production": ["C"], "cohort_ages": ["C"]},
+    out_dims=["C"],
     units={"production": "g/m^2", "cohort_ages": "s", "rec_age": "s", "return": "g/m^2/s"},
 )
 def aging_flow(production, cohort_ages, rec_age):
     """Compute aging flux (transfer from C to C+1).
+
+    With vmap, this function receives:
+    - production: (C,) - cohort dimension only
+    - cohort_ages: (C,)
+    - rec_age: scalar (for each spatial point)
 
     Logic:
     - Calculates flow based on cohort duration.
     - If a cohort is recruited (Age > RecAge), it does NOT flow to C+1 (it goes to Biomass).
     - The last cohort does NOT flow out (accumulation/plus group).
     """
-    # Handle Broadcasting: (C, Y, X)
-    spatial_ndim = production.ndim - 1
-    c_broadcast = (production.shape[0],) + (1,) * spatial_ndim
-
     # Cohort durations
     d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
     last_d_tau = d_tau_raw[-1:]
     d_tau = jnp.concatenate([d_tau_raw, last_d_tau])
 
-    # Aging rate
-    aging_coef = (1.0 / d_tau).reshape(c_broadcast)
+    # Aging rate (no reshape needed, already 1D)
+    aging_coef = 1.0 / d_tau
 
     # Base Outflow
     base_outflow = production * aging_coef
 
     # 1. Recruitment Filter
     # If recruited, flow is diverted to biomass, so it's 0 for aging.
-    cohort_ages_grid = cohort_ages.reshape(c_broadcast)
-    is_recruited = cohort_ages_grid >= rec_age
+    is_recruited = cohort_ages >= rec_age
     aging_outflow = jnp.where(is_recruited, 0.0, base_outflow)
 
     # 2. Last Cohort Filter (Accumulation)
     # Prevent outflow from the last cohort
-    aging_outflow = aging_outflow.at[-1, ...].set(0.0)
+    aging_outflow = aging_outflow.at[-1].set(0.0)
 
     # 3. Balance (Loss + Gain from prev)
     loss = -aging_outflow
 
     # Gain for cohort i comes from outflow of i-1
     # Cohort 0 has no aging input
-    gain = jnp.concatenate(
-        [
-            jnp.zeros((1,) + production.shape[1:]),
-            aging_outflow[:-1],
-        ],
-        axis=0,
-    )
+    gain = jnp.concatenate([jnp.zeros(1), aging_outflow[:-1]])
 
     return loss + gain
 
@@ -170,6 +168,7 @@ def aging_flow(production, cohort_ages, rec_age):
     name="lmtl:recruitment_flow",
     backend="jax",
     core_dims={"production": ["C"], "cohort_ages": ["C"]},
+    out_dims=["C"],  # prod_loss has C dim, biomass_gain is scalar (transpose skips it)
     outputs=["prod_loss", "biomass_gain"],
     units={
         "production": "g/m^2",
@@ -180,28 +179,31 @@ def aging_flow(production, cohort_ages, rec_age):
     },
 )
 def recruitment_flow(production, cohort_ages, rec_age):
-    """Compute recruitment flux (transfer from C to Biomass)."""
-    spatial_ndim = production.ndim - 1
-    c_broadcast = (production.shape[0],) + (1,) * spatial_ndim
+    """Compute recruitment flux (transfer from C to Biomass).
 
+    With vmap, this function receives:
+    - production: (C,) - cohort dimension only
+    - cohort_ages: (C,)
+    - rec_age: scalar (for each spatial point)
+    """
+    # Cohort durations
     d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
     last_d_tau = d_tau_raw[-1:]
     d_tau = jnp.concatenate([d_tau_raw, last_d_tau])
 
-    aging_coef = (1.0 / d_tau).reshape(c_broadcast)
+    # Aging coefficient (no reshape needed, already 1D)
+    aging_coef = 1.0 / d_tau
     base_outflow = production * aging_coef
 
     # Filter: Keep ONLY recruited fluxes
-    cohort_ages_grid = cohort_ages.reshape(c_broadcast)
-    is_recruited = cohort_ages_grid >= rec_age
-
+    is_recruited = cohort_ages >= rec_age
     flux_to_biomass = jnp.where(is_recruited, base_outflow, 0.0)
 
-    # 1. Loss from Production
+    # 1. Loss from Production (C,)
     prod_loss = -flux_to_biomass
 
-    # 2. Gain to Biomass (Sum over all contributing cohorts)
-    biomass_gain = jnp.sum(flux_to_biomass, axis=0)
+    # 2. Gain to Biomass (scalar - sum over all cohorts)
+    biomass_gain = jnp.sum(flux_to_biomass)
 
     return prod_loss, biomass_gain
 
@@ -307,7 +309,7 @@ blueprint = Blueprint.from_dict(
 
 # Simulation Time
 start_date = "2000-01-01"
-end_date = "2020-01-01"  # 2 years
+end_date = "2002-01-01"  # 2 years
 dt = "3h"
 
 # Generate dates covering [start, end] inclusive

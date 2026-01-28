@@ -48,6 +48,7 @@ class ComputeNode:
     group: str | None = None  # Nom du groupe fonctionnel (ex: 'Tuna')
     core_dims: dict[str, list[str]] = field(default_factory=dict)
     input_dims: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    out_dims: list[str] | None = None  # Output dimensions from function metadata
 
     def __hash__(self) -> int:
         """Return hash based on node name."""

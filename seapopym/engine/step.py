@@ -13,7 +13,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from seapopym.blueprint.nodes import ComputeNode
-from seapopym.engine.vectorize import wrap_with_vmap
+from seapopym.engine.vectorize import (
+    compute_broadcast_dims,
+    compute_output_transpose_axes,
+    wrap_with_vmap,
+)
 
 if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
@@ -55,20 +59,28 @@ def build_step_fn(
     compute_nodes: list[ComputeNode] = [node for node in nx.topological_sort(graph) if isinstance(node, ComputeNode)]
 
     # Pre-compute vmapped functions for nodes with core_dims
-    vmapped_funcs: dict[str, Callable[..., Any]] = {}
+    # Store (vmapped_func, arg_order, transpose_axes) - arg_order for positional calling,
+    # transpose_axes to convert vmap output order back to canonical order
+    vmapped_funcs: dict[str, tuple[Callable[..., Any], list[str] | None, tuple[int, ...] | None]] = {}
     for compute_node in compute_nodes:
         if compute_node.core_dims:
             # Get argument order from input_mapping keys
             arg_order = list(compute_node.input_mapping.keys())
-            vmapped_funcs[compute_node.name] = wrap_with_vmap(
-                compute_node.func,
-                compute_node.input_dims,
-                compute_node.core_dims,
-                arg_order,
+            broadcast_dims = compute_broadcast_dims(compute_node.input_dims, compute_node.core_dims)
+            transpose_axes = compute_output_transpose_axes(broadcast_dims, compute_node.out_dims)
+            vmapped_funcs[compute_node.name] = (
+                wrap_with_vmap(
+                    compute_node.func,
+                    compute_node.input_dims,
+                    compute_node.core_dims,
+                    arg_order,
+                ),
+                arg_order,  # Store arg_order for positional calling
+                transpose_axes,  # Store transpose axes for output reordering
             )
         else:
             # No core_dims, use original function (element-wise broadcasting)
-            vmapped_funcs[compute_node.name] = compute_node.func
+            vmapped_funcs[compute_node.name] = (compute_node.func, None, None)
 
     def step_fn(state: State, forcings_t: Forcings) -> tuple[State, Outputs]:
         """Execute one timestep.
@@ -95,8 +107,16 @@ def build_step_fn(
             func_inputs = _resolve_inputs(compute_node.input_mapping, state, forcings_t, parameters, intermediates)
 
             # Call the vmapped function (or original if no core_dims)
-            func = vmapped_funcs[compute_node.name]
-            result = func(**func_inputs)
+            func, arg_order, transpose_axes = vmapped_funcs[compute_node.name]
+            if arg_order is not None:
+                # vmapped function requires positional arguments in specific order
+                result = func(*[func_inputs[arg] for arg in arg_order])
+                # Transpose output from vmap order to canonical order
+                if transpose_axes is not None:
+                    result = _transpose_vmap_output(result, transpose_axes)
+            else:
+                # Original function can use keyword arguments
+                result = func(**func_inputs)
 
             # Handle outputs using the node's output_mapping
             _handle_compute_outputs(result, compute_node.output_mapping, tendencies, intermediates)
@@ -116,6 +136,36 @@ def build_step_fn(
         return new_state, outputs
 
     return step_fn
+
+
+def _transpose_vmap_output(result: Any, axes: tuple[int, ...]) -> Any:
+    """Transpose vmap output from vmap order to canonical order.
+
+    Handles both single outputs and tuples of outputs.
+    Only transposes arrays with the expected number of dimensions.
+
+    Args:
+        result: Function result (array or tuple of arrays).
+        axes: Transpose axes to apply.
+
+    Returns:
+        Transposed result.
+    """
+    import jax.numpy as jnp
+
+    expected_ndim = len(axes)
+
+    def transpose_if_matching(arr: Any) -> Any:
+        """Transpose array only if it has the expected number of dimensions."""
+        if hasattr(arr, "ndim") and arr.ndim == expected_ndim:
+            return jnp.transpose(arr, axes)
+        return arr
+
+    if isinstance(result, tuple):
+        # Multi-output: transpose each if dimensions match
+        return tuple(transpose_if_matching(r) for r in result)
+    else:
+        return transpose_if_matching(result)
 
 
 def _resolve_inputs(
