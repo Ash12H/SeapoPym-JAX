@@ -29,9 +29,13 @@ Forcings = dict[str, Array]
 Outputs = dict[str, Array]
 
 
+Params = dict[str, Array]
+
+
 def build_step_fn(
     model: CompiledModel,
-) -> Callable[[State, Forcings], tuple[State, Outputs]]:
+    params_as_argument: bool = False,
+) -> Callable[..., tuple[Any, Outputs]]:
     """Build a step function from a compiled model.
 
     The returned function executes one timestep of the model:
@@ -42,13 +46,20 @@ def build_step_fn(
 
     Args:
         model: Compiled model containing graph, parameters, and metadata.
+        params_as_argument: If True, parameters are passed as part of the carry
+            instead of being captured by closure. This enables gradient computation
+            via jax.grad(). Default is False for backward compatibility.
 
     Returns:
-        Step function with signature (state, forcings_t) -> (new_state, outputs).
+        If params_as_argument=False (default):
+            Step function with signature (state, forcings_t) -> (new_state, outputs).
+        If params_as_argument=True:
+            Step function with signature ((state, params), forcings_t) -> ((new_state, params), outputs).
+            This signature is compatible with jax.lax.scan and jax.grad.
     """
     # Extract what we need from model (closure captures these)
     graph = model.graph
-    parameters = model.parameters
+    default_parameters = model.parameters
     dt = model.dt
     backend = model.backend
 
@@ -82,12 +93,13 @@ def build_step_fn(
             # No core_dims, use original function (element-wise broadcasting)
             vmapped_funcs[compute_node.name] = (compute_node.func, None, None)
 
-    def step_fn(state: State, forcings_t: Forcings) -> tuple[State, Outputs]:
-        """Execute one timestep.
+    def _execute_step(state: State, forcings_t: Forcings, parameters: Params) -> tuple[State, Outputs]:
+        """Core step execution logic.
 
         Args:
             state: Current state variables.
             forcings_t: Forcings at current timestep (includes mask).
+            parameters: Model parameters.
 
         Returns:
             Tuple of (new_state, outputs).
@@ -135,7 +147,42 @@ def build_step_fn(
 
         return new_state, outputs
 
-    return step_fn
+    if params_as_argument:
+        # Gradient-compatible mode: params in carry
+        def step_fn_with_params(
+            carry: tuple[State, Params], forcings_t: Forcings
+        ) -> tuple[tuple[State, Params], Outputs]:
+            """Execute one timestep with parameters as part of the carry.
+
+            This signature is compatible with jax.lax.scan and jax.grad.
+
+            Args:
+                carry: Tuple of (state, params).
+                forcings_t: Forcings at current timestep.
+
+            Returns:
+                Tuple of ((new_state, params), outputs).
+            """
+            state, params = carry
+            new_state, outputs = _execute_step(state, forcings_t, params)
+            return (new_state, params), outputs
+
+        return step_fn_with_params
+    else:
+        # Default mode: params captured by closure (backward compatible)
+        def step_fn(state: State, forcings_t: Forcings) -> tuple[State, Outputs]:
+            """Execute one timestep.
+
+            Args:
+                state: Current state variables.
+                forcings_t: Forcings at current timestep (includes mask).
+
+            Returns:
+                Tuple of (new_state, outputs).
+            """
+            return _execute_step(state, forcings_t, default_parameters)
+
+        return step_fn
 
 
 def _transpose_vmap_output(result: Any, axes: tuple[int, ...]) -> Any:
