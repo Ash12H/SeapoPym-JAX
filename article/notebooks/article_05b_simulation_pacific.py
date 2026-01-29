@@ -38,7 +38,7 @@ OUTPUT_TRANSPORT = DATA_DIR / "seapopym_pacific_transport_jax.zarr"
 
 # Simulation Period
 START_DATE = "1998-01-01"
-END_DATE = "2020-12-31"
+END_DATE = "2000-12-31"
 DT = "3h"
 
 # LMTL Biological Parameters

@@ -5,7 +5,7 @@
 - **Projet** : Migration des scripts article/ vers nouvelle architecture SeapoPym
 - **Étape courante** : 5. Exécution
 - **Rôle actif** : Développeur
-- **Dernière mise à jour** : 2026-01-29
+- **Dernière mise à jour** : 2026-01-29 21:15
 
 ## Résumé du besoin
 
@@ -37,14 +37,16 @@ Migrer les anciens scripts de benchmarking/validation (article/notebooks/) vers 
 | État | ID | Nom | Description | Dépendances |
 |------|----|-----|-------------|-------------|
 | ☑ | T3.1 | Créer benchmark Zalesak JAX | Créer `examples/transport_zalesak_jax.py` | - |
-| ☑ | T3.2 | Migrer article_03a | Migrer `article_03a_transport_2d_zalesak.py` vers JAX (déjà fait: T3.1) | T3.1 |
+| ☑ | T3.2 | Migrer article_03a | Migrer `article_03a_transport_2d_zalesak.py` - Adapté depuis examples/ au format article | T3.1 |
 
-### Phase 4 : Performance / Scaling
+### Phase 4 : Performance / Scaling (ARCHIVÉE)
 
 | État | ID | Nom | Description | Dépendances |
 |------|----|-----|-------------|-------------|
-| ☐ | T4.1 | Migrer article_04a | Migrer `article_04a_weak_scaling.py` - Tests de scaling | T0.2 |
-| ☐ | T4.2 | Migrer article_04b | Migrer `article_04b_time_decomposition.py` - Décomposition temporelle | T4.1 |
+| 🗄️ | T4.1 | ~~Migrer article_04a~~ | ARCHIVÉ - Tests de complexité O(N) internes (non prioritaire) | - |
+| 🗄️ | T4.2 | ~~Migrer article_04b~~ | ARCHIVÉ - Profiling interne des fonctions (non prioritaire) | - |
+
+**Note** : Phase 4 archivée. Les scripts 04a/04b testent les performances internes du modèle (complexité algorithmique, profiling), mais ne comparent pas JAX vs SEAPODYM original. La Phase 5 (scripts 05b/05d/05f) fournit déjà une validation scientifique et des métriques de temps d'exécution. Priorité donnée à l'amélioration du modèle plutôt qu'aux benchmarks internes.
 
 ### Phase 5 : Simulation Pacific
 
@@ -63,14 +65,14 @@ Migrer les anciens scripts de benchmarking/validation (article/notebooks/) vers 
 |------|----|-----|-------------|-------------|
 | ☑ | T6.1 | Migrer article_06 | Migrer `article_06_bonus_animation_pacific.py` - Animation (JAX) | T5.6 |
 
-## Ordre de priorité suggéré
+## Ordre de priorité (réalisé)
 
-1. **T0.1-T0.2** : Préparation structure
-2. **T3.2** : Valider transport (déjà fait avec T3.1)
-3. **T1.1** : Bio 0D (base pour le reste)
-4. **T5.1-T5.2** : Simulation Pacific (cas d'usage principal)
-5. **T4.1-T4.2** : Performance (pour l'article)
-6. **T2.1, T5.3-T5.6, T6.1** : Le reste
+1. ✅ **T0.1-T0.2** : Préparation structure
+2. ✅ **T3.1-T3.2** : Validation transport (JAX)
+3. ✅ **T1.1** : Bio 0D (base pour le reste)
+4. ✅ **T5.1-T5.6** : Simulation Pacific (cas d'usage principal)
+5. ✅ **T2.1, T6.1** : Comparaison versions + Animation
+6. 🗄️ **T4.1-T4.2** : Archivé (benchmarks internes non prioritaires)
 
 ## Notes techniques
 
@@ -120,3 +122,4 @@ Fichier : `seapopym/functions/lmtl.py`
 |----|------|--------|------|
 | - | 4. Planification | Nouveau workflow créé | 2026-01-29 |
 | 5. Exécution | 5. Exécution | Phase 5-6 complétées | 2026-01-29 |
+| 5. Exécution | 5. Exécution | Phase 3 finalisée (article_03a créé), Phase 4 archivée | 2026-01-29 21:20 |

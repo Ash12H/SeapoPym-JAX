@@ -88,20 +88,26 @@ print("-" * 70)
 # Reference (Seapodym original)
 ds_ref = xr.open_zarr(FILE_REF)
 ref = ds_ref["zooplankton"].load()
-print(f"Reference   : {ref.shape}, dims={list(ref.dims)}")
+# Convert from mg/m² to g/m² (reference is in mg, JAX model outputs g)
+ref = ref / 1000.0
+print(f"Reference   : {ref.shape}, dims={list(ref.dims)} (converted mg/m² -> g/m²)")
 print(f"  Period    : {pd.to_datetime(ref.time.values).min()} -> {pd.to_datetime(ref.time.values).max()}")
 
 # Transport (SeapoPym JAX)
 ds_trans = xr.open_zarr(FILE_TRANS)
 dag_trans = ds_trans["biomass"].load()
 print(f"Transport   : {dag_trans.shape}, dims={list(dag_trans.dims)}")
-print(f"  Period    : {pd.to_datetime(dag_trans.T.values).min()} -> {pd.to_datetime(dag_trans.T.values).max()}")
+print(
+    f"  Period    : {pd.to_datetime(dag_trans.coords['T'].values).min()} -> {pd.to_datetime(dag_trans.coords['T'].values).max()}"
+)
 
 # No-Transport (SeapoPym JAX)
 ds_no_trans = xr.open_zarr(FILE_NO_TRANS)
 dag_no_trans = ds_no_trans["biomass"].load()
 print(f"No-Transport: {dag_no_trans.shape}, dims={list(dag_no_trans.dims)}")
-print(f"  Period    : {pd.to_datetime(dag_no_trans.T.values).min()} -> {pd.to_datetime(dag_no_trans.T.values).max()}")
+print(
+    f"  Period    : {pd.to_datetime(dag_no_trans.coords['T'].values).min()} -> {pd.to_datetime(dag_no_trans.coords['T'].values).max()}"
+)
 
 # =============================================================================
 # STANDARDIZE COORDINATES
@@ -267,24 +273,30 @@ rmse_trans = np.sqrt((diff_trans**2).mean(dim="time"))
 diff_no_trans = dag_no_trans_aligned - ref_aligned
 rmse_no_trans = np.sqrt((diff_no_trans**2).mean(dim="time"))
 
-vmax_rmse = float(ref_aligned.quantile(0.75))
+# Log10 RMSE for better visualization of differences
+log_rmse_trans = np.log10(rmse_trans.where(rmse_trans > 0))
+log_rmse_no_trans = np.log10(rmse_no_trans.where(rmse_no_trans > 0))
 
-# RMSE maps
+# Common scale for both plots
+vmin_log = float(np.nanmin([log_rmse_trans.min(), log_rmse_no_trans.min()]))
+vmax_log = float(np.nanmax([log_rmse_trans.max(), log_rmse_no_trans.max()]))
+
+# RMSE maps (log scale)
 fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
 ax1 = axes[0]
-im1 = rmse_trans.plot(ax=ax1, cmap="viridis_r", vmin=0, vmax=vmax_rmse, add_colorbar=False)
-ax1.set_title("RMSE - JAX Transport vs Reference", fontsize=12, fontweight="bold")
+im1 = log_rmse_trans.plot(ax=ax1, cmap="viridis_r", vmin=vmin_log, vmax=vmax_log, add_colorbar=False)
+ax1.set_title("log10(RMSE) - JAX Transport vs Reference", fontsize=12, fontweight="bold")
 ax1.set_xlabel("Longitude")
 ax1.set_ylabel("Latitude")
-plt.colorbar(im1, ax=ax1, label="RMSE (g/m2)")
+plt.colorbar(im1, ax=ax1, label="log10(RMSE) [g/m2]")
 
 ax2 = axes[1]
-im2 = rmse_no_trans.plot(ax=ax2, cmap="viridis_r", vmin=0, vmax=vmax_rmse, add_colorbar=False)
-ax2.set_title("RMSE - JAX No-Transport vs Reference", fontsize=12, fontweight="bold")
+im2 = log_rmse_no_trans.plot(ax=ax2, cmap="viridis_r", vmin=vmin_log, vmax=vmax_log, add_colorbar=False)
+ax2.set_title("log10(RMSE) - JAX No-Transport vs Reference", fontsize=12, fontweight="bold")
 ax2.set_xlabel("Longitude")
 ax2.set_ylabel("Latitude")
-plt.colorbar(im2, ax=ax2, label="RMSE (g/m2)")
+plt.colorbar(im2, ax=ax2, label="log10(RMSE) [g/m2]")
 
 plt.tight_layout()
 plt.savefig(FIGURES_DIR / "fig_05f_spatial_rmse.png", dpi=150, bbox_inches="tight")

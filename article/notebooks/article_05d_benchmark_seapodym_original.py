@@ -24,7 +24,7 @@ DATA_DIR = BASE_DIR.parent / "data"
 SEAPODYM_BIN = "/Users/adm-lehodey/Documents/Workspace/Projects/seapodym-project/seapodym-lmtl/build/bin/seapodym-lmtl"
 CONFIG_XML = DATA_DIR / "LMTL_Pacific_Run" / "pacific_run.xml"
 GROUP = "D1N1"  # Functional group to run
-N_PROCS = 1
+N_PROCS = 4
 
 # =============================================================================
 # VERIFICATION
