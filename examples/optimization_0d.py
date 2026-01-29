@@ -146,8 +146,8 @@ print(f"Generated {len(obs_indices)} observations at {obs_interval}-timestep int
 # =============================================================================
 
 # Initial guess (wrong parameters)
-INITIAL_GROWTH_RATE = 0.15 / 86400.0  # 50% higher than true
-INITIAL_MORTALITY_RATE = 0.02 / 86400.0  # 60% lower than true
+INITIAL_GROWTH_RATE = 0.11 / 86400.0  # 50% higher than true
+INITIAL_MORTALITY_RATE = 0.04 / 86400.0  # 60% lower than true
 
 # Create config with INITIAL (wrong) parameters
 config_init = Config.from_dict(
@@ -237,7 +237,7 @@ print("\nOptimization progress:")
 result = optimizer.run(
     loss_fn=loss_fn_0d,
     initial_params=initial_params,
-    n_steps=200,
+    n_steps=100,
     verbose=True,
 )
 

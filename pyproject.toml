@@ -64,6 +64,10 @@ docs = [
     "mkdocstrings[python]>=0.24.0",
 ]
 
+optimization = [
+    "evosax>=0.1.0",
+]
+
 viz = [
     "matplotlib>=3.8.0",
     "cartopy>=0.22.0",
