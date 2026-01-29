@@ -109,11 +109,11 @@ print("Running Gradient (Adam)...")
 t0 = time.time()
 grad_opt = Optimizer(
     algorithm="adam",
-    learning_rate=0.05,
+    learning_rate=0.005,  # Conservative LR for stable convergence
     bounds=BOUNDS,
     scaling="bounds",
 )
-results["gradient"] = grad_opt.run(loss_fn, INITIAL_PARAMS, n_steps=200)
+results["gradient"] = grad_opt.run(loss_fn, INITIAL_PARAMS, n_steps=500)
 grad_time = time.time() - t0
 print(f"  Time: {grad_time:.2f}s")
 print(f"  Loss: {results['gradient'].loss:.6f}")
@@ -149,8 +149,8 @@ hybrid_opt = HybridOptimizer(
     popsize=32,
     top_k=5,
     bounds=BOUNDS,
-    gradient_steps=50,
-    gradient_lr=0.05,
+    gradient_steps=100,
+    gradient_lr=0.005,  # Conservative LR for stable convergence
     seed=42,
 )
 results["hybrid"] = hybrid_opt.run(loss_fn, INITIAL_PARAMS, n_generations=50)
