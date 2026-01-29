@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 
+import jax
 import jax.numpy as jnp
 
 from seapopym.blueprint import functional
@@ -69,13 +70,15 @@ def _get_neighbor_east(
         - CLOSED/OPEN: returns current cell value (zero gradient)
         - PERIODIC: returns western-most column
     """
-    if bc_east == BoundaryType.PERIODIC:
-        return jnp.roll(state, shift=-1, axis=-1)
-    else:
-        # Shift left and pad right edge with boundary values
-        shifted = jnp.roll(state, shift=-1, axis=-1)
-        # Replace last column with original last column (zero gradient)
-        return shifted.at[:, -1].set(state[:, -1])
+    shifted = jnp.roll(state, shift=-1, axis=-1)
+    # For non-periodic: replace last column with original (zero gradient)
+    non_periodic = shifted.at[:, -1].set(state[:, -1])
+    # Select based on boundary condition
+    return jax.lax.cond(
+        bc_east == BoundaryType.PERIODIC,
+        lambda: shifted,
+        lambda: non_periodic,
+    )
 
 
 def _get_neighbor_west(
@@ -93,11 +96,13 @@ def _get_neighbor_west(
         - CLOSED/OPEN: returns current cell value (zero gradient)
         - PERIODIC: returns eastern-most column
     """
-    if bc_west == BoundaryType.PERIODIC:
-        return jnp.roll(state, shift=1, axis=-1)
-    else:
-        shifted = jnp.roll(state, shift=1, axis=-1)
-        return shifted.at[:, 0].set(state[:, 0])
+    shifted = jnp.roll(state, shift=1, axis=-1)
+    non_periodic = shifted.at[:, 0].set(state[:, 0])
+    return jax.lax.cond(
+        bc_west == BoundaryType.PERIODIC,
+        lambda: shifted,
+        lambda: non_periodic,
+    )
 
 
 def _get_neighbor_north(
@@ -115,11 +120,13 @@ def _get_neighbor_north(
         - CLOSED/OPEN: returns current cell value (zero gradient)
         - PERIODIC: returns southern-most row
     """
-    if bc_north == BoundaryType.PERIODIC:
-        return jnp.roll(state, shift=-1, axis=-2)
-    else:
-        shifted = jnp.roll(state, shift=-1, axis=-2)
-        return shifted.at[-1, :].set(state[-1, :])
+    shifted = jnp.roll(state, shift=-1, axis=-2)
+    non_periodic = shifted.at[-1, :].set(state[-1, :])
+    return jax.lax.cond(
+        bc_north == BoundaryType.PERIODIC,
+        lambda: shifted,
+        lambda: non_periodic,
+    )
 
 
 def _get_neighbor_south(
@@ -137,11 +144,13 @@ def _get_neighbor_south(
         - CLOSED/OPEN: returns current cell value (zero gradient)
         - PERIODIC: returns northern-most row
     """
-    if bc_south == BoundaryType.PERIODIC:
-        return jnp.roll(state, shift=1, axis=-2)
-    else:
-        shifted = jnp.roll(state, shift=1, axis=-2)
-        return shifted.at[0, :].set(state[0, :])
+    shifted = jnp.roll(state, shift=1, axis=-2)
+    non_periodic = shifted.at[0, :].set(state[0, :])
+    return jax.lax.cond(
+        bc_south == BoundaryType.PERIODIC,
+        lambda: shifted,
+        lambda: non_periodic,
+    )
 
 
 def _get_boundary_mask_east(
@@ -155,9 +164,12 @@ def _get_boundary_mask_east(
     For OPEN/PERIODIC, flux is allowed everywhere.
     """
     mask = jnp.ones((ny, nx))
-    if bc_east == BoundaryType.CLOSED:
-        mask = mask.at[:, -1].set(0.0)
-    return mask
+    mask_closed = mask.at[:, -1].set(0.0)
+    return jax.lax.cond(
+        bc_east == BoundaryType.CLOSED,
+        lambda: mask_closed,
+        lambda: mask,
+    )
 
 
 def _get_boundary_mask_west(
@@ -167,9 +179,12 @@ def _get_boundary_mask_west(
 ) -> jnp.ndarray:
     """Get mask for western boundary (1=interior/periodic, 0=closed boundary)."""
     mask = jnp.ones((ny, nx))
-    if bc_west == BoundaryType.CLOSED:
-        mask = mask.at[:, 0].set(0.0)
-    return mask
+    mask_closed = mask.at[:, 0].set(0.0)
+    return jax.lax.cond(
+        bc_west == BoundaryType.CLOSED,
+        lambda: mask_closed,
+        lambda: mask,
+    )
 
 
 def _get_boundary_mask_north(
@@ -179,9 +194,12 @@ def _get_boundary_mask_north(
 ) -> jnp.ndarray:
     """Get mask for northern boundary (1=interior/periodic, 0=closed boundary)."""
     mask = jnp.ones((ny, nx))
-    if bc_north == BoundaryType.CLOSED:
-        mask = mask.at[-1, :].set(0.0)
-    return mask
+    mask_closed = mask.at[-1, :].set(0.0)
+    return jax.lax.cond(
+        bc_north == BoundaryType.CLOSED,
+        lambda: mask_closed,
+        lambda: mask,
+    )
 
 
 def _get_boundary_mask_south(
@@ -191,9 +209,12 @@ def _get_boundary_mask_south(
 ) -> jnp.ndarray:
     """Get mask for southern boundary (1=interior/periodic, 0=closed boundary)."""
     mask = jnp.ones((ny, nx))
-    if bc_south == BoundaryType.CLOSED:
-        mask = mask.at[0, :].set(0.0)
-    return mask
+    mask_closed = mask.at[0, :].set(0.0)
+    return jax.lax.cond(
+        bc_south == BoundaryType.CLOSED,
+        lambda: mask_closed,
+        lambda: mask,
+    )
 
 
 # =============================================================================
@@ -402,7 +423,7 @@ def _compute_diffusion_fluxes(
     out_dims=["Y", "X"],
     outputs=["advection_rate", "diffusion_rate"],
     units={
-        "state": "kg/m^3",
+        "state": "g/m^2",
         "u": "m/s",
         "v": "m/s",
         "D": "m^2/s",
@@ -412,8 +433,8 @@ def _compute_diffusion_fluxes(
         "face_width": "m",
         "cell_area": "m^2",
         "mask": "dimensionless",
-        "advection_rate": "kg/m^3/s",
-        "diffusion_rate": "kg/m^3/s",
+        "advection_rate": "g/m^2/s",
+        "diffusion_rate": "g/m^2/s",
     },
 )
 def transport_tendency(

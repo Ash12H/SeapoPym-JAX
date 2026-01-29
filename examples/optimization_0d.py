@@ -184,7 +184,7 @@ observations = SparseObservations(
 # Note: scaling="bounds" normalizes parameters to [0,1], enabling normal learning rates
 optimizer = Optimizer(
     algorithm="adam",
-    learning_rate=0.1,
+    learning_rate=0.001,
     bounds={
         "growth_rate": (0.01 / 86400.0, 0.5 / 86400.0),
         "mortality_rate": (0.01 / 86400.0, 0.5 / 86400.0),
