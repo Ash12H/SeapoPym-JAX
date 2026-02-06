@@ -68,6 +68,10 @@ optimization = [
     "evosax>=0.1.0",
 ]
 
+sensitivity = [
+    "SALib>=1.4.0",
+]
+
 viz = [
     "matplotlib>=3.8.0",
     "cartopy>=0.22.0",
@@ -178,7 +182,7 @@ line-ending = "auto"
 known-first-party = ["seapopym"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["ARG", "S101"]
+"tests/**/*.py" = ["ARG", "S101", "E402"]
 
 # ══════════════════════════════════════════════════════════════
 # PYRIGHT Configuration
