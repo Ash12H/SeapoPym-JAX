@@ -163,8 +163,14 @@ class SobolAnalyzer:
                     axis=0,
                 )
 
-            # Convert to JAX param dict
-            params_batch = self._array_to_param_dict(batch_params_np, problem["names"])
+            # Convert to JAX param dict (varied params only)
+            varied_params = self._array_to_param_dict(batch_params_np, problem["names"])
+
+            # Merge with model defaults: broadcast all params to batch, then override varied ones
+            params_batch = {
+                k: jnp.broadcast_to(v, (batch_size,) + v.shape) for k, v in self.model.parameters.items()
+            }
+            params_batch.update(varied_params)
 
             # Run batched simulation
             time_series = runner.run_batch(params_batch, batch_size)
