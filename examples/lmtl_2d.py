@@ -12,6 +12,7 @@ Processes:
 
 import time
 
+import jax
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -147,8 +148,8 @@ n_days = (end_pd - start_pd).days + 5  # Add margin to cover end_date safely
 dates = pd.date_range(start=start_pd, periods=n_days, freq="D")
 
 # Grid (2D)
-# grid_size = (180, 360)
-grid_size = (1, 1)
+grid_size = (180, 360)
+# grid_size = (1, 1)
 ny, nx = grid_size
 lat = np.arange(ny)
 lon = np.arange(nx)
@@ -201,6 +202,7 @@ config = Config.from_dict(
 # =============================================================================
 
 if __name__ == "__main__":
+    jax.config.update("jax_default_device", jax.devices("cpu")[0])
     print("Compiling model (LMTL 2D)...")
     model = compile_model(blueprint, config, backend="jax")
     print(f"Model compiled. Backend: {model.backend}")

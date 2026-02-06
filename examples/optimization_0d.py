@@ -10,6 +10,7 @@ the seapopym optimization module. It:
 This serves as a proof-of-concept for the optimization workflow.
 """
 
+import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,6 +24,8 @@ from seapopym.optimization import GradientRunner, Optimizer, SparseObservations
 
 # Initialize Pint registry
 ureg = pint.get_application_registry()
+
+jax.config.update("jax_default_device", jax.devices("cpu")[0])
 
 # =============================================================================
 # 1. DEFINE MODEL FUNCTIONS
