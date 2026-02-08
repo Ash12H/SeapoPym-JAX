@@ -236,6 +236,10 @@ class BlueprintValidator:
             data_nodes[var_path] = node
 
         # Create ComputeNodes and edges for each process step
+        # Track function name counts to generate unique node names when the
+        # same function appears multiple times (e.g. transport on biomass
+        # AND production).
+        _func_name_counts: dict[str, int] = {}
         for step in blueprint.process:
             if step.func not in result.resolved_functions:
                 continue
@@ -264,9 +268,14 @@ class BlueprintValidator:
                     # Scalar or unknown dimensions
                     input_dims[arg_name] = ()
 
+            # Generate unique name for this compute node
+            _count = _func_name_counts.get(step.func, 0)
+            _func_name_counts[step.func] = _count + 1
+            _unique_name = step.func if _count == 0 else f"{step.func}#{_count}"
+
             compute_node = ComputeNode(
                 func=metadata.func,
-                name=step.func,
+                name=_unique_name,
                 output_mapping=output_mapping,
                 input_mapping=dict(step.inputs),
                 core_dims=metadata.core_dims,

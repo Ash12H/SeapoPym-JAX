@@ -165,6 +165,26 @@ blueprint = Blueprint.from_dict(
                     "diffusion_rate": {"target": "tendencies.biomass", "type": "tendency"},
                 },
             },
+            # --- Transport (advection + diffusion on production, vmapped over C) ---
+            {
+                "func": "phys:transport_tendency",
+                "inputs": {
+                    "state": "state.production",
+                    "u": "forcings.u",
+                    "v": "forcings.v",
+                    "D": "forcings.D",
+                    "dx": "forcings.dx",
+                    "dy": "forcings.dy",
+                    "face_height": "forcings.face_height",
+                    "face_width": "forcings.face_width",
+                    "cell_area": "forcings.cell_area",
+                    "mask": "forcings.mask",
+                },
+                "outputs": {
+                    "advection_rate": {"target": "tendencies.production", "type": "tendency"},
+                    "diffusion_rate": {"target": "tendencies.production", "type": "tendency"},
+                },
+            },
         ],
     }
 )

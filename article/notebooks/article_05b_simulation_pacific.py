@@ -392,6 +392,30 @@ def create_blueprint_transport():
                         "diffusion_rate": {"target": "tendencies.biomass", "type": "tendency"},
                     },
                 },
+                # Transport for production (vmapped over cohort dimension C)
+                {
+                    "func": "phys:transport_tendency",
+                    "inputs": {
+                        "state": "state.production",
+                        "u": "forcings.current_u",
+                        "v": "forcings.current_v",
+                        "D": "parameters.D",
+                        "dx": "parameters.dx",
+                        "dy": "parameters.dy",
+                        "face_height": "parameters.face_height",
+                        "face_width": "parameters.face_width",
+                        "cell_area": "parameters.cell_area",
+                        "mask": "parameters.mask",
+                        "bc_north": "parameters.bc_north",
+                        "bc_south": "parameters.bc_south",
+                        "bc_east": "parameters.bc_east",
+                        "bc_west": "parameters.bc_west",
+                    },
+                    "outputs": {
+                        "advection_rate": {"target": "tendencies.production", "type": "tendency"},
+                        "diffusion_rate": {"target": "tendencies.production", "type": "tendency"},
+                    },
+                },
             ],
         }
     )
