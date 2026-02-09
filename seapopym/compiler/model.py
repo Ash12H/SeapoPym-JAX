@@ -21,8 +21,7 @@ if TYPE_CHECKING:
     from seapopym.compiler.compiler import TimeGrid
     from seapopym.compiler.forcing import ForcingStore
 
-# Type alias for arrays (JAX or NumPy)
-Array = Any  # jax.Array | np.ndarray
+from seapopym.types import Array
 
 
 # Canonical dimension order as per SPEC_02 §4.1

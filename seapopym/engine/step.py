@@ -22,14 +22,7 @@ from seapopym.engine.vectorize import (
 if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
 
-# Type aliases
-Array = Any  # np.ndarray | jax.Array
-State = dict[str, Array]
-Forcings = dict[str, Array]
-Outputs = dict[str, Array]
-
-
-Params = dict[str, Array]
+from seapopym.types import Array, Forcings, Outputs, Params, State
 
 
 def build_step_fn(

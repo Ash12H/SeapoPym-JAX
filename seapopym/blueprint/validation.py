@@ -315,7 +315,7 @@ class BlueprintValidator:
                 if out_spec.type == "tendency":
                     # Extract the state variable being modified
                     # e.g., "tendencies.growth" -> look for matching state var
-                    pass  # TODO: Resolve tendency targets
+                    pass  # Known limitation: tendency target resolution not yet implemented
 
                 out_node = DataNode(
                     name=out_spec.target,

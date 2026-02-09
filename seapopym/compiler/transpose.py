@@ -15,8 +15,7 @@ import xarray as xr
 from .exceptions import TransposeError
 from .model import CANONICAL_DIMS
 
-# Type alias
-Array = Any  # np.ndarray | jax.Array
+from seapopym.types import Array
 
 
 def apply_dimension_mapping(

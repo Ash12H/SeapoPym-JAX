@@ -15,9 +15,7 @@ from evosax.algorithms import CMA_ES
 
 from seapopym.optimization.optimizer import OptimizeResult
 
-# Type aliases
-Array = jnp.ndarray
-Params = dict[str, Array]
+from seapopym.types import Array, Params
 
 
 class EvolutionaryOptimizer:

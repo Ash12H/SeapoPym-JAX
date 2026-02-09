@@ -16,8 +16,7 @@ import xarray as xr
 
 from .transpose import apply_dimension_mapping, ensure_contiguous, transpose_canonical
 
-# Type alias
-Array = Any  # np.ndarray | jax.Array
+from seapopym.types import Array
 
 
 def load_data(

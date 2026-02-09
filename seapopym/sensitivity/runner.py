@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-Array = Any  # jax.Array | np.ndarray
+from seapopym.types import Array
 
 
 class SobolRunner:

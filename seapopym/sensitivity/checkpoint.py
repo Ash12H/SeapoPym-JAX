@@ -21,7 +21,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-Array = Any  # np.ndarray | jax.Array
+from seapopym.types import Array
 
 
 class SobolCheckpoint:

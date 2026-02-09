@@ -10,6 +10,7 @@ The Compiler orchestrates the full compilation pipeline:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -18,6 +19,8 @@ import pandas as pd
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config, ParameterValue, validate_blueprint, validate_config
+
+logger = logging.getLogger(__name__)
 
 from .forcing import ForcingStore
 from .inference import infer_shapes
@@ -377,8 +380,8 @@ class Compiler:
                     try:
                         coords = extract_coords(da, dim_mapping, self.backend)
                         coords_extracted = True
-                    except Exception:
-                        pass
+                    except (KeyError, ValueError, TypeError) as e:
+                        logger.debug("Failed to extract coords from DataArray '%s': %s", name, e)
 
             else:
                 # --- Raw array / scalar / file path: eager materialization ---
@@ -395,8 +398,8 @@ class Compiler:
                     try:
                         coords = extract_coords(source, dim_mapping, self.backend)
                         coords_extracted = True
-                    except Exception:
-                        pass
+                    except (KeyError, ValueError, TypeError) as e:
+                        logger.debug("Failed to extract coords from file '%s': %s", source, e)
 
         # Generate mask if not provided
         if "mask" not in raw_forcings:

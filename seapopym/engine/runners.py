@@ -26,9 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Type aliases
-Array = Any  # np.ndarray | jax.Array
-State = dict[str, Array]
+from seapopym.types import Array, State
 
 
 class StreamingRunner:

@@ -1,6 +1,6 @@
 """Asynchronous I/O for streaming output.
 
-Provides AsyncWriter for writing simulation outputs in parallel with computation.
+Provides DiskWriter for writing simulation outputs in parallel with computation.
 Uses ThreadPoolExecutor since GIL is released during JAX execution.
 """
 
@@ -24,8 +24,7 @@ from .exceptions import EngineIOError
 
 logger = logging.getLogger(__name__)
 
-# Type alias
-Array = Any  # np.ndarray | jax.Array
+from seapopym.types import Array
 
 
 class OutputWriter(Protocol):
@@ -342,7 +341,3 @@ class MemoryWriter:
                 resolved[node_short_name] = tuple(d for d in node.dims)
 
         return resolved
-
-
-# Alias for backward compatibility
-AsyncWriter = DiskWriter

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-Array = Any  # jax.Array | np.ndarray
+from seapopym.types import Array
 
 _DEFAULT_QOI = ["mean", "var", "argmax", "median"]
 
@@ -309,7 +309,7 @@ class SobolAnalyzer:
         return SobolResult(
             S1=s1_df,
             ST=st_df,
-            S2=None,  # TODO: extract S2 if calc_second_order
+            S2=None,  # Known limitation: S2 extraction not yet implemented
             S1_conf=s1_conf_df,
             ST_conf=st_conf_df,
             n_samples=n_samples,

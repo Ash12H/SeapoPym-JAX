@@ -4,18 +4,18 @@ import numpy as np
 import pytest
 
 from seapopym.engine.exceptions import EngineIOError
-from seapopym.engine.io import AsyncWriter
+from seapopym.engine.io import DiskWriter
 
 
-class TestAsyncWriter:
-    """Tests for AsyncWriter class."""
+class TestDiskWriter:
+    """Tests for DiskWriter class."""
 
     def test_init_creates_directory(self, tmp_path):
         """Test that initialization creates output directory."""
         output_path = tmp_path / "output"
         assert not output_path.exists()
 
-        writer = AsyncWriter(output_path)
+        writer = DiskWriter(output_path)
         writer.initialize({"Y": 10, "X": 20}, ["biomass"])
 
         assert output_path.exists()
@@ -24,7 +24,7 @@ class TestAsyncWriter:
     def test_write_single_chunk(self, tmp_path):
         """Test writing a single chunk."""
         output_path = tmp_path / "output"
-        writer = AsyncWriter(output_path)
+        writer = DiskWriter(output_path)
         writer.initialize({"Y": 5, "X": 5}, ["biomass"])
 
         # Write a chunk
@@ -43,7 +43,7 @@ class TestAsyncWriter:
     def test_write_multiple_chunks(self, tmp_path):
         """Test writing multiple chunks."""
         output_path = tmp_path / "output"
-        writer = AsyncWriter(output_path)
+        writer = DiskWriter(output_path)
         writer.initialize({"Y": 5, "X": 5}, ["biomass"])
 
         # Write multiple chunks
@@ -63,7 +63,7 @@ class TestAsyncWriter:
     def test_write_multiple_variables(self, tmp_path):
         """Test writing multiple variables."""
         output_path = tmp_path / "output"
-        writer = AsyncWriter(output_path)
+        writer = DiskWriter(output_path)
         writer.initialize({"Y": 5, "X": 5}, ["biomass", "temperature"])
 
         data = {
@@ -84,7 +84,7 @@ class TestAsyncWriter:
         """Test using writer as context manager."""
         output_path = tmp_path / "output"
 
-        with AsyncWriter(output_path) as writer:
+        with DiskWriter(output_path) as writer:
             writer.initialize({"Y": 5, "X": 5}, ["biomass"])
             data = {"biomass": np.ones((5, 5, 5)) * 100.0}
             writer.append(data, chunk_index=0)
@@ -98,7 +98,7 @@ class TestAsyncWriter:
     def test_write_without_init_raises(self, tmp_path):
         """Test that writing without initialization raises error."""
         output_path = tmp_path / "output"
-        writer = AsyncWriter(output_path)
+        writer = DiskWriter(output_path)
 
         with pytest.raises(EngineIOError):
             writer.append({"biomass": np.ones((5, 5, 5))}, chunk_index=0)
@@ -111,7 +111,7 @@ class TestAsyncWriter:
         import jax.numpy as jnp
 
         output_path = tmp_path / "output"
-        with AsyncWriter(output_path) as writer:
+        with DiskWriter(output_path) as writer:
             writer.initialize({"Y": 5, "X": 5}, ["biomass"])
 
             # Use JAX array
@@ -125,13 +125,13 @@ class TestAsyncWriter:
         assert store["biomass"].shape[0] == 5  # type: ignore[union-attr]
 
 
-class TestAsyncWriterConcurrency:
+class TestDiskWriterConcurrency:
     """Tests for concurrent write behavior."""
 
     def test_parallel_writes(self, tmp_path):
         """Test that multiple writes can proceed in parallel."""
         output_path = tmp_path / "output"
-        writer = AsyncWriter(output_path, max_workers=2)
+        writer = DiskWriter(output_path, max_workers=2)
         writer.initialize({"Y": 10, "X": 10}, ["biomass"])
 
         # Submit multiple writes quickly

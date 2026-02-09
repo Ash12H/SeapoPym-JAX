@@ -24,7 +24,7 @@ from .exceptions import (
     EngineIOError,
     StepError,
 )
-from .io import AsyncWriter
+from .io import DiskWriter
 from .runners import StreamingRunner
 from .step import build_step_fn
 
@@ -39,7 +39,7 @@ __all__ = [
     # Step
     "build_step_fn",
     # I/O
-    "AsyncWriter",
+    "DiskWriter",
     # Exceptions
     "EngineError",
     "StepError",

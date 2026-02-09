@@ -132,23 +132,6 @@ class UnitMismatchError(ValidationError):
         super().__init__(msg)
 
 
-class GridAlignmentError(ValidationError):
-    """E105: Grid coordinates are not aligned across variables."""
-
-    code = "E105"
-    message = "Grid alignment error"
-
-    def __init__(self, var_names: list[str], dimension: str | None = None) -> None:
-        """Initialize with misaligned variable names."""
-        self.var_names = var_names
-        self.dimension = dimension
-        if dimension:
-            msg = f"Grid alignment error on dimension '{dimension}' for variables: {var_names}"
-        else:
-            msg = f"Grid alignment error for variables: {var_names}"
-        super().__init__(msg)
-
-
 class MissingDataError(ValidationError):
     """E106: Required data is missing."""
 

@@ -10,8 +10,7 @@ from typing import Literal
 
 import jax.numpy as jnp
 
-# Type alias for JAX arrays
-Array = jnp.ndarray
+from seapopym.types import Array
 
 
 def rmse(

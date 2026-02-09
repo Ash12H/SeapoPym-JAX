@@ -13,7 +13,7 @@ from typing import Any
 
 import jax.numpy as jnp
 
-Array = Any  # jax.Array
+from seapopym.types import Array
 
 # Registry of available QoI functions
 _QOI_REGISTRY: dict[str, Any] = {}

@@ -14,9 +14,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
-# Type aliases
-Array = jnp.ndarray
-Params = dict[str, Array]
+from seapopym.types import Array, Params
 
 
 @dataclass

@@ -14,9 +14,7 @@ import jax.numpy as jnp
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
 from seapopym.optimization.optimizer import Optimizer, OptimizeResult
 
-# Type aliases
-Array = jnp.ndarray
-Params = dict[str, Array]
+from seapopym.types import Array, Params
 
 
 class HybridOptimizer:

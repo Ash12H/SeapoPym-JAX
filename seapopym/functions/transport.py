@@ -50,168 +50,74 @@ class BoundaryType(IntEnum):
     PERIODIC = 2
 
 
+# Direction config: (shift, axis, boundary_slice_fn)
+# - shift: roll direction (-1 = toward higher index, +1 = toward lower index)
+# - axis: -1 for X (east/west), -2 for Y (north/south)
+# - boundary_slice: indexer for the boundary edge to fix in non-periodic mode
+_DIRECTION_CONFIG = {
+    "east": (-1, -1, lambda s: (slice(None), -1)),
+    "west": (1, -1, lambda s: (slice(None), 0)),
+    "north": (-1, -2, lambda s: (-1, slice(None))),
+    "south": (1, -2, lambda s: (0, slice(None))),
+}
+
+
 # =============================================================================
 # NEIGHBOR ACCESS FUNCTIONS
 # =============================================================================
 
 
-def _get_neighbor_east(
+def _get_neighbor(
     state: jnp.ndarray,
-    bc_east: int,
+    direction: str,
+    bc: int,
 ) -> jnp.ndarray:
-    """Get eastern neighbor values with boundary condition handling.
+    """Get neighbor values in a given direction with boundary condition handling.
 
     Args:
         state: Field values (Y, X)
-        bc_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        direction: One of "east", "west", "north", "south"
+        bc: Boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
 
     Returns:
-        Eastern neighbor values (Y, X). At eastern boundary:
+        Neighbor values (Y, X). At the boundary:
         - CLOSED/OPEN: returns current cell value (zero gradient)
-        - PERIODIC: returns western-most column
+        - PERIODIC: wraps around
     """
-    shifted = jnp.roll(state, shift=-1, axis=-1)
-    # For non-periodic: replace last column with original (zero gradient)
-    non_periodic = shifted.at[:, -1].set(state[:, -1])
-    # Select based on boundary condition
+    shift, axis, bnd_slice_fn = _DIRECTION_CONFIG[direction]
+    shifted = jnp.roll(state, shift=shift, axis=axis)
+    bnd = bnd_slice_fn(state)
+    non_periodic = shifted.at[bnd].set(state[bnd])
     return jax.lax.cond(
-        bc_east == BoundaryType.PERIODIC,
+        bc == BoundaryType.PERIODIC,
         lambda: shifted,
         lambda: non_periodic,
     )
 
 
-def _get_neighbor_west(
-    state: jnp.ndarray,
-    bc_west: int,
-) -> jnp.ndarray:
-    """Get western neighbor values with boundary condition handling.
-
-    Args:
-        state: Field values (Y, X)
-        bc_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
-
-    Returns:
-        Western neighbor values (Y, X). At western boundary:
-        - CLOSED/OPEN: returns current cell value (zero gradient)
-        - PERIODIC: returns eastern-most column
-    """
-    shifted = jnp.roll(state, shift=1, axis=-1)
-    non_periodic = shifted.at[:, 0].set(state[:, 0])
-    return jax.lax.cond(
-        bc_west == BoundaryType.PERIODIC,
-        lambda: shifted,
-        lambda: non_periodic,
-    )
-
-
-def _get_neighbor_north(
-    state: jnp.ndarray,
-    bc_north: int,
-) -> jnp.ndarray:
-    """Get northern neighbor values with boundary condition handling.
-
-    Args:
-        state: Field values (Y, X)
-        bc_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
-
-    Returns:
-        Northern neighbor values (Y, X). At northern boundary:
-        - CLOSED/OPEN: returns current cell value (zero gradient)
-        - PERIODIC: returns southern-most row
-    """
-    shifted = jnp.roll(state, shift=-1, axis=-2)
-    non_periodic = shifted.at[-1, :].set(state[-1, :])
-    return jax.lax.cond(
-        bc_north == BoundaryType.PERIODIC,
-        lambda: shifted,
-        lambda: non_periodic,
-    )
-
-
-def _get_neighbor_south(
-    state: jnp.ndarray,
-    bc_south: int,
-) -> jnp.ndarray:
-    """Get southern neighbor values with boundary condition handling.
-
-    Args:
-        state: Field values (Y, X)
-        bc_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
-
-    Returns:
-        Southern neighbor values (Y, X). At southern boundary:
-        - CLOSED/OPEN: returns current cell value (zero gradient)
-        - PERIODIC: returns northern-most row
-    """
-    shifted = jnp.roll(state, shift=1, axis=-2)
-    non_periodic = shifted.at[0, :].set(state[0, :])
-    return jax.lax.cond(
-        bc_south == BoundaryType.PERIODIC,
-        lambda: shifted,
-        lambda: non_periodic,
-    )
-
-
-def _get_boundary_mask_east(
+def _get_boundary_mask(
     ny: int,
     nx: int,
-    bc_east: int,
+    direction: str,
+    bc: int,
 ) -> jnp.ndarray:
-    """Get mask for eastern boundary (1=interior/periodic, 0=closed boundary).
+    """Get mask for a boundary (1=interior/periodic, 0=closed boundary).
 
-    For CLOSED boundaries, the eastern-most column has no flux.
+    For CLOSED boundaries, the boundary edge has no flux.
     For OPEN/PERIODIC, flux is allowed everywhere.
+
+    Args:
+        ny: Number of rows.
+        nx: Number of columns.
+        direction: One of "east", "west", "north", "south"
+        bc: Boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
     """
+    _shift, _axis, bnd_slice_fn = _DIRECTION_CONFIG[direction]
     mask = jnp.ones((ny, nx))
-    mask_closed = mask.at[:, -1].set(0.0)
+    bnd = bnd_slice_fn(mask)
+    mask_closed = mask.at[bnd].set(0.0)
     return jax.lax.cond(
-        bc_east == BoundaryType.CLOSED,
-        lambda: mask_closed,
-        lambda: mask,
-    )
-
-
-def _get_boundary_mask_west(
-    ny: int,
-    nx: int,
-    bc_west: int,
-) -> jnp.ndarray:
-    """Get mask for western boundary (1=interior/periodic, 0=closed boundary)."""
-    mask = jnp.ones((ny, nx))
-    mask_closed = mask.at[:, 0].set(0.0)
-    return jax.lax.cond(
-        bc_west == BoundaryType.CLOSED,
-        lambda: mask_closed,
-        lambda: mask,
-    )
-
-
-def _get_boundary_mask_north(
-    ny: int,
-    nx: int,
-    bc_north: int,
-) -> jnp.ndarray:
-    """Get mask for northern boundary (1=interior/periodic, 0=closed boundary)."""
-    mask = jnp.ones((ny, nx))
-    mask_closed = mask.at[-1, :].set(0.0)
-    return jax.lax.cond(
-        bc_north == BoundaryType.CLOSED,
-        lambda: mask_closed,
-        lambda: mask,
-    )
-
-
-def _get_boundary_mask_south(
-    ny: int,
-    nx: int,
-    bc_south: int,
-) -> jnp.ndarray:
-    """Get mask for southern boundary (1=interior/periodic, 0=closed boundary)."""
-    mask = jnp.ones((ny, nx))
-    mask_closed = mask.at[0, :].set(0.0)
-    return jax.lax.cond(
-        bc_south == BoundaryType.CLOSED,
+        bc == BoundaryType.CLOSED,
         lambda: mask_closed,
         lambda: mask,
     )
@@ -256,26 +162,26 @@ def _compute_advection_fluxes(
     ny, nx = state.shape
 
     # Get neighbor values
-    state_east = _get_neighbor_east(state, bc_east)
-    state_west = _get_neighbor_west(state, bc_west)
-    state_north = _get_neighbor_north(state, bc_north)
-    state_south = _get_neighbor_south(state, bc_south)
+    state_east = _get_neighbor(state, "east", bc_east)
+    state_west = _get_neighbor(state, "west", bc_west)
+    state_north = _get_neighbor(state, "north", bc_north)
+    state_south = _get_neighbor(state, "south", bc_south)
 
-    u_east = _get_neighbor_east(u, bc_east)
-    u_west = _get_neighbor_west(u, bc_west)
-    v_north = _get_neighbor_north(v, bc_north)
-    v_south = _get_neighbor_south(v, bc_south)
+    u_east = _get_neighbor(u, "east", bc_east)
+    u_west = _get_neighbor(u, "west", bc_west)
+    v_north = _get_neighbor(v, "north", bc_north)
+    v_south = _get_neighbor(v, "south", bc_south)
 
-    mask_east = _get_neighbor_east(mask, bc_east)
-    mask_west = _get_neighbor_west(mask, bc_west)
-    mask_north = _get_neighbor_north(mask, bc_north)
-    mask_south = _get_neighbor_south(mask, bc_south)
+    mask_east = _get_neighbor(mask, "east", bc_east)
+    mask_west = _get_neighbor(mask, "west", bc_west)
+    mask_north = _get_neighbor(mask, "north", bc_north)
+    mask_south = _get_neighbor(mask, "south", bc_south)
 
     # Boundary masks (zero flux at closed boundaries)
-    bc_mask_e = _get_boundary_mask_east(ny, nx, bc_east)
-    bc_mask_w = _get_boundary_mask_west(ny, nx, bc_west)
-    bc_mask_n = _get_boundary_mask_north(ny, nx, bc_north)
-    bc_mask_s = _get_boundary_mask_south(ny, nx, bc_south)
+    bc_mask_e = _get_boundary_mask(ny, nx, "east", bc_east)
+    bc_mask_w = _get_boundary_mask(ny, nx, "west", bc_west)
+    bc_mask_n = _get_boundary_mask(ny, nx, "north", bc_north)
+    bc_mask_s = _get_boundary_mask(ny, nx, "south", bc_south)
 
     # --- EAST FACE ---
     # Velocity at face (average of adjacent cells)
@@ -343,31 +249,31 @@ def _compute_diffusion_fluxes(
     ny, nx = state.shape
 
     # Get neighbor values
-    state_east = _get_neighbor_east(state, bc_east)
-    state_west = _get_neighbor_west(state, bc_west)
-    state_north = _get_neighbor_north(state, bc_north)
-    state_south = _get_neighbor_south(state, bc_south)
+    state_east = _get_neighbor(state, "east", bc_east)
+    state_west = _get_neighbor(state, "west", bc_west)
+    state_north = _get_neighbor(state, "north", bc_north)
+    state_south = _get_neighbor(state, "south", bc_south)
 
-    D_east = _get_neighbor_east(D, bc_east)
-    D_west = _get_neighbor_west(D, bc_west)
-    D_north = _get_neighbor_north(D, bc_north)
-    D_south = _get_neighbor_south(D, bc_south)
+    D_east = _get_neighbor(D, "east", bc_east)
+    D_west = _get_neighbor(D, "west", bc_west)
+    D_north = _get_neighbor(D, "north", bc_north)
+    D_south = _get_neighbor(D, "south", bc_south)
 
-    dx_east = _get_neighbor_east(dx, bc_east)
-    dx_west = _get_neighbor_west(dx, bc_west)
-    dy_north = _get_neighbor_north(dy, bc_north)
-    dy_south = _get_neighbor_south(dy, bc_south)
+    dx_east = _get_neighbor(dx, "east", bc_east)
+    dx_west = _get_neighbor(dx, "west", bc_west)
+    dy_north = _get_neighbor(dy, "north", bc_north)
+    dy_south = _get_neighbor(dy, "south", bc_south)
 
-    mask_east = _get_neighbor_east(mask, bc_east)
-    mask_west = _get_neighbor_west(mask, bc_west)
-    mask_north = _get_neighbor_north(mask, bc_north)
-    mask_south = _get_neighbor_south(mask, bc_south)
+    mask_east = _get_neighbor(mask, "east", bc_east)
+    mask_west = _get_neighbor(mask, "west", bc_west)
+    mask_north = _get_neighbor(mask, "north", bc_north)
+    mask_south = _get_neighbor(mask, "south", bc_south)
 
     # Boundary masks
-    bc_mask_e = _get_boundary_mask_east(ny, nx, bc_east)
-    bc_mask_w = _get_boundary_mask_west(ny, nx, bc_west)
-    bc_mask_n = _get_boundary_mask_north(ny, nx, bc_north)
-    bc_mask_s = _get_boundary_mask_south(ny, nx, bc_south)
+    bc_mask_e = _get_boundary_mask(ny, nx, "east", bc_east)
+    bc_mask_w = _get_boundary_mask(ny, nx, "west", bc_west)
+    bc_mask_n = _get_boundary_mask(ny, nx, "north", bc_north)
+    bc_mask_s = _get_boundary_mask(ny, nx, "south", bc_south)
 
     # --- EAST FACE ---
     # Diffusion coefficient at face (harmonic mean for heterogeneous D)

@@ -20,9 +20,7 @@ from seapopym.optimization.optimizer import Optimizer, OptimizeResult
 if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
 
-# Type aliases
-Array = jnp.ndarray
-Params = dict[str, Array]
+from seapopym.types import Array, Params
 
 
 @dataclass

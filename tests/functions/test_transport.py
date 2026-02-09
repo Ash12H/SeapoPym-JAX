@@ -6,10 +6,7 @@ import pytest
 
 from seapopym.functions.transport import (
     BoundaryType,
-    _get_neighbor_east,
-    _get_neighbor_north,
-    _get_neighbor_south,
-    _get_neighbor_west,
+    _get_neighbor,
     transport_tendency,
 )
 
@@ -30,7 +27,7 @@ class TestNeighborFunctions:
     def test_get_neighbor_east_periodic(self):
         """Eastern neighbor with PERIODIC BC should wrap around."""
         state = jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        neighbor = _get_neighbor_east(state, BoundaryType.PERIODIC)
+        neighbor = _get_neighbor(state, "east", BoundaryType.PERIODIC)
         # Last column should wrap to first column
         expected = jnp.array([[2.0, 3.0, 1.0], [5.0, 6.0, 4.0]])
         assert jnp.allclose(neighbor, expected)
@@ -38,7 +35,7 @@ class TestNeighborFunctions:
     def test_get_neighbor_east_closed(self):
         """Eastern neighbor with CLOSED BC should use current value at boundary."""
         state = jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        neighbor = _get_neighbor_east(state, BoundaryType.CLOSED)
+        neighbor = _get_neighbor(state, "east", BoundaryType.CLOSED)
         # Last column should equal itself (zero gradient)
         expected = jnp.array([[2.0, 3.0, 3.0], [5.0, 6.0, 6.0]])
         assert jnp.allclose(neighbor, expected)
@@ -46,7 +43,7 @@ class TestNeighborFunctions:
     def test_get_neighbor_west_periodic(self):
         """Western neighbor with PERIODIC BC should wrap around."""
         state = jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        neighbor = _get_neighbor_west(state, BoundaryType.PERIODIC)
+        neighbor = _get_neighbor(state, "west", BoundaryType.PERIODIC)
         # First column should wrap to last column
         expected = jnp.array([[3.0, 1.0, 2.0], [6.0, 4.0, 5.0]])
         assert jnp.allclose(neighbor, expected)
@@ -54,7 +51,7 @@ class TestNeighborFunctions:
     def test_get_neighbor_north_closed(self):
         """Northern neighbor with CLOSED BC should use current value at boundary."""
         state = jnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-        neighbor = _get_neighbor_north(state, BoundaryType.CLOSED)
+        neighbor = _get_neighbor(state, "north", BoundaryType.CLOSED)
         # Last row should equal itself
         expected = jnp.array([[3.0, 4.0], [5.0, 6.0], [5.0, 6.0]])
         assert jnp.allclose(neighbor, expected)
@@ -62,7 +59,7 @@ class TestNeighborFunctions:
     def test_get_neighbor_south_closed(self):
         """Southern neighbor with CLOSED BC should use current value at boundary."""
         state = jnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-        neighbor = _get_neighbor_south(state, BoundaryType.CLOSED)
+        neighbor = _get_neighbor(state, "south", BoundaryType.CLOSED)
         # First row should equal itself
         expected = jnp.array([[1.0, 2.0], [1.0, 2.0], [3.0, 4.0]])
         assert jnp.allclose(neighbor, expected)

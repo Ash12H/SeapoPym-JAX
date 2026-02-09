@@ -57,10 +57,12 @@ docs = [
 
 optimization = [
     "evosax>=0.1.0",
+    "flax>=0.12.3",
 ]
 
 sensitivity = [
     "SALib>=1.4.0",
+    "pyarrow>=14.0.0",
 ]
 
 viz = [

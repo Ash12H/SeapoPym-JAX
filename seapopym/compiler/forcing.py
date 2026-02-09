@@ -17,8 +17,7 @@ from typing import Any, Literal
 import numpy as np
 import xarray as xr
 
-# Type alias
-Array = Any  # jax.Array | np.ndarray
+from seapopym.types import Array
 
 
 def compute_source_window(
