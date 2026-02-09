@@ -236,7 +236,9 @@ class TestCompileTimeGrid:
         assert model.time_grid is not None
         assert model.time_grid.n_timesteps == 10
         assert model.shapes["T"] == 10
-        assert model.forcings["temp"].shape[0] == 10  # Interpolated
+        # Interpolation is deferred to runtime — use get_all() to verify
+        all_forcings = model.forcings.get_all()
+        assert all_forcings["temp"].shape[0] == 10  # Interpolated at runtime
 
     def test_coords_generation(self, blueprint):
         """Test that T coords are generated from time_grid."""
@@ -324,7 +326,9 @@ class TestCompileTimeGrid:
         # Target indices: 0, 0.33, 0.66, 1.0 (linspace(0, 1, 4))
         # Values: 0, 3.33, 6.66, 10
 
-        result = model.forcings["temp"].flatten()
+        # Interpolation is deferred to runtime — use get_all() to verify
+        all_forcings = model.forcings.get_all()
+        result = all_forcings["temp"].flatten()
         expected = np.linspace(0, 10, 4)
 
         np.testing.assert_allclose(result, expected, atol=1e-5)

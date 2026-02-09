@@ -15,9 +15,11 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config, ParameterValue, validate_blueprint, validate_config
 
+from .forcing import ForcingStore
 from .inference import infer_shapes
 from .model import CANONICAL_DIMS, Array, CompiledModel
 from .preprocessing import extract_coords, prepare_array
@@ -239,7 +241,7 @@ class Compiler:
             shapes = {dim_mapping.get(k, k): v for k, v in shapes.items()}
 
         # Step 6: Prepare forcings (with temporal validation)
-        forcings, coords = self._prepare_forcings(config, dim_mapping, shapes, time_grid)
+        forcings, coords = self._prepare_forcings(config, dim_mapping, shapes, time_grid, blueprint_dims)
 
         # Step 6: Prepare initial state
         state = self._prepare_state(config, blueprint, dim_mapping)
@@ -282,179 +284,144 @@ class Compiler:
         dim_mapping: dict[str, str] | None,
         shapes: dict[str, int],
         time_grid: TimeGrid,
-    ) -> tuple[dict[str, Array], dict[str, Array]]:
-        """Prepare forcing arrays with temporal validation and interpolation.
+        blueprint_dims: dict[str, list[str] | None],
+    ) -> tuple[ForcingStore, dict[str, Array]]:
+        """Prepare forcings into a ForcingStore with deferred materialization.
 
-        Forcings are processed as follows:
-        1. Static forcings (no T dimension): kept as-is (broadcasted at runtime)
-        2. Temporally aligned forcings (shape[0] == n_timesteps): kept as-is
-        3. Under-sampled forcings (shape[0] < n_timesteps): interpolated
+        xr.DataArray forcings are kept lazy — only metadata is validated at
+        compile time. Materialization happens at runtime in ForcingStore.get_chunk().
 
-        The interpolation method is specified in config.execution.forcing_interpolation.
+        Raw arrays (numpy/scalar) are materialized eagerly since they are
+        already in memory.
 
         Args:
             config: Configuration with forcings data.
             dim_mapping: Optional dimension renaming map.
             shapes: Inferred dimension sizes (including T from time_grid).
             time_grid: Temporal grid for validation and coord generation.
+            blueprint_dims: Dimension declarations from blueprint (e.g. {"forcings.temp": ["T","Y","X"]}).
 
         Returns:
-            Tuple of (forcings dict, coords dict) with temporal coords added.
+            Tuple of (ForcingStore, coords dict) with temporal coords added.
 
         Raises:
             ValueError: If a forcing's temporal range does not cover the
                 simulation range defined by time_grid.
         """
-        forcings: dict[str, Array] = {}
+        from .transpose import apply_dimension_mapping, transpose_canonical
+
+        raw_forcings: dict[str, Any] = {}
+        dynamic_forcings: set[str] = set()
         coords: dict[str, Array] = {}
         coords_extracted = False
         n_timesteps = shapes.get("T", 1)
         interp_method = config.execution.forcing_interpolation
 
         for name, source in config.forcings.items():
-            arr, _dims, _mask = prepare_array(
-                source,
-                dimension_mapping=dim_mapping,
-                backend=self.backend,
-                fill_nan=self.fill_nan,
-            )
+            # Determine dynamic/static from blueprint declarations
+            bp_dims = blueprint_dims.get(f"forcings.{name}")
+            is_dynamic = bp_dims is not None and "T" in bp_dims
 
-            # Validate and slice temporal range if forcing has time coordinates
-            if hasattr(source, "coords") and "T" in source.coords:
-                forcing_coords = source.coords["T"]
-                forcing_start = forcing_coords.values[0]
-                forcing_end = forcing_coords.values[-1]
+            if is_dynamic:
+                dynamic_forcings.add(name)
 
-                # Check if forcing covers simulation range
-                if time_grid.start < forcing_start or time_grid.end > forcing_end:
-                    raise ValueError(
-                        f"Forcing '{name}' temporal range [{forcing_start}, {forcing_end}] "
-                        f"does not cover simulation range [{time_grid.start}, {time_grid.end}]. "
-                        f"Ensure forcing data spans the entire simulation period."
-                    )
+            if isinstance(source, xr.DataArray):
+                # --- Lazy xr.DataArray path ---
+                da = apply_dimension_mapping(source, dim_mapping)
+                da = transpose_canonical(da)
 
-                # Slice forcing to simulation temporal range
-                # Strategy: keep points within [start, end) plus boundary points for interpolation
-                forcing_times = forcing_coords.values
-                sim_start = time_grid.start
-                sim_end = time_grid.end
+                # Validate temporal coverage on metadata (no materialization)
+                if is_dynamic and "T" in da.coords:
+                    forcing_coords = da.coords["T"]
+                    forcing_start = forcing_coords.values[0]
+                    forcing_end = forcing_coords.values[-1]
 
-                # Find bracket indices: points at or after start, before end
-                start_idx = np.searchsorted(forcing_times, sim_start, side="left")
-                end_idx = np.searchsorted(forcing_times, sim_end, side="left")
+                    if time_grid.start < forcing_start or time_grid.end > forcing_end:
+                        raise ValueError(
+                            f"Forcing '{name}' temporal range [{forcing_start}, {forcing_end}] "
+                            f"does not cover simulation range [{time_grid.start}, {time_grid.end}]. "
+                            f"Ensure forcing data spans the entire simulation period."
+                        )
 
-                # Ensure we have at least 2 points for interpolation
-                # Expand to include boundary points if needed
-                if end_idx - start_idx < 2:
-                    # Very sparse forcing: expand to include neighbors
-                    if start_idx > 0:
-                        start_idx -= 1
-                    if end_idx < len(forcing_times):
-                        end_idx += 1
+                    # Slice at xarray level (still lazy)
+                    forcing_times = forcing_coords.values
+                    start_idx = int(np.searchsorted(forcing_times, time_grid.start, side="left"))
+                    end_idx = int(np.searchsorted(forcing_times, time_grid.end, side="left"))
 
-                # Slice the forcing data along time dimension (first axis)
-                arr = arr[start_idx:end_idx]
+                    if end_idx - start_idx < 2:
+                        if start_idx > 0:
+                            start_idx -= 1
+                        if end_idx < len(forcing_times):
+                            end_idx += 1
 
-            # Check if temporal interpolation is needed
-            # Only interpolate if:
-            # 1. Array is valid
-            # 2. Time dimension is present (first canonical dimension)
-            # 3. Timesteps don't match
-            # 4. Interpolation is enabled
-            time_dim = "T"
-            if (
-                arr.ndim > 0 and time_dim in _dims and arr.shape[0] != n_timesteps and interp_method != "constant"
-            ):  # Forcing has a time dimension but doesn't match expected timesteps
-                # Apply interpolation
-                arr = self._interpolate_forcing(arr, arr.shape[0], n_timesteps, interp_method)
+                    da = da.isel(T=slice(start_idx, end_idx))
 
-            forcings[name] = arr
+                if is_dynamic:
+                    # Keep lazy — ForcingStore will materialize at runtime
+                    raw_forcings[name] = da
+                else:
+                    # Static: small, materialize now
+                    arr = da.values
+                    arr = np.asarray(arr)
+                    nan_mask = np.isnan(arr) if np.issubdtype(arr.dtype, np.floating) else None
+                    if nan_mask is not None and nan_mask.any():
+                        arr = np.where(nan_mask, self.fill_nan, arr)
+                    if self.backend == "jax":
+                        import jax.numpy as jnp
 
-            # Extract coords from first file source
-            if not coords_extracted and isinstance(source, str):
-                try:
-                    coords = extract_coords(source, dim_mapping, self.backend)
-                    coords_extracted = True
-                except Exception:
-                    pass  # Coords extraction is optional
+                        arr = jnp.asarray(arr)
+                    raw_forcings[name] = arr
+
+                # Extract coords from first xr.DataArray source
+                if not coords_extracted:
+                    try:
+                        coords = extract_coords(da, dim_mapping, self.backend)
+                        coords_extracted = True
+                    except Exception:
+                        pass
+
+            else:
+                # --- Raw array / scalar / file path: eager materialization ---
+                arr, _dims, _mask = prepare_array(
+                    source,
+                    dimension_mapping=dim_mapping,
+                    backend=self.backend,
+                    fill_nan=self.fill_nan,
+                )
+                raw_forcings[name] = arr
+
+                # Extract coords from first file source
+                if not coords_extracted and isinstance(source, str):
+                    try:
+                        coords = extract_coords(source, dim_mapping, self.backend)
+                        coords_extracted = True
+                    except Exception:
+                        pass
 
         # Generate mask if not provided
-        if "mask" not in forcings:
-            # Create default mask from shapes
+        if "mask" not in raw_forcings:
             mask_shape = tuple(shapes.get(d, 1) for d in ["Y", "X"] if d in shapes)
             if mask_shape:
                 if self.backend == "jax":
                     import jax.numpy as jnp
 
-                    forcings["mask"] = jnp.ones(mask_shape, dtype=jnp.bool_)
+                    raw_forcings["mask"] = jnp.ones(mask_shape, dtype=jnp.bool_)
                 else:
-                    forcings["mask"] = np.ones(mask_shape, dtype=np.bool_)
+                    raw_forcings["mask"] = np.ones(mask_shape, dtype=np.bool_)
 
         # Add temporal coordinates from time_grid
         coords["T"] = time_grid.coords
 
-        return forcings, coords
+        forcing_store = ForcingStore(
+            _forcings=raw_forcings,
+            n_timesteps=n_timesteps,
+            interp_method=interp_method,
+            backend=self.backend,
+            fill_nan=self.fill_nan,
+            _dynamic_forcings=dynamic_forcings,
+        )
 
-    def _interpolate_forcing(
-        self,
-        forcing: Array,
-        source_len: int,
-        target_len: int,
-        method: str,
-    ) -> Array:
-        """Interpolate forcing data to target number of timesteps.
-
-        Args:
-            forcing: Original forcing array (shape: (T_source, ...)).
-            source_len: Source number of timesteps.
-            target_len: Target number of timesteps.
-            method: Interpolation method ("nearest", "linear", "ffill").
-
-        Returns:
-            Interpolated forcing (shape: (T_target, ...)).
-        """
-        import numpy as np
-
-        # Convert to numpy for interpolation (if JAX)
-        forcing_np = np.asarray(forcing)
-
-        # Source and target indices
-        source_indices = np.arange(source_len)
-        target_indices = np.linspace(0, source_len - 1, target_len)
-
-        if method == "nearest":
-            # Nearest neighbor interpolation
-            nearest_idx = np.round(target_indices).astype(int)
-            nearest_idx = np.clip(nearest_idx, 0, source_len - 1)
-            result = forcing_np[nearest_idx]
-
-        elif method == "linear":
-            # Linear interpolation
-            from scipy.interpolate import interp1d
-
-            # Interpolate along first axis (time)
-            # Note: fill_value="extrapolate" allows extrapolation beyond bounds
-            f = interp1d(source_indices, forcing_np, axis=0, kind="linear", fill_value="extrapolate")  # type: ignore[arg-type]
-            result = f(target_indices)
-
-        elif method == "ffill":
-            # Forward fill: repeat each value until next sample
-            # Map target indices to source indices (floor)
-            ffill_idx = np.floor(target_indices).astype(int)
-            ffill_idx = np.clip(ffill_idx, 0, source_len - 1)
-            result = forcing_np[ffill_idx]
-
-        else:
-            # Should not happen (validated by Pydantic)
-            raise ValueError(f"Unknown interpolation method: {method}")
-
-        # Convert back to target backend
-        if self.backend == "jax":
-            import jax.numpy as jnp
-
-            return jnp.asarray(result)
-        else:
-            return result
+        return forcing_store, coords
 
     def _prepare_state(
         self,

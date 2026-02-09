@@ -56,6 +56,7 @@ class TestForcingInterpolation:
         # Need to mimic what compile() does before calling it
         shapes = {"T": nt, "Y": ny, "X": nx}
         dim_mapping = {}
+        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
 
         forcings, _ = compiler._prepare_forcings(
             config,
@@ -68,6 +69,7 @@ class TestForcingInterpolation:
                 n_timesteps=nt,
                 coords=np.array([]),
             ),
+            blueprint_dims=blueprint_dims,
         )
 
         # Bathy should match input shape (ny, nx), NOT (nt, nx)
@@ -102,6 +104,7 @@ class TestForcingInterpolation:
 
         compiler = Compiler(backend="numpy")
         shapes = {"T": target_t, "Y": 1, "X": 1}
+        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
         forcings, _ = compiler._prepare_forcings(
             config,
             {},
@@ -113,9 +116,12 @@ class TestForcingInterpolation:
                 n_timesteps=target_t,
                 coords=np.array([]),
             ),
+            blueprint_dims=blueprint_dims,
         )
 
-        res = forcings["temp"].flatten()
+        # Interpolation is deferred — use get_all() to materialize
+        all_forcings = forcings.get_all()
+        res = all_forcings["temp"].flatten()
         expected = np.linspace(0, 40, target_t)
 
         # Should be close
@@ -147,6 +153,7 @@ class TestForcingInterpolation:
 
         compiler = Compiler(backend="numpy")
         shapes = {"T": target_t, "Y": 1, "X": 1}
+        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
         forcings, _ = compiler._prepare_forcings(
             config,
             {},
@@ -158,9 +165,12 @@ class TestForcingInterpolation:
                 n_timesteps=target_t,
                 coords=np.array([]),
             ),
+            blueprint_dims=blueprint_dims,
         )
 
-        res = forcings["temp"].flatten()
+        # Interpolation is deferred — use get_all() to materialize
+        all_forcings = forcings.get_all()
+        res = all_forcings["temp"].flatten()
         # indices: 0->0, 1->0.33(0), 2->0.66(1), 3->1
         # With linspace(0, 1, 4): 0.0, 0.33, 0.66, 1.0
         # round(0)=0, round(0.33)=0, round(0.66)=1, round(1)=1
@@ -193,6 +203,7 @@ class TestForcingInterpolation:
 
         compiler = Compiler(backend="numpy")
         shapes = {"T": target_t, "Y": 1, "X": 1}
+        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
         forcings, _ = compiler._prepare_forcings(
             config,
             {},
@@ -204,9 +215,12 @@ class TestForcingInterpolation:
                 n_timesteps=target_t,
                 coords=np.array([]),
             ),
+            blueprint_dims=blueprint_dims,
         )
 
-        res = forcings["temp"].flatten()
+        # Interpolation is deferred — use get_all() to materialize
+        all_forcings = forcings.get_all()
+        res = all_forcings["temp"].flatten()
         # [0, 0.33, 0.66, 1.0] -> floor -> [0, 0, 0, 1]
         # Wait, current implementation uses floor(linspace(0, N-1, M))
         # linspace(0, 1, 4): 0, 0.33, 0.66, 1

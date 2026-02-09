@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from seapopym.blueprint import Blueprint
     from seapopym.compiler.compiler import TimeGrid
+    from seapopym.compiler.forcing import ForcingStore
 
 # Type alias for arrays (JAX or NumPy)
 Array = Any  # jax.Array | np.ndarray
@@ -58,7 +59,7 @@ class CompiledModel:
 
     # Data pytrees
     state: dict[str, Array] = field(default_factory=dict)
-    forcings: dict[str, Array] = field(default_factory=dict)
+    forcings: ForcingStore = field(default_factory=lambda: _default_forcing_store())
     parameters: dict[str, Array] = field(default_factory=dict)
 
     # Metadata
@@ -92,17 +93,30 @@ class CompiledModel:
 
     def to_numpy(self) -> CompiledModel:
         """Convert all arrays to NumPy (useful for debugging)."""
+        from seapopym.compiler.forcing import ForcingStore
 
         def convert(arr: Array) -> np.ndarray:
             if hasattr(arr, "numpy"):
                 return arr.numpy()
             return np.asarray(arr)
 
+        # Materialize all forcings and convert to numpy
+        all_forcings = self.forcings.get_all()
+        numpy_forcings_dict = {k: convert(v) for k, v in all_forcings.items()}
+        numpy_store = ForcingStore(
+            _forcings=numpy_forcings_dict,
+            n_timesteps=self.n_timesteps,
+            interp_method=self.forcings.interp_method,
+            backend="numpy",
+            fill_nan=self.forcings.fill_nan,
+            _dynamic_forcings=set(self.forcings._dynamic_forcings),
+        )
+
         return CompiledModel(
             blueprint=self.blueprint,
             graph=self.graph,
             state={k: convert(v) for k, v in self.state.items()},
-            forcings={k: convert(v) for k, v in self.forcings.items()},
+            forcings=numpy_store,
             parameters={k: convert(v) for k, v in self.parameters.items()},
             shapes=self.shapes,
             coords={k: convert(v) for k, v in self.coords.items()},
@@ -110,3 +124,10 @@ class CompiledModel:
             backend="numpy",
             trainable_params=self.trainable_params,
         )
+
+
+def _default_forcing_store() -> ForcingStore:
+    """Create a default empty ForcingStore (avoids circular import at module level)."""
+    from seapopym.compiler.forcing import ForcingStore
+
+    return ForcingStore()
