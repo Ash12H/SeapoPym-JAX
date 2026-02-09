@@ -20,8 +20,6 @@ Example:
 """
 
 # New declarative API (SPEC_01)
-# Legacy API (backward compatibility with controller)
-from ._legacy import Blueprint as LegacyBlueprint
 from .exceptions import (
     BlueprintError,
     ConfigurationError,
@@ -99,6 +97,4 @@ __all__ = [
     "MissingInputError",
     "CycleError",
     "ConfigurationError",
-    # Legacy (backward compatibility)
-    "LegacyBlueprint",
 ]

@@ -5,8 +5,8 @@ import pytest
 
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import compile_model
-from seapopym.engine.exceptions import BackendError, ChunkingError
-from seapopym.engine.runners import GradientRunner, StreamingRunner
+from seapopym.engine.exceptions import ChunkingError
+from seapopym.engine.runners import StreamingRunner
 
 
 @pytest.fixture(autouse=True)
@@ -246,86 +246,3 @@ class TestStreamingRunner:
         np.testing.assert_array_equal(outputs["biomass"][-1], final_state["biomass"])
 
 
-class TestGradientRunner:
-    """Tests for GradientRunner."""
-
-    @pytest.fixture(autouse=True)
-    def skip_if_no_jax(self):
-        """Skip tests if JAX is not available."""
-        pytest.importorskip("jax")
-
-    def test_init_requires_jax_backend(self, simple_blueprint, simple_config):
-        """Test that GradientRunner requires JAX backend."""
-
-        @functional(name="test:growth", backend="numpy")
-        def test_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
-
-        with pytest.raises(BackendError):
-            GradientRunner(model)
-
-    def test_run(self, simple_blueprint, simple_config):
-        """Test running simulation."""
-        import jax.numpy as jnp
-
-        @functional(name="test:growth", backend="jax")
-        def test_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        model = compile_model(simple_blueprint, simple_config, backend="jax")
-        runner = GradientRunner(model)
-
-        final_state, outputs = runner.run()
-
-        assert "biomass" in final_state
-        # Biomass should have grown
-        assert jnp.all(final_state["biomass"] >= 100.0)
-
-    def test_run_preserves_gradient(self, simple_blueprint, simple_config):
-        """Test that gradients can be computed through the run."""
-        import jax
-        import jax.numpy as jnp
-
-        @functional(name="test:growth", backend="jax")
-        def test_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        model = compile_model(simple_blueprint, simple_config, backend="jax")
-        runner = GradientRunner(model)
-
-        # Define a simple loss
-        def loss_fn(growth_rate):
-            # Update parameter
-            model.parameters["growth_rate"] = growth_rate
-            final_state, _ = runner.run()
-            # Loss is mean final biomass (we want to maximize)
-            return -jnp.mean(final_state["biomass"])
-
-        # Compute gradient
-        initial_rate = jnp.array(0.001)
-        grad = jax.grad(loss_fn)(initial_rate)
-
-        # Gradient should exist and be non-zero
-        assert not jnp.isnan(grad)
-
-    def test_loss_fn(self, simple_blueprint, simple_config):
-        """Test loss function computation."""
-        import jax.numpy as jnp
-
-        @functional(name="test:growth", backend="jax")
-        def test_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        model = compile_model(simple_blueprint, simple_config, backend="jax")
-        runner = GradientRunner(model)
-
-        # Create synthetic observations
-        observations = {"biomass": jnp.ones((5, 5)) * 150.0}
-
-        params = {"growth_rate": jnp.array(0.001)}
-        loss = runner.loss_fn(params, observations)
-
-        # Loss should be positive (MSE)
-        assert loss > 0

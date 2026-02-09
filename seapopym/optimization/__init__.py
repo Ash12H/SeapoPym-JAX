@@ -37,7 +37,7 @@ try:
 
     __all__ += ["EvolutionaryOptimizer", "HybridOptimizer"]
     _HAS_EVOSAX = True
-except ImportError:
+except (ImportError, KeyError):
     _HAS_EVOSAX = False
 
 

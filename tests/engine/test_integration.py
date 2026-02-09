@@ -8,7 +8,8 @@ import pytest
 
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import compile_model
-from seapopym.engine import GradientRunner, StreamingRunner
+from seapopym.engine import StreamingRunner
+from seapopym.optimization.gradient import GradientRunner
 
 
 @pytest.fixture(autouse=True)
@@ -245,7 +246,7 @@ class TestE2EBasicSimulation:
 
         model = compile_model(blueprint, config, backend="jax")
         runner = GradientRunner(model)
-        final_state, outputs = runner.run()
+        final_state, outputs = runner.run_with_params(dict(model.parameters))
 
         assert "biomass" in final_state
         assert jnp.all(final_state["biomass"] >= 100.0)

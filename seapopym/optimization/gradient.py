@@ -108,7 +108,7 @@ class GradientRunner:
         if initial_state is None:
             initial_state = self.model.state
         if forcings is None:
-            forcings = self.model.forcings
+            forcings = self.model.forcings.get_all()
 
         # Initial carry includes both state and params
         init_carry = (initial_state, params)

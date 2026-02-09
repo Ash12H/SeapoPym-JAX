@@ -25,17 +25,10 @@ dependencies = [
     "zarr>=2.16.1",
     "numpy>=1.26.0",
     "pandas>=2.1.0",
-    "netcdf4>=1.6.0",
     "dask>=2023.12.0",
-    "matplotlib>=3.8.0",
     "networkx>=3.0",
-    "bokeh>=3.8.1",
-    "distributed>=2025.11.0",
     "pint>=0.24.4",
     "pint-xarray>=0.5.1",
-    "numba>=0.63.1",
-    "scipy>=1.15.3",
-    "tqdm>=4.67.1",
     "pydantic>=2.0.0",
     "pyyaml>=6.0.0",
     "jax[cuda12]>=0.4.20",
@@ -47,8 +40,6 @@ dependencies = [
 dev = [
     "pytest>=7.4.3",
     "pytest-cov>=4.1.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-benchmark>=4.0.0",
     "pyright>=1.1.340",
     "ruff>=0.1.0",
     "pre-commit>=3.5.0",
@@ -74,15 +65,15 @@ sensitivity = [
 
 viz = [
     "matplotlib>=3.8.0",
-    "cartopy>=0.22.0",
     "seaborn>=0.13.0",
+    "tqdm>=4.67.1",
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/seapopym-message"
+Homepage = "https://github.com/Ash12H/seapopym-message"
 Documentation = "https://seapopym-message.readthedocs.io"
-Repository = "https://github.com/yourusername/seapopym-message"
-Issues = "https://github.com/yourusername/seapopym-message/issues"
+Repository = "https://github.com/Ash12H/seapopym-message"
+Issues = "https://github.com/Ash12H/seapopym-message/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -121,8 +112,6 @@ exclude = [
     "dist",
     "node_modules",
     "venv",
-    "seapopym/_legacy",
-    "tests/_legacy",
 ]
 
 [tool.ruff.lint]
@@ -190,7 +179,7 @@ known-first-party = ["seapopym"]
 
 [tool.pyright]
 include = ["seapopym", "tests"]
-exclude = ["**/node_modules", "**/__pycache__", "examples", "benchmarks", "seapopym/_legacy", "tests/_legacy"]
+exclude = ["**/node_modules", "**/__pycache__", "examples", "benchmarks"]
 venvPath = "."
 venv = ".venv"
 reportMissingImports = true
@@ -205,7 +194,6 @@ typeCheckingMode = "basic"
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
-norecursedirs = ["_legacy"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -248,4 +236,6 @@ exclude_lines = [
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "vulture>=2.14",
+]
