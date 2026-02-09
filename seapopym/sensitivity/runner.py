@@ -4,9 +4,9 @@ Evaluates the model for a batch of parameter sets simultaneously
 using jax.vmap over the parameter axis, with temporal chunking
 for memory management and point extraction for efficiency.
 
-Memory layout per time chunk:
-    GPU: (batch_size, T_chunk, Y, X) — full spatial grid
-    Accumulated: (batch_size, T_chunk, n_points) — extracted points only
+Memory optimization: extraction happens INSIDE the lax.scan body,
+so only (batch_size, T_chunk, n_points) is accumulated instead of
+the full spatial grids (batch_size, T_chunk, C, Y, X).
 """
 
 from __future__ import annotations
@@ -32,8 +32,9 @@ class SobolRunner:
     """Runs batched simulations with temporal chunking and point extraction.
 
     Uses jax.vmap to parallelize model evaluations across parameter sets,
-    and temporal chunking to control GPU memory usage. At each chunk,
-    only the values at extraction points are kept.
+    and temporal chunking to control GPU memory usage. Point extraction
+    is performed inside the scan body so that lax.scan only accumulates
+    a small (n_points,) vector per timestep instead of full spatial grids.
 
     Args:
         model: Compiled SeapoPym model.
@@ -54,9 +55,9 @@ class SobolRunner:
         self.output_variable = output_variable
         self.chunk_size = chunk_size
 
-        # Pre-compute extraction indices as JAX arrays
-        self._y_indices = jnp.array([p[0] for p in extraction_points])
-        self._x_indices = jnp.array([p[1] for p in extraction_points])
+        # Pre-compute extraction indices as JAX integer arrays
+        self._y_indices = jnp.array([p[0] for p in extraction_points], dtype=jnp.int32)
+        self._x_indices = jnp.array([p[1] for p in extraction_points], dtype=jnp.int32)
 
         # Build step function with params externalized
         self._step_fn = build_step_fn(model, params_as_argument=True)
@@ -106,14 +107,12 @@ class SobolRunner:
             # Slice forcings for this chunk (exact length, no padding)
             forcings_chunk = self.model.forcings.get_chunk(start, end)
 
-            # Run vmapped scan with the exact chunk length
-            state_batch, outputs_batch = self._run_vmapped_scan(
+            # Run vmapped scan — returns extracted points directly
+            state_batch, extracted = self._run_vmapped_scan(
                 state_batch, params_batch, forcings_chunk, chunk_len
             )
 
-            # Extract points from output variable
-            var_output = outputs_batch[self.output_variable]
-            extracted = self._extract_points(var_output)
+            # extracted is already (batch_size, chunk_len, n_points)
             extracted_chunks.append(extracted)
 
         # Concatenate along time axis: (batch_size, T_total, n_points)
@@ -125,8 +124,13 @@ class SobolRunner:
         params_batch: dict[str, Array],
         forcings_chunk: dict[str, Array],
         chunk_len: int,
-    ) -> tuple[dict[str, Array], dict[str, Array]]:
-        """Run vmapped lax.scan over a temporal chunk.
+    ) -> tuple[dict[str, Array], Array]:
+        """Run vmapped lax.scan over a temporal chunk with in-scan extraction.
+
+        Point extraction happens inside the scan body: at each timestep,
+        only the output variable values at extraction points are returned.
+        This prevents lax.scan from accumulating full spatial grids
+        (especially the large production tensor).
 
         Each distinct chunk_len triggers one JIT compilation, cached in
         self._scan_cache. Typically at most 2 entries: chunk_size and remainder.
@@ -138,17 +142,38 @@ class SobolRunner:
             chunk_len: Number of timesteps in this chunk.
 
         Returns:
-            Tuple of (new_state_batch, outputs_batch).
+            Tuple of (new_state_batch, extracted_points).
+            extracted_points has shape (batch_size, chunk_len, n_points).
         """
         if chunk_len not in self._scan_cache:
             step_fn = self._step_fn
             scan_length = chunk_len
+            output_var = self.output_variable
+            y_idx = self._y_indices
+            x_idx = self._x_indices
+            n_spatial_dims = len(self.model.state[output_var].shape)
+
+            def _extract_from_state(var):
+                """Extract points from a state variable (handles 0D/1D/2D)."""
+                if n_spatial_dims == 0:
+                    return var[None]  # scalar → (1,)
+                if n_spatial_dims == 1:
+                    return var[x_idx]  # (X,) → (n_points,)
+                return var[y_idx, x_idx]  # (Y, X) → (n_points,)
 
             def single_run(state, params, forcings):
-                """Run scan for a single parameter set."""
+                """Run scan for a single parameter set with in-scan extraction."""
                 carry = (state, params)
-                (final_state, _), outputs = lax.scan(step_fn, carry, forcings, length=scan_length)
-                return final_state, outputs
+
+                def step_extract(carry, forcings_t):
+                    new_carry, _outputs = step_fn(carry, forcings_t)
+                    extracted = _extract_from_state(new_carry[0][output_var])
+                    return new_carry, extracted
+
+                (final_state, _), extracted = lax.scan(
+                    step_extract, carry, forcings, length=scan_length
+                )
+                return final_state, extracted  # extracted: (chunk, n_points)
 
             def vmapped_scan(state_batch, params_batch, forcings):
                 return jax.vmap(single_run, in_axes=(0, 0, None))(state_batch, params_batch, forcings)
@@ -156,25 +181,3 @@ class SobolRunner:
             self._scan_cache[chunk_len] = jax.jit(vmapped_scan)
 
         return self._scan_cache[chunk_len](state_batch, params_batch, forcings_chunk)
-
-    def _extract_points(self, output: Array) -> Array:
-        """Extract values at specified grid points.
-
-        Args:
-            output: Array with spatial dims, shape (batch_size, T_chunk, ..., Y, X)
-                    or (batch_size, T_chunk) for 0D models.
-
-        Returns:
-            Extracted values, shape (batch_size, T_chunk, n_points).
-        """
-        if output.ndim == 2:
-            # 0D model: no spatial dims, treat single value as one point
-            return output[:, :, None]
-
-        if output.ndim == 3:
-            # (batch, T, X) — 1D model
-            return output[:, :, self._x_indices]
-
-        # (batch, T, Y, X) — 2D model
-        return output[:, :, self._y_indices, self._x_indices]
-

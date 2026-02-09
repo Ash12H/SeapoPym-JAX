@@ -335,11 +335,13 @@ def _integrate_euler(
         New state after integration.
     """
     if backend == "jax":
+        import jax.numpy as jnp
+
         new_state = {}
         for var_name, value in state.items():
             if var_name in tendencies:
                 total_tendency = sum(tendencies[var_name])
-                new_state[var_name] = value + total_tendency * dt
+                new_state[var_name] = jnp.maximum(value + total_tendency * dt, 0.0)
             else:
                 new_state[var_name] = value
         return new_state
@@ -350,7 +352,7 @@ def _integrate_euler(
         for var_name, value in state.items():
             if var_name in tendencies:
                 total_tendency = sum(tendencies[var_name])
-                new_state[var_name] = value + total_tendency * dt
+                new_state[var_name] = np.maximum(value + total_tendency * dt, 0.0)
             else:
                 new_state[var_name] = np.copy(value)
         return new_state

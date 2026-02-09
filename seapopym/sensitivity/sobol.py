@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -150,6 +151,7 @@ class SobolAnalyzer:
         # Process remaining batches
         eval_elapsed = 0.0
         eval_count = 0
+        _mem_logged = False
         for batch_start in range(start_sample, n_total, batch_size):
             batch_end = min(batch_start + batch_size, n_total)
             actual_batch_size = batch_end - batch_start
@@ -195,6 +197,24 @@ class SobolAnalyzer:
 
             eval_elapsed += time.perf_counter() - t_batch_start
             eval_count += actual_batch_size
+
+            # Log GPU memory after first batch (includes JIT compilation peak)
+            if not _mem_logged:
+                _mem_logged = True
+                try:
+                    mem = jax.devices()[0].memory_stats()
+                    if mem:
+                        peak_gb = mem.get("peak_bytes_in_use", 0) / 1e9
+                        curr_gb = mem.get("bytes_in_use", 0) / 1e9
+                        limit_gb = mem.get("bytes_limit", 0) / 1e9
+                        logger.info(
+                            f"GPU memory: {curr_gb:.2f} GiB in use, "
+                            f"{peak_gb:.2f} GiB peak, "
+                            f"{limit_gb:.2f} GiB limit "
+                            f"({peak_gb/limit_gb*100:.0f}% peak utilization)"
+                        )
+                except Exception:
+                    pass
 
             # Save checkpoint
             if checkpoint is not None:
