@@ -34,6 +34,7 @@ from .exceptions import (
     TransposeError,
     UnitError,
 )
+from .forcing import ForcingStore
 from .inference import infer_shapes
 from .model import CANONICAL_DIMS, CompiledModel
 from .preprocessing import prepare_array, preprocess_nan, strip_xarray
@@ -50,6 +51,7 @@ __all__ = [
     "Compiler",
     "compile_model",
     "CompiledModel",
+    "ForcingStore",
     # Constants
     "CANONICAL_DIMS",
     # Inference

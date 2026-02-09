@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-import numpy as np
 
 from seapopym.engine.step import build_step_fn
 
@@ -105,7 +104,7 @@ class SobolRunner:
             logger.debug(f"Processing chunk {chunk_idx + 1}/{len(chunks)} (t={start}-{end})")
 
             # Slice forcings for this chunk (exact length, no padding)
-            forcings_chunk = self._slice_forcings(start, end)
+            forcings_chunk = self.model.forcings.get_chunk(start, end)
 
             # Run vmapped scan with the exact chunk length
             state_batch, outputs_batch = self._run_vmapped_scan(
@@ -179,26 +178,3 @@ class SobolRunner:
         # (batch, T, Y, X) — 2D model
         return output[:, :, self._y_indices, self._x_indices]
 
-    def _slice_forcings(self, start: int, end: int) -> dict[str, Array]:
-        """Slice forcings for a temporal chunk.
-
-        Args:
-            start: Start timestep (inclusive).
-            end: End timestep (exclusive).
-
-        Returns:
-            Dict of forcing arrays for this chunk.
-        """
-        forcings = self.model.forcings
-        n_timesteps = self.model.n_timesteps
-        chunk_len = end - start
-        sliced = {}
-
-        for name, arr in forcings.items():
-            arr_np = np.asarray(arr)
-            if arr_np.ndim > 0 and arr_np.shape[0] == n_timesteps:
-                sliced[name] = jnp.array(arr_np[start:end])
-            else:
-                sliced[name] = jnp.broadcast_to(jnp.array(arr_np), (chunk_len,) + arr_np.shape)
-
-        return sliced
