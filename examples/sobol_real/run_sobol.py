@@ -318,7 +318,18 @@ def main():
     combined.to_csv(RESULTS_PATH)
     logger.info(f"Results saved to {RESULTS_PATH}")
 
-    # 5. Summary
+    # 5. Timing summary
+    tps = result.time_per_sim
+    print(f"\n--- Timing ---")
+    print(f"  Average time per simulation: {tps:.3f} s/sim ({1/tps:.1f} sim/s)")
+    for target_n in [1_000, 10_000, 100_000, 1_000_000]:
+        hours = target_n * tps / 3600
+        if hours < 1:
+            print(f"  Estimated for {target_n:>10,} sims: {hours * 60:.1f} min")
+        else:
+            print(f"  Estimated for {target_n:>10,} sims: {hours:.1f} h")
+
+    # 6. Parameter ranking
     print("\n--- Parameter ranking (mean |ST| across all QoI/points) ---")
     mean_st = result.ST.abs().mean(axis=0).sort_values(ascending=False)
     for param, val in mean_st.items():

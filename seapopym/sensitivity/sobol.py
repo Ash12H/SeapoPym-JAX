@@ -19,6 +19,7 @@ Example:
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -52,6 +53,7 @@ class SobolResult:
         S1_conf: Confidence intervals for S1.
         ST_conf: Confidence intervals for ST.
         n_samples: Base sample size N used.
+        time_per_sim: Average wall-clock time per simulation [seconds].
         problem: SALib problem dict (for reproducibility).
     """
 
@@ -61,6 +63,7 @@ class SobolResult:
     S1_conf: pd.DataFrame
     ST_conf: pd.DataFrame
     n_samples: int
+    time_per_sim: float
     problem: dict = field(repr=False)
 
 
@@ -145,11 +148,14 @@ class SobolAnalyzer:
                 all_qoi[qoi_name].append(checkpoint.extract_qoi_array(existing_df, qoi_name))
 
         # Process remaining batches
+        eval_elapsed = 0.0
+        eval_count = 0
         for batch_start in range(start_sample, n_total, batch_size):
             batch_end = min(batch_start + batch_size, n_total)
             actual_batch_size = batch_end - batch_start
 
             logger.info(f"Evaluating batch {batch_start}-{batch_end} / {n_total}")
+            t_batch_start = time.perf_counter()
 
             # Extract parameter values for this batch
             batch_params_np = param_samples[batch_start:batch_end]
@@ -187,6 +193,9 @@ class SobolAnalyzer:
             for name in qoi_names:
                 all_qoi[name].append(qoi_np[name])
 
+            eval_elapsed += time.perf_counter() - t_batch_start
+            eval_count += actual_batch_size
+
             # Save checkpoint
             if checkpoint is not None:
                 checkpoint.save_batch(
@@ -194,6 +203,13 @@ class SobolAnalyzer:
                     params_values=param_samples[batch_start:batch_end],
                     qoi_values=qoi_np,
                 )
+
+        # Compute average time per simulation
+        time_per_sim = eval_elapsed / eval_count if eval_count > 0 else 0.0
+        logger.info(
+            f"Evaluation done: {eval_count} sims in {eval_elapsed:.1f}s "
+            f"({time_per_sim:.3f} s/sim, {1/time_per_sim:.1f} sim/s)"
+        )
 
         # Phase 3: Compute Sobol indices (CPU)
         logger.info("Computing Sobol indices...")
@@ -205,6 +221,7 @@ class SobolAnalyzer:
             n_samples=n_samples,
             calc_second_order=calc_second_order,
             sobol_analyze=sobol_analyze,
+            time_per_sim=time_per_sim,
         )
 
     def _validate_inputs(
@@ -253,6 +270,7 @@ class SobolAnalyzer:
         n_samples: int,
         calc_second_order: bool,
         sobol_analyze: Any,
+        time_per_sim: float = 0.0,
     ) -> SobolResult:
         """Compute Sobol indices from collected QoI values.
 
@@ -313,5 +331,6 @@ class SobolAnalyzer:
             S1_conf=s1_conf_df,
             ST_conf=st_conf_df,
             n_samples=n_samples,
+            time_per_sim=time_per_sim,
             problem=problem,
         )
