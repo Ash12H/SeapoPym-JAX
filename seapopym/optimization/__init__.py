@@ -19,6 +19,18 @@ from __future__ import annotations
 from seapopym.optimization.gradient import GradientRunner, SparseObservations
 from seapopym.optimization.loss import mse, nrmse, rmse
 from seapopym.optimization.optimizer import Optimizer, OptimizeResult
+from seapopym.optimization.likelihood import (
+    GaussianLikelihood,
+    make_log_posterior,
+)
+from seapopym.optimization.prior import (
+    HalfNormal,
+    LogNormal,
+    Normal,
+    PriorSet,
+    TruncatedNormal,
+    Uniform,
+)
 
 __all__ = [
     "rmse",
@@ -28,6 +40,14 @@ __all__ = [
     "OptimizeResult",
     "GradientRunner",
     "SparseObservations",
+    "Uniform",
+    "Normal",
+    "LogNormal",
+    "HalfNormal",
+    "TruncatedNormal",
+    "PriorSet",
+    "GaussianLikelihood",
+    "make_log_posterior",
 ]
 
 # Optional imports (require evosax)
