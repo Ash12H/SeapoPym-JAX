@@ -239,3 +239,47 @@ class PriorSet:
         for (name, prior), subkey in zip(self.priors.items(), keys, strict=True):
             result[name] = prior.sample(subkey)
         return result
+
+    def to_unit(self, params: Params) -> Params:
+        """Map physical parameters to unit space [0, 1] using prior bounds.
+
+        Args:
+            params: Parameter values in physical space.
+
+        Returns:
+            Parameter values normalized to [0, 1].
+        """
+        result = {}
+        for name, prior in self.priors.items():
+            if name in params:
+                low, high = prior.bounds
+                result[name] = (params[name] - low) / (high - low)
+        return result
+
+    def from_unit(self, params_unit: Params) -> Params:
+        """Map unit-space [0, 1] parameters back to physical space.
+
+        Args:
+            params_unit: Parameter values in [0, 1].
+
+        Returns:
+            Parameter values in physical space.
+        """
+        result = {}
+        for name, prior in self.priors.items():
+            if name in params_unit:
+                low, high = prior.bounds
+                result[name] = params_unit[name] * (high - low) + low
+        return result
+
+    def log_det_jacobian(self) -> Array:
+        """Log-determinant of the Jacobian for the unit -> physical transform.
+
+        Returns:
+            Scalar: sum of log(high - low) for all priors.
+        """
+        total = 0.0
+        for prior in self.priors.values():
+            low, high = prior.bounds
+            total += float(jnp.log(high - low))
+        return jnp.array(total)

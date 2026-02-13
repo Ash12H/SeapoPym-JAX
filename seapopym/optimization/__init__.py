@@ -22,6 +22,7 @@ from seapopym.optimization.optimizer import Optimizer, OptimizeResult
 from seapopym.optimization.likelihood import (
     GaussianLikelihood,
     make_log_posterior,
+    reparameterize_log_posterior,
 )
 from seapopym.optimization.prior import (
     HalfNormal,
@@ -48,6 +49,7 @@ __all__ = [
     "PriorSet",
     "GaussianLikelihood",
     "make_log_posterior",
+    "reparameterize_log_posterior",
 ]
 
 # Optional imports (require evosax)

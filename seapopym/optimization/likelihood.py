@@ -137,3 +137,38 @@ def make_log_posterior(
             return -loss_fn(params) + prior_set.log_prob(params)
 
     return log_posterior
+
+
+def reparameterize_log_posterior(
+    log_posterior_fn: Callable[[Params], Array],
+    prior_set: PriorSet,
+) -> Callable[[Params], Array]:
+    """Wrap a log-posterior to operate in unit space [0, 1].
+
+    NUTS works best when all parameters have similar scales. This function
+    reparameterizes the log-posterior so that the sampler works in [0, 1]^d
+    (normalized via prior bounds), while the model receives physical values.
+
+    The Jacobian correction (log|det J|) is included so that the sampling
+    distribution is correct.
+
+    Args:
+        log_posterior_fn: Log-posterior in physical parameter space.
+        prior_set: PriorSet providing bounds for normalization.
+
+    Returns:
+        Log-posterior in unit space, suitable for run_nuts().
+
+    Example:
+        >>> log_post_unit = reparameterize_log_posterior(log_post, prior_set)
+        >>> init_unit = prior_set.to_unit(initial_params)
+        >>> result = run_nuts(log_post_unit, init_unit, ...)
+        >>> samples_phys = prior_set.from_unit(result.samples)
+    """
+    log_det_jac = prior_set.log_det_jacobian()
+
+    def log_posterior_unit(params_unit: Params) -> Array:
+        params_phys = prior_set.from_unit(params_unit)
+        return log_posterior_fn(params_phys) + log_det_jac
+
+    return log_posterior_unit
