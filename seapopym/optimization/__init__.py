@@ -60,9 +60,20 @@ try:
 except (ImportError, KeyError):
     _HAS_EVOSAX = False
 
+# Optional imports (require blackjax)
+try:
+    from seapopym.optimization.nuts import NUTSResult, run_nuts
+
+    __all__ += ["NUTSResult", "run_nuts"]
+    _HAS_BLACKJAX = True
+except ImportError:
+    _HAS_BLACKJAX = False
+
 
 def __getattr__(name: str):
     """Provide helpful error message for optional dependencies."""
     if name in ("EvolutionaryOptimizer", "HybridOptimizer") and not _HAS_EVOSAX:
         raise ImportError(f"{name} requires the evosax package. Install it with: pip install seapopym[optimization]")
+    if name in ("NUTSResult", "run_nuts") and not _HAS_BLACKJAX:
+        raise ImportError(f"{name} requires the blackjax package. Install it with: pip install seapopym[optimization]")
     raise AttributeError(f"module 'seapopym.optimization' has no attribute '{name}'")

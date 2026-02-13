@@ -62,6 +62,7 @@ gpu = [
 optimization = [
     "evosax>=0.1.0",
     "flax>=0.12.3",
+    "blackjax>=1.2.0",
 ]
 
 sensitivity = [
