@@ -54,8 +54,9 @@ __all__ = [
 try:
     from seapopym.optimization.evolutionary import EvolutionaryOptimizer
     from seapopym.optimization.hybrid import HybridOptimizer
+    from seapopym.optimization.ipop import IPOPResult, run_ipop_cmaes
 
-    __all__ += ["EvolutionaryOptimizer", "HybridOptimizer"]
+    __all__ += ["EvolutionaryOptimizer", "HybridOptimizer", "IPOPResult", "run_ipop_cmaes"]
     _HAS_EVOSAX = True
 except (ImportError, KeyError):
     _HAS_EVOSAX = False
@@ -72,7 +73,7 @@ except ImportError:
 
 def __getattr__(name: str):
     """Provide helpful error message for optional dependencies."""
-    if name in ("EvolutionaryOptimizer", "HybridOptimizer") and not _HAS_EVOSAX:
+    if name in ("EvolutionaryOptimizer", "HybridOptimizer", "IPOPResult", "run_ipop_cmaes") and not _HAS_EVOSAX:
         raise ImportError(f"{name} requires the evosax package. Install it with: pip install seapopym[optimization]")
     if name in ("NUTSResult", "run_nuts") and not _HAS_BLACKJAX:
         raise ImportError(f"{name} requires the blackjax package. Install it with: pip install seapopym[optimization]")
