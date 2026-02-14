@@ -17,9 +17,16 @@ and support automatic differentiation via JAX.
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 
 from seapopym.blueprint import functional
+
+# Sigmoid steepness for smooth recruitment transition.
+# Transition from ~1% to ~99% over ±1 day (DVM timescale).
+# k = ln(99) / (1 day in seconds) ≈ 5.32e-5 s⁻¹
+_RECRUITMENT_TRANSITION_DAYS = 1.0
+_K_SIGMOID = float(jnp.log(99.0)) / (_RECRUITMENT_TRANSITION_DAYS * 86400.0)
 
 # =============================================================================
 # ENVIRONMENT FUNCTIONS
@@ -313,8 +320,9 @@ def aging_flow(
 
     Logic:
     - Calculates flow based on cohort duration.
-    - If a cohort is recruited (age >= rec_age), it does NOT flow to C+1
-      (it goes to Biomass instead).
+    - A smooth sigmoid determines the recruitment fraction per cohort
+      (0 = not recruited, 1 = fully recruited). The non-recruited fraction
+      flows to the next cohort (aging).
     - The last cohort does NOT flow out (accumulation/plus group).
 
     Args:
@@ -336,16 +344,17 @@ def aging_flow(
     # Base Outflow
     base_outflow = production * aging_coef
 
-    # 1. Recruitment Filter
-    # If recruited, flow is diverted to biomass, so it's 0 for aging.
-    is_recruited = cohort_ages >= rec_age
-    aging_outflow = jnp.where(is_recruited, 0.0, base_outflow)
+    # Smooth recruitment fraction: 0 (young) -> 1 (old enough)
+    # Sigmoid with half-saturation at rec_age, transition over ±1 day
+    recruit_fraction = jax.nn.sigmoid(_K_SIGMOID * (cohort_ages - rec_age))
 
-    # 2. Last Cohort Filter (Accumulation)
-    # Prevent outflow from the last cohort
+    # Aging gets the non-recruited fraction
+    aging_outflow = (1.0 - recruit_fraction) * base_outflow
+
+    # Last Cohort: no outflow (plus group)
     aging_outflow = aging_outflow.at[-1].set(0.0)
 
-    # 3. Balance (Loss + Gain from prev)
+    # Balance (Loss + Gain from prev)
     loss = -aging_outflow
 
     # Gain for cohort i comes from outflow of i-1
@@ -381,6 +390,9 @@ def recruitment_flow(
     - cohort_ages: (C,)
     - rec_age: scalar (for each spatial point)
 
+    Uses a smooth sigmoid to determine the recruited fraction per cohort,
+    ensuring differentiability w.r.t. rec_age (and thus tau_r_0, gamma_tau_r).
+
     Args:
         production: Current production [g/m^2] with shape (C,).
         cohort_ages: Age of each cohort [s] with shape (C,).
@@ -400,9 +412,9 @@ def recruitment_flow(
     aging_coef = 1.0 / d_tau
     base_outflow = production * aging_coef
 
-    # Filter: Keep ONLY recruited fluxes
-    is_recruited = cohort_ages >= rec_age
-    flux_to_biomass = jnp.where(is_recruited, base_outflow, 0.0)
+    # Smooth recruitment fraction
+    recruit_fraction = jax.nn.sigmoid(_K_SIGMOID * (cohort_ages - rec_age))
+    flux_to_biomass = recruit_fraction * base_outflow
 
     # 1. Loss from Production (C,)
     prod_loss = -flux_to_biomass
