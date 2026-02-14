@@ -57,7 +57,7 @@ jax.config.update("jax_default_device", jax.devices("cpu")[0])
 # =============================================================================
 
 # NUTS
-N_WARMUP = 500  # Warmup steps (step size + mass matrix adaptation)
+N_WARMUP = 2000  # Warmup steps (step size + mass matrix adaptation)
 N_SAMPLES = 200  # Posterior samples to collect
 SEED = 0
 INIT_OFFSET = 0.2  # Fractional offset from true params (0 = exact, 0.2 = +20%)
@@ -351,6 +351,7 @@ if __name__ == "__main__":
         n_warmup=N_WARMUP,
         n_samples=N_SAMPLES,
         seed=SEED,
+        target_acceptance_rate=0.95,
     )
 
     # Convert samples back to physical space
