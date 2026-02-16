@@ -48,11 +48,11 @@ CHUNK_SIZE = 500
 
 # Extraction points (Y, X indices within 20x20 grid)
 EXTRACTION_POINTS = [
-    (9, 9),    # Biscay center (~45N, 4W)
-    (4, 9),    # South (~40N, 4W)
+    (10, 10),  # Biscay center (~45N, 3W)
+    (2, 13),   # South-west (~37N, 0E) — shifted to ocean
     (14, 9),   # North (~50N, 4W)
-    (9, 4),    # West (~45N, 9W)
-    (9, 14),   # East (~45N, 1E)
+    (10, 5),   # West (~45N, 8W)
+    (7, 17),   # East (~42N, 4E) — shifted to ocean
 ]
 
 PARAM_BOUNDS = {

@@ -44,11 +44,11 @@ BATCH_SIZE = 2**14 * 2
 CHUNK_SIZE = 500
 
 EXTRACTION_POINTS = [
-    (9, 9),    # Canary center (~30N, 347E)
-    (4, 9),    # South (~25N, 347E)
-    (14, 9),   # North (~35N, 347E)
-    (9, 4),    # West (~30N, 342E)
-    (9, 14),   # East (~30N, 352E)
+    (10, 10),  # Canary center (~30N, 348E)
+    (6, 9),    # South (~26N, 347E) — shifted to ocean
+    (15, 10),  # North (~35N, 348E) — shifted to ocean
+    (10, 5),   # West (~30N, 343E)
+    (12, 13),  # East (~32N, 351E) — shifted to ocean
 ]
 
 PARAM_BOUNDS = {

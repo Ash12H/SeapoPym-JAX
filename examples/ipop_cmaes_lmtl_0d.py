@@ -27,7 +27,8 @@ from seapopym.compiler import compile_model
 from seapopym.engine.step import build_step_fn
 from seapopym.optimization.ipop import run_ipop_cmaes
 
-jax.config.update("jax_default_device", jax.devices("cpu")[0])
+# Use GPU if available, fall back to CPU
+print(f"JAX devices: {jax.devices()}")
 
 # =============================================================================
 # CONFIGURATION — modify these to tune the experiment
@@ -48,7 +49,7 @@ SEED = 42
 
 # Simulation
 SPINUP_YEARS = 1  # Stabilize the system before optimization
-OPT_YEARS = 2  # Period on which observations are sampled
+OPT_YEARS = 1  # Period on which observations are sampled
 DT = "1d"
 
 # Twin experiment

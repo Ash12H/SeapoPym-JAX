@@ -33,12 +33,18 @@ class IPOPResult:
     n_restarts: int = 0
 
 
-def _params_distance(a: Params, b: Params) -> float:
-    """Euclidean distance between two parameter dicts in normalized space."""
+def _params_distance(a: Params, b: Params, bounds: dict[str, tuple[float, float]]) -> float:
+    """Euclidean distance between two parameter dicts, normalized by bounds."""
     dist_sq = 0.0
     for key in a:
         if key in b:
-            diff = jnp.atleast_1d(a[key]) - jnp.atleast_1d(b[key])
+            va = jnp.atleast_1d(a[key])
+            vb = jnp.atleast_1d(b[key])
+            if key in bounds:
+                low, high = bounds[key]
+                va = (va - low) / (high - low)
+                vb = (vb - low) / (high - low)
+            diff = va - vb
             dist_sq += float(jnp.sum(diff**2))
     return float(jnp.sqrt(dist_sq))
 
@@ -47,10 +53,11 @@ def _is_new_mode(
     candidate: OptimizeResult,
     existing_modes: list[OptimizeResult],
     distance_threshold: float,
+    bounds: dict[str, tuple[float, float]],
 ) -> bool:
-    """Check if candidate is far enough from all existing modes."""
+    """Check if candidate is far enough from all existing modes (in normalized space)."""
     return all(
-        _params_distance(candidate.params, mode.params) >= distance_threshold for mode in existing_modes
+        _params_distance(candidate.params, mode.params, bounds) >= distance_threshold for mode in existing_modes
     )
 
 
@@ -115,16 +122,24 @@ def run_ipop_cmaes(
             bounds=bounds,
             seed=seed + i,
         )
-        result = optimizer.run(loss_fn, start_params, n_generations=n_generations, verbose=False)
+        if verbose:
+            import time
+
+            print(f"\n--- Restart {i + 1}/{n_restarts}: popsize={popsize}, {n_generations} generations ---")
+            t0 = time.time()
+
+        result = optimizer.run(loss_fn, start_params, n_generations=n_generations, verbose=verbose)
         all_results.append(result)
 
-        if _is_new_mode(result, modes, distance_threshold):
+        if _is_new_mode(result, modes, distance_threshold, bounds):
             modes.append(result)
 
         if verbose:
+            elapsed = time.time() - t0
+            actual_gens = result.n_iterations
             print(
-                f"Restart {i + 1}/{n_restarts}: popsize={popsize}, "
-                f"loss={result.loss:.6e}, modes={len(modes)}"
+                f"  -> loss={result.loss:.6e}, {actual_gens} gens, modes={len(modes)}, "
+                f"elapsed={elapsed:.1f}s ({elapsed / max(actual_gens, 1):.3f} s/gen)"
             )
 
     # Sort modes by loss (best first)
