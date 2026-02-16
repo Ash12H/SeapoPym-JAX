@@ -10,6 +10,7 @@ Steps:
 4. Visualize modes found, convergence, and parameter recovery
 """
 
+import math
 import time
 
 import jax
@@ -32,10 +33,16 @@ jax.config.update("jax_default_device", jax.devices("cpu")[0])
 # CONFIGURATION — modify these to tune the experiment
 # =============================================================================
 
-# IPOP-CMA-ES
-N_RESTARTS = 3
-INITIAL_POPSIZE = 64
-N_GENERATIONS = 100
+# Number of optimized parameters (used for Hansen defaults below)
+N_PARAMS = 5
+
+# IPOP-CMA-ES — Hansen defaults (pycma, Auger & Hansen 2005)
+#   popsize:  4 + floor(3 * ln(n))
+#   maxiter:  100 + 150 * (n+3)^2 / sqrt(popsize)
+#   restarts: 9 (Auger & Hansen 2005 benchmark)
+INITIAL_POPSIZE = 4 + int(3 * math.log(N_PARAMS))  # 8 for n=5
+N_GENERATIONS = int(100 + 150 * (N_PARAMS + 3) ** 2 / math.sqrt(INITIAL_POPSIZE))
+N_RESTARTS = 5
 DISTANCE_THRESHOLD = 0.1
 SEED = 42
 

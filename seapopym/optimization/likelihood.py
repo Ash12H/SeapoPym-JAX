@@ -165,10 +165,18 @@ def reparameterize_log_posterior(
         >>> result = run_nuts(log_post_unit, init_unit, ...)
         >>> samples_phys = prior_set.from_unit(result.samples)
     """
+    # Precompute bounds eagerly (outside JIT) to avoid ConcretizationTypeError
+    # when priors like HalfNormal compute bounds via jstats.norm.ppf + float().
+    bounds = prior_set._bounds_arrays()
     log_det_jac = prior_set.log_det_jacobian()
 
     def log_posterior_unit(params_unit: Params) -> Array:
-        params_phys = prior_set.from_unit(params_unit)
+        # Inline from_unit using precomputed bounds (JIT-safe)
+        params_phys = {}
+        for name in bounds:
+            if name in params_unit:
+                low, high = bounds[name]
+                params_phys[name] = params_unit[name] * (high - low) + low
         return log_posterior_fn(params_phys) + log_det_jac
 
     return log_posterior_unit

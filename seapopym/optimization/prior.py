@@ -240,6 +240,10 @@ class PriorSet:
             result[name] = prior.sample(subkey)
         return result
 
+    def _bounds_arrays(self) -> dict[str, tuple[float, float]]:
+        """Eagerly evaluate bounds (safe outside JIT)."""
+        return {name: prior.bounds for name, prior in self.priors.items()}
+
     def to_unit(self, params: Params) -> Params:
         """Map physical parameters to unit space [0, 1] using prior bounds.
 
@@ -249,10 +253,11 @@ class PriorSet:
         Returns:
             Parameter values normalized to [0, 1].
         """
+        bounds = self._bounds_arrays()
         result = {}
-        for name, prior in self.priors.items():
+        for name in self.priors:
             if name in params:
-                low, high = prior.bounds
+                low, high = bounds[name]
                 result[name] = (params[name] - low) / (high - low)
         return result
 
@@ -265,10 +270,11 @@ class PriorSet:
         Returns:
             Parameter values in physical space.
         """
+        bounds = self._bounds_arrays()
         result = {}
-        for name, prior in self.priors.items():
+        for name in self.priors:
             if name in params_unit:
-                low, high = prior.bounds
+                low, high = bounds[name]
                 result[name] = params_unit[name] * (high - low) + low
         return result
 
@@ -278,8 +284,8 @@ class PriorSet:
         Returns:
             Scalar: sum of log(high - low) for all priors.
         """
+        bounds = self._bounds_arrays()
         total = 0.0
-        for prior in self.priors.values():
-            low, high = prior.bounds
+        for low, high in bounds.values():
             total += float(jnp.log(high - low))
         return jnp.array(total)
