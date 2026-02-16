@@ -1,17 +1,12 @@
 """CMA-ES → NUTS Pipeline on LMTL 0D Model (Twin Experiment).
 
 Two-stage Bayesian parameter estimation:
-1. IPOP-CMA-ES: gradient-free global search to find a good point estimate
-   for ALL parameters, especially tau_r_0/gamma_tau_r (weak gradient).
-2. NUTS: Bayesian posterior sampling for the gradient-rich parameters
-   (lambda_0, gamma_lambda, efficiency), initialized at the CMA-ES optimum.
-   tau_r_0/gamma_tau_r are fixed at CMA-ES values.
+1. IPOP-CMA-ES: gradient-free global search to find mode(s).
+2. NUTS: one Markov chain per CMA-ES mode, sampling all 5 parameters.
+   Initialized at each mode's optimum.
 
-Why a pipeline?
-    The sigmoid recruitment has ~1000x weaker gradient sensitivity for
-    tau_r_0/gamma_tau_r vs the other parameters (daily cohorts, ±1 day
-    transition). NUTS alone produces wide, unreliable posteriors for these.
-    CMA-ES handles them well (gradient-free), and NUTS refines the rest.
+This allows comparing posteriors from different starting points to detect
+multimodality and assess convergence across chains.
 """
 
 import time
@@ -32,8 +27,9 @@ from seapopym.optimization.likelihood import make_log_posterior, reparameterize_
 from seapopym.optimization.nuts import run_nuts
 from seapopym.optimization.prior import HalfNormal, PriorSet, Uniform
 
-# Use GPU if available, fall back to CPU
-print(f"JAX devices: {jax.devices()}")
+# Force CPU for 0D model (GPU overhead dominates for tiny workloads)
+jax.config.update("jax_default_device", jax.devices("cpu")[0])
+print(f"JAX device: {jax.devices('cpu')[0]}")
 
 # =============================================================================
 # CONFIGURATION
@@ -47,15 +43,10 @@ N_GENERATIONS = int(100 + 150 * (N_PARAMS + 3) ** 2 / np.sqrt(INITIAL_POPSIZE))
 DISTANCE_THRESHOLD = 0.1
 CMAES_SEED = 42
 
-# --- Stage 2: NUTS ---
-N_WARMUP = 100
-N_SAMPLES = 200
+# --- Stage 2: NUTS (one chain per CMA-ES mode) ---
+N_WARMUP = 200
+N_SAMPLES = 500
 NUTS_SEED = 0
-
-# Parameters estimated by NUTS (gradient-rich)
-NUTS_PARAMS = ["lambda_0", "gamma_lambda", "efficiency"]
-# Parameters fixed from CMA-ES (weak gradient)
-CMAES_ONLY_PARAMS = ["tau_r_0", "gamma_tau_r"]
 
 # --- Simulation ---
 SPINUP_YEARS = 1
@@ -78,22 +69,27 @@ TRUE_PARAMS = {
 
 ALL_OPT_PARAMS = ["lambda_0", "gamma_lambda", "tau_r_0", "gamma_tau_r", "efficiency"]
 
+# All parameters estimated by NUTS, initialized from CMA-ES modes
+NUTS_PARAMS = ALL_OPT_PARAMS
+
 # Bounds (shared by CMA-ES and NUTS priors)
 BOUNDS = {
-    "lambda_0": (1e-10, 5 * TRUE_PARAMS["lambda_0"]),
-    "gamma_lambda": (0.01, 5 * TRUE_PARAMS["gamma_lambda"]),
-    "tau_r_0": (0.1 * TRUE_PARAMS["tau_r_0"], 5 * TRUE_PARAMS["tau_r_0"]),
-    "gamma_tau_r": (0.01, 5 * TRUE_PARAMS["gamma_tau_r"]),
-    "efficiency": (0.01, 5 * TRUE_PARAMS["efficiency"]),
+    "lambda_0": (1e-10, 2 * TRUE_PARAMS["lambda_0"]),
+    "gamma_lambda": (0.01, 2 * TRUE_PARAMS["gamma_lambda"]),
+    "tau_r_0": (0.1 * TRUE_PARAMS["tau_r_0"], 2 * TRUE_PARAMS["tau_r_0"]),
+    "gamma_tau_r": (0.01, 2 * TRUE_PARAMS["gamma_tau_r"]),
+    "efficiency": (0.01, 2 * TRUE_PARAMS["efficiency"]),
 }
 
-# NUTS priors
+# NUTS priors — all 5 parameters
 # HalfNormal for parameters inside exponentials (concentrate mass near small values)
-# scale chosen so that ~95% of mass is below 2× the true value
+# Uniform for bounded parameters without strong prior information
 NUTS_PRIORS = PriorSet(
     {
         "lambda_0": HalfNormal(scale=3 * TRUE_PARAMS["lambda_0"]),
         "gamma_lambda": HalfNormal(scale=0.3),
+        "tau_r_0": Uniform(*BOUNDS["tau_r_0"]),
+        "gamma_tau_r": Uniform(*BOUNDS["gamma_tau_r"]),
         "efficiency": Uniform(*BOUNDS["efficiency"]),
     }
 )
@@ -296,7 +292,6 @@ if __name__ == "__main__":
     print(f"  Stage 1 (CMA-ES): {N_RESTARTS} restarts, {N_GENERATIONS} gen")
     print(f"  Stage 2 (NUTS):   {N_WARMUP} warmup + {N_SAMPLES} samples")
     print(f"  NUTS params:      {NUTS_PARAMS}")
-    print(f"  Fixed from CMA-ES: {CMAES_ONLY_PARAMS}")
     print("=" * 60)
 
     # ----- Generate observations -----
@@ -357,318 +352,276 @@ if __name__ == "__main__":
         print(f"  {p:<14} = {float(best_cmaes.params[p]):>12.4g}  (true: {TRUE_PARAMS[p]:>12.4g}, ratio: {ratio:.4f})")
 
     # =====================================================================
-    # STAGE 2: NUTS (gradient-rich parameters only)
+    # STAGE 2: NUTS (one chain per CMA-ES mode, all 5 parameters)
     # =====================================================================
     print("\n" + "=" * 60)
     print("STAGE 2: NUTS")
+    print(f"  {len(cmaes_result.modes)} chain(s), {N_WARMUP} warmup + {N_SAMPLES} samples each")
+    print(f"  Parameters: {NUTS_PARAMS}")
     print("=" * 60)
 
-    # Fix tau_r_0 and gamma_tau_r at CMA-ES values
-    fixed_from_cmaes = {k: best_cmaes.params[k] for k in CMAES_ONLY_PARAMS}
-    print("Fixed from CMA-ES:")
-    for k, v in fixed_from_cmaes.items():
-        print(f"  {k} = {float(v):.4g}")
-
-    # Build loss function that only takes NUTS params
-    def nuts_loss_fn(nuts_params: dict) -> jnp.ndarray:
-        full_params = {**nuts_params, **fixed_from_cmaes}
-        return loss_fn(full_params)
-
-    # Log-posterior in unit space
-    log_posterior = make_log_posterior(nuts_loss_fn, NUTS_PRIORS)
+    # Log-posterior in unit space (shared across chains)
+    log_posterior = make_log_posterior(loss_fn, NUTS_PRIORS)
     log_posterior_unit = reparameterize_log_posterior(log_posterior, NUTS_PRIORS)
 
-    # Initialize NUTS at CMA-ES optimum (in unit space)
-    nuts_init_phys = {k: best_cmaes.params[k] for k in NUTS_PARAMS}
-    nuts_init_unit = NUTS_PRIORS.to_unit(nuts_init_phys)
+    # Run one chain per CMA-ES mode
+    chain_results: list = []
+    nuts_elapsed_total = 0.0
 
-    print(f"\nNUTS initial (from CMA-ES):")
-    for p in NUTS_PARAMS:
-        print(f"  {p:<14} = {float(nuts_init_phys[p]):>12.4g} [unit: {float(nuts_init_unit[p]):.4f}]")
+    for chain_idx, mode in enumerate(cmaes_result.modes):
+        print(f"\n--- Chain {chain_idx + 1}/{len(cmaes_result.modes)} "
+              f"(from CMA-ES mode #{chain_idx + 1}, loss={mode.loss:.4e}) ---")
 
-    print(f"\nRunning NUTS ({N_WARMUP} warmup + {N_SAMPLES} samples)...")
-    t0 = time.time()
+        # Initialize at this mode's optimum (in unit space)
+        init_phys = {k: mode.params[k] for k in NUTS_PARAMS}
+        init_unit = NUTS_PRIORS.to_unit(init_phys)
 
-    nuts_result = run_nuts(
-        log_posterior_fn=log_posterior_unit,
-        initial_params=nuts_init_unit,
-        n_warmup=N_WARMUP,
-        n_samples=N_SAMPLES,
-        seed=NUTS_SEED,
-        target_acceptance_rate=0.85,
-    )
+        for p in NUTS_PARAMS:
+            print(f"  {p:<14} = {float(init_phys[p]):>12.4g} [unit: {float(init_unit[p]):.4f}]")
 
-    # Convert back to physical space
-    nuts_result.samples = NUTS_PRIORS.from_unit(nuts_result.samples)
+        t0 = time.time()
+        result = run_nuts(
+            log_posterior_fn=log_posterior_unit,
+            initial_params=init_unit,
+            n_warmup=N_WARMUP,
+            n_samples=N_SAMPLES,
+            seed=NUTS_SEED + chain_idx,
+            target_acceptance_rate=0.85,
+        )
+        # Convert back to physical space
+        result.samples = NUTS_PRIORS.from_unit(result.samples)
+        elapsed = time.time() - t0
+        nuts_elapsed_total += elapsed
 
-    nuts_elapsed = time.time() - t0
-    print(f"Completed in {nuts_elapsed:.1f}s")
-    print(f"  Acceptance rate: {nuts_result.acceptance_rate:.2%}")
-    print(f"  Divergences: {int(jnp.sum(nuts_result.divergences))} / {N_SAMPLES}")
+        n_div = int(jnp.sum(result.divergences))
+        print(f"  Completed in {elapsed:.1f}s — "
+              f"accept={result.acceptance_rate:.2%}, divergences={n_div}/{N_SAMPLES}")
+
+        chain_results.append(result)
 
     # =====================================================================
     # RESULTS
     # =====================================================================
     print("\n" + "=" * 60)
-    print("COMBINED RESULTS")
+    print("RESULTS (per chain)")
     print("=" * 60)
 
-    header = f"{'Param':<14} {'True':>12} {'Estimate':>12} {'Std':>12} {'Source':>10}"
-    print(header)
-    print("-" * len(header))
-
-    for p in ALL_OPT_PARAMS:
-        true_val = TRUE_PARAMS[p]
-        if p in NUTS_PARAMS:
-            samples = nuts_result.samples[p]
+    for chain_idx, result in enumerate(chain_results):
+        print(f"\n--- Chain {chain_idx + 1} ---")
+        header = f"  {'Param':<14} {'True':>12} {'Mean':>12} {'Std':>12}"
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for p in NUTS_PARAMS:
+            true_val = TRUE_PARAMS[p]
+            samples = result.samples[p]
             mean = float(jnp.mean(samples))
             std = float(jnp.std(samples))
-            source = "NUTS"
-        else:
-            mean = float(best_cmaes.params[p])
-            std = 0.0
-            source = "CMA-ES"
-        print(f"{p:<14} {true_val:>12.4g} {mean:>12.4g} {std:>12.4g} {source:>10}")
+            print(f"  {p:<14} {true_val:>12.4g} {mean:>12.4g} {std:>12.4g}")
 
     # =====================================================================
     # VISUALIZATION
     # =====================================================================
-    n_nuts = len(NUTS_PARAMS)
-    fig, axes = plt.subplots(n_nuts + 1, 2, figsize=(14, 4 * (n_nuts + 1)))
+    n_chains = len(chain_results)
+    n_params = len(NUTS_PARAMS)
+    chain_colors = plt.cm.tab10(np.linspace(0, 1, max(n_chains, 1)))
 
-    # --- Top row: Biomass comparison ---
+    fig, axes = plt.subplots(n_params + 1, 2, figsize=(14, 3 * (n_params + 1)))
+
+    # --- Top row left: Biomass comparison ---
     ax_bio = axes[0, 0]
     dt_seconds = _model.dt
     time_days = np.arange(n_opt_steps) * dt_seconds / 86400.0
 
     ax_bio.plot(time_days, np.array(true_biomass), "k-", linewidth=2, label="True", alpha=0.7)
     ax_bio.scatter(
-        obs_local_indices * dt_seconds / 86400.0,
-        np.array(observations),
-        c="red",
-        s=20,
-        zorder=5,
-        label="Observations",
+        obs_local_indices * dt_seconds / 86400.0, np.array(observations),
+        c="red", s=20, zorder=5, label="Observations",
     )
-
-    # CMA-ES prediction
     cmaes_bio = run_simulation(best_cmaes.params)[_spinup_steps:]
     ax_bio.plot(time_days, np.array(cmaes_bio), "--", color="tab:orange", linewidth=1.5, label="CMA-ES best")
 
-    # NUTS posterior mean prediction
-    nuts_mean_params = {k: jnp.mean(nuts_result.samples[k]) for k in NUTS_PARAMS}
-    combined_mean = {**nuts_mean_params, **fixed_from_cmaes}
-    nuts_bio = run_simulation(combined_mean)[_spinup_steps:]
-    ax_bio.plot(time_days, np.array(nuts_bio), "--", color="tab:green", linewidth=1.5, label="NUTS mean")
+    for ci, result in enumerate(chain_results):
+        mean_params = {k: jnp.mean(result.samples[k]) for k in NUTS_PARAMS}
+        bio = run_simulation(mean_params)[_spinup_steps:]
+        ax_bio.plot(time_days, np.array(bio), "--", color=chain_colors[ci],
+                    linewidth=1.5, label=f"Chain {ci + 1} mean")
 
     ax_bio.set_xlabel("Day")
     ax_bio.set_ylabel("Biomass (g/m²)")
-    ax_bio.set_title("Biomass: True vs CMA-ES vs NUTS")
-    ax_bio.legend(fontsize=8)
+    ax_bio.set_title("Biomass: True vs CMA-ES vs NUTS chains")
+    ax_bio.legend(fontsize=7)
     ax_bio.grid(True, alpha=0.3)
 
     # --- Top row right: Parameter recovery bar chart ---
     ax_bar = axes[0, 1]
-    x_pos = np.arange(len(ALL_OPT_PARAMS))
-    true_vals = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS])
+    x_pos = np.arange(n_params)
+    bar_w = 0.8 / (n_chains + 1)
 
-    cmaes_ratios = np.array([float(best_cmaes.params[p]) / TRUE_PARAMS[p] for p in ALL_OPT_PARAMS])
-    combined_ratios = []
-    for p in ALL_OPT_PARAMS:
-        if p in NUTS_PARAMS:
-            combined_ratios.append(float(jnp.mean(nuts_result.samples[p])) / TRUE_PARAMS[p])
-        else:
-            combined_ratios.append(float(best_cmaes.params[p]) / TRUE_PARAMS[p])
-    combined_ratios = np.array(combined_ratios)
+    # CMA-ES best
+    cmaes_ratios = np.array([float(best_cmaes.params[p]) / TRUE_PARAMS[p] for p in NUTS_PARAMS])
+    ax_bar.bar(x_pos - 0.4 + bar_w / 2, cmaes_ratios, bar_w,
+               label="CMA-ES", color="tab:orange", alpha=0.7)
 
-    bar_w = 0.35
-    ax_bar.bar(x_pos - bar_w / 2, cmaes_ratios, bar_w, label="CMA-ES", color="tab:orange", alpha=0.7)
-    ax_bar.bar(x_pos + bar_w / 2, combined_ratios, bar_w, label="Pipeline", color="tab:green", alpha=0.7)
+    # Each chain
+    for ci, result in enumerate(chain_results):
+        ratios = np.array([float(jnp.mean(result.samples[p])) / TRUE_PARAMS[p] for p in NUTS_PARAMS])
+        ax_bar.bar(x_pos - 0.4 + (ci + 1.5) * bar_w, ratios, bar_w,
+                   label=f"Chain {ci + 1}", color=chain_colors[ci], alpha=0.7)
+
     ax_bar.axhline(y=1, color="k", linestyle="--", alpha=0.5)
     ax_bar.set_xticks(x_pos)
-    ax_bar.set_xticklabels(ALL_OPT_PARAMS, rotation=30, ha="right", fontsize=9)
+    ax_bar.set_xticklabels(NUTS_PARAMS, rotation=30, ha="right", fontsize=9)
     ax_bar.set_ylabel("Ratio to true value")
     ax_bar.set_title("Parameter recovery")
-    ax_bar.legend(fontsize=8)
+    ax_bar.legend(fontsize=7)
     ax_bar.grid(True, alpha=0.3, axis="y")
 
-    # --- NUTS parameter rows: trace + histogram ---
+    # --- Parameter rows: trace + histogram (overlay all chains) ---
     for i, p in enumerate(NUTS_PARAMS):
-        samples = np.array(nuts_result.samples[p].flatten())
         true_val = TRUE_PARAMS[p]
 
-        # Trace
         ax_trace = axes[i + 1, 0]
-        ax_trace.plot(samples, linewidth=0.5, alpha=0.7, color="steelblue")
-        ax_trace.axhline(y=true_val, color="red", linewidth=1.5, linestyle="--", label="True")
-        ax_trace.axhline(
-            y=float(best_cmaes.params[p]),
-            color="tab:orange",
-            linewidth=1,
-            linestyle=":",
-            label="CMA-ES",
-        )
+        ax_hist = axes[i + 1, 1]
+
+        for ci, result in enumerate(chain_results):
+            samples = np.array(result.samples[p].flatten())
+            ax_trace.plot(samples, linewidth=0.4, alpha=0.6, color=chain_colors[ci],
+                          label=f"Chain {ci + 1}" if i == 0 else None)
+
+            sample_range = float(np.ptp(samples))
+            if sample_range > 0 and sample_range / (abs(np.mean(samples)) + 1e-30) > 1e-8:
+                ax_hist.hist(samples, bins=30, density=True, alpha=0.4,
+                             color=chain_colors[ci], edgecolor="white",
+                             label=f"Chain {ci + 1}" if i == 0 else None)
+            else:
+                ax_hist.axvline(x=float(np.mean(samples)), color=chain_colors[ci],
+                                linewidth=3, alpha=0.6)
+
+        ax_trace.axhline(y=true_val, color="red", linewidth=1.5, linestyle="--", label="True" if i == 0 else None)
         ax_trace.set_ylabel(p)
         if i == 0:
             ax_trace.set_title("NUTS trace plots")
-        if i == n_nuts - 1:
+            ax_trace.legend(fontsize=7, loc="upper right")
+        if i == n_params - 1:
             ax_trace.set_xlabel("Sample")
-        ax_trace.legend(fontsize=7, loc="upper right")
 
-        # Histogram
-        ax_hist = axes[i + 1, 1]
-        sample_range = float(np.ptp(samples))
-        if sample_range > 0 and sample_range / (abs(np.mean(samples)) + 1e-30) > 1e-8:
-            ax_hist.hist(samples, bins=30, density=True, alpha=0.7, color="steelblue", edgecolor="white")
-        else:
-            ax_hist.axvline(x=float(np.mean(samples)), color="steelblue", linewidth=4, alpha=0.7)
-            ax_hist.text(
-                0.5,
-                0.5,
-                "std ≈ 0\n(not explored)",
-                transform=ax_hist.transAxes,
-                ha="center",
-                va="center",
-                fontsize=9,
-                color="gray",
-            )
-        ax_hist.axvline(x=true_val, color="red", linewidth=1.5, linestyle="--", label="True")
-        ax_hist.axvline(x=float(np.mean(samples)), color="tab:green", linewidth=1.5, label="NUTS mean")
-        ax_hist.axvline(
-            x=float(best_cmaes.params[p]),
-            color="tab:orange",
-            linewidth=1,
-            linestyle=":",
-            label="CMA-ES",
-        )
+        ax_hist.axvline(x=true_val, color="red", linewidth=1.5, linestyle="--", label="True" if i == 0 else None)
         ax_hist.set_ylabel("Density")
         if i == 0:
             ax_hist.set_title("NUTS posterior distributions")
-        if i == n_nuts - 1:
+            ax_hist.legend(fontsize=7)
+        if i == n_params - 1:
             ax_hist.set_xlabel(p)
-        ax_hist.legend(fontsize=7)
 
+    # Summary stats in suptitle
+    total_div = sum(int(jnp.sum(r.divergences)) for r in chain_results)
+    total_samples = N_SAMPLES * n_chains
+    mean_accept = np.mean([r.acceptance_rate for r in chain_results])
     fig.suptitle(
         f"CMA-ES → NUTS Pipeline — "
-        f"CMA-ES: {cmaes_elapsed:.0f}s, loss={best_cmaes.loss:.2e} | "
-        f"NUTS: {nuts_elapsed:.0f}s, accept={nuts_result.acceptance_rate:.0%}, "
-        f"div={int(jnp.sum(nuts_result.divergences))}",
+        f"CMA-ES: {cmaes_elapsed:.0f}s | "
+        f"NUTS: {nuts_elapsed_total:.0f}s, {n_chains} chain(s), "
+        f"accept={mean_accept:.0%}, div={total_div}/{total_samples}",
         fontsize=11,
     )
     fig.tight_layout()
     plt.savefig("examples/pipeline_cmaes_nuts_lmtl_0d_results.png", dpi=150)
-    print("\nPlot saved to examples/pipeline_cmaes_nuts_lmtl_0d_results.png")
+    print(f"\nPlot saved to examples/pipeline_cmaes_nuts_lmtl_0d_results.png")
 
     # =====================================================================
-    # PAIRWISE LOSS LANDSCAPE (corner plot)
+    # CORNER PLOT: Pairwise loss landscape (zoomed + log scale)
     # =====================================================================
-    GRID_SIZE = 20  # points per axis (total evals per pair = GRID_SIZE²)
-    print(f"\nComputing pairwise loss landscapes ({GRID_SIZE}x{GRID_SIZE} grid)...")
+    print("\nGenerating corner plot (pairwise loss landscape)...")
 
-    n_all = len(ALL_OPT_PARAMS)
-    loss_jit = jax.jit(loss_fn)
+    # JIT-compile loss_fn once (avoids re-tracing the lax.scan at every call)
+    jit_loss = jax.jit(loss_fn)
+    _ = jit_loss({k: best_cmaes.params[k] for k in ALL_OPT_PARAMS}).block_until_ready()
 
-    # Precompute grids for each parameter
-    param_grids = {}
-    for p in ALL_OPT_PARAMS:
-        low, high = BOUNDS[p]
-        param_grids[p] = np.linspace(low, high, GRID_SIZE)
+    # Zoom: parameter ranges centered on CMA-ES best, width = 4× distance to true
+    # This avoids the "all yellow" problem from using the full bounds.
+    corner_params = ALL_OPT_PARAMS
+    n_corner = len(corner_params)
+    GRID_RES = 20  # grid resolution per axis (20² × 10 pairs ≈ 4000 evals)
 
-    fig2, axes2 = plt.subplots(n_all, n_all, figsize=(16, 16))
+    corner_ranges: dict[str, tuple[float, float]] = {}
+    for p in corner_params:
+        best_val = float(best_cmaes.params[p])
+        true_val = TRUE_PARAMS[p]
+        half_width = max(abs(best_val - true_val) * 4, abs(true_val) * 0.3)
+        lo = max(BOUNDS[p][0], best_val - half_width)
+        hi = min(BOUNDS[p][1], best_val + half_width)
+        corner_ranges[p] = (lo, hi)
 
-    # Hide upper triangle and diagonal
-    for i in range(n_all):
-        for j in range(n_all):
-            if j >= i:
-                axes2[i, j].set_visible(False)
+    fig_corner, axes_corner = plt.subplots(
+        n_corner, n_corner, figsize=(3 * n_corner, 3 * n_corner),
+    )
 
-    n_pairs = n_all * (n_all - 1) // 2
-    pair_count = 0
+    for row in range(n_corner):
+        for col in range(n_corner):
+            ax = axes_corner[row, col]
 
-    for i in range(1, n_all):
-        for j in range(i):
-            pair_count += 1
-            p_y = ALL_OPT_PARAMS[i]  # row = y axis
-            p_x = ALL_OPT_PARAMS[j]  # col = x axis
-            print(f"  [{pair_count}/{n_pairs}] {p_x} vs {p_y}...", end="", flush=True)
+            if col > row:
+                ax.axis("off")
+                continue
 
-            grid_x = param_grids[p_x]
-            grid_y = param_grids[p_y]
-            loss_grid = np.zeros((GRID_SIZE, GRID_SIZE))
+            p_row = corner_params[row]
+            p_col = corner_params[col]
 
-            for iy in range(GRID_SIZE):
-                for ix in range(GRID_SIZE):
-                    test_params = {k: jnp.array(TRUE_PARAMS[k]) for k in ALL_OPT_PARAMS}
-                    test_params[p_x] = jnp.array(grid_x[ix])
-                    test_params[p_y] = jnp.array(grid_y[iy])
-                    loss_grid[iy, ix] = float(loss_jit(test_params))
+            if row == col:
+                # Diagonal: 1D loss profile
+                vals = np.linspace(*corner_ranges[p_row], GRID_RES)
+                losses_1d = []
+                for v in vals:
+                    test_params = {k: best_cmaes.params[k] for k in ALL_OPT_PARAMS}
+                    test_params[p_row] = jnp.array(v)
+                    losses_1d.append(float(jit_loss(test_params)))
+                losses_1d = np.array(losses_1d)
+                ax.semilogy(vals, losses_1d, "b-", linewidth=1.5)
+                ax.axvline(TRUE_PARAMS[p_row], color="red", linestyle="--", linewidth=1, label="True")
+                ax.axvline(float(best_cmaes.params[p_row]), color="green", linestyle=":", linewidth=1, label="CMA-ES")
+                ax.set_ylabel("Loss (log)")
+                if row == 0:
+                    ax.legend(fontsize=6)
+            else:
+                # Off-diagonal: 2D loss landscape
+                vals_col = np.linspace(*corner_ranges[p_col], GRID_RES)
+                vals_row = np.linspace(*corner_ranges[p_row], GRID_RES)
+                loss_grid = np.full((GRID_RES, GRID_RES), np.nan)
 
-            ax = axes2[i, j]
-            # Clip high loss values for better contrast
-            vmax = min(float(np.percentile(loss_grid, 95)), 5.0)
-            cf = ax.contourf(
-                grid_x,
-                grid_y,
-                loss_grid,
-                levels=20,
-                cmap="viridis",
-                vmin=0,
-                vmax=vmax,
-            )
-            ax.contour(
-                grid_x,
-                grid_y,
-                loss_grid,
-                levels=10,
-                colors="white",
-                linewidths=0.3,
-                alpha=0.5,
-            )
+                for ii, vr in enumerate(vals_row):
+                    for jj, vc in enumerate(vals_col):
+                        test_params = {k: best_cmaes.params[k] for k in ALL_OPT_PARAMS}
+                        test_params[p_row] = jnp.array(vr)
+                        test_params[p_col] = jnp.array(vc)
+                        loss_grid[ii, jj] = float(jit_loss(test_params))
 
-            # Mark true values
-            ax.plot(TRUE_PARAMS[p_x], TRUE_PARAMS[p_y], "r*", markersize=12, label="True")
+                # Log scale with contours
+                log_loss = np.log10(np.clip(loss_grid, 1e-12, None))
+                im = ax.contourf(vals_col, vals_row, log_loss, levels=20, cmap="viridis")
+                ax.contour(vals_col, vals_row, log_loss, levels=10, colors="white", linewidths=0.3, alpha=0.5)
+                ax.plot(TRUE_PARAMS[p_col], TRUE_PARAMS[p_row], "r*", markersize=10, zorder=10)
+                ax.plot(float(best_cmaes.params[p_col]), float(best_cmaes.params[p_row]),
+                        "g^", markersize=8, zorder=10)
 
-            # Mark CMA-ES modes
-            for k, mode in enumerate(cmaes_result.modes):
-                marker = "o" if k == 0 else "s"
-                ax.plot(
-                    float(mode.params[p_x]),
-                    float(mode.params[p_y]),
-                    marker,
-                    color="tab:orange",
-                    markersize=7,
-                    markeredgecolor="white",
-                    markeredgewidth=0.5,
-                    label=f"CMA #{k + 1}" if i == 1 and j == 0 else None,
-                )
-
-            # Labels
-            if i == n_all - 1:
-                ax.set_xlabel(p_x, fontsize=8)
+            # Labels on edges only
+            if row == n_corner - 1:
+                ax.set_xlabel(p_col, fontsize=8)
             else:
                 ax.set_xticklabels([])
-            if j == 0:
-                ax.set_ylabel(p_y, fontsize=8)
+            if col == 0 and row != col:
+                ax.set_ylabel(p_row, fontsize=8)
+            elif row == col:
+                pass  # keep ylabel "Loss (log)"
             else:
                 ax.set_yticklabels([])
+
             ax.tick_params(labelsize=6)
-            print(" done")
 
-    # Legend on the first visible upper triangle cell
-    axes2[0, 0].set_visible(True)
-    axes2[0, 0].axis("off")
-    from matplotlib.lines import Line2D
-
-    legend_elements = [
-        Line2D([0], [0], marker="*", color="red", linestyle="None", markersize=12, label="True"),
-        Line2D([0], [0], marker="o", color="tab:orange", linestyle="None", markersize=7, label="CMA-ES modes"),
-    ]
-    axes2[0, 0].legend(handles=legend_elements, loc="center", fontsize=10, frameon=False)
-
-    fig2.suptitle(
-        "Pairwise loss landscape (other params fixed at true values)",
-        fontsize=13,
+    fig_corner.suptitle(
+        "Pairwise loss landscape (log₁₀) — zoomed around CMA-ES best\n"
+        "Red ★ = true | Green ▲ = CMA-ES best",
+        fontsize=11,
     )
-    fig2.tight_layout()
+    fig_corner.tight_layout()
     plt.savefig("examples/pipeline_loss_landscape.png", dpi=150)
-    print("\nPlot saved to examples/pipeline_loss_landscape.png")
+    print("Corner plot saved to examples/pipeline_loss_landscape.png")
