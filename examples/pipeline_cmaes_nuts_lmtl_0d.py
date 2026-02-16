@@ -32,7 +32,8 @@ from seapopym.optimization.likelihood import make_log_posterior, reparameterize_
 from seapopym.optimization.nuts import run_nuts
 from seapopym.optimization.prior import HalfNormal, PriorSet, Uniform
 
-jax.config.update("jax_default_device", jax.devices("cpu")[0])
+# Use GPU if available, fall back to CPU
+print(f"JAX devices: {jax.devices()}")
 
 # =============================================================================
 # CONFIGURATION
@@ -42,13 +43,13 @@ jax.config.update("jax_default_device", jax.devices("cpu")[0])
 N_RESTARTS = 3
 N_PARAMS = 5  # number of optimized parameters
 INITIAL_POPSIZE = 4 + int(3 * np.log(N_PARAMS))  # Hansen: 4 + floor(3*ln(n))
-N_GENERATIONS = 100 * N_PARAMS**2 // INITIAL_POPSIZE  # budget ≈ 100*n²
+N_GENERATIONS = int(100 + 150 * (N_PARAMS + 3) ** 2 / np.sqrt(INITIAL_POPSIZE))
 DISTANCE_THRESHOLD = 0.1
 CMAES_SEED = 42
 
 # --- Stage 2: NUTS ---
-N_WARMUP = 500
-N_SAMPLES = 500
+N_WARMUP = 100
+N_SAMPLES = 200
 NUTS_SEED = 0
 
 # Parameters estimated by NUTS (gradient-rich)
@@ -58,7 +59,7 @@ CMAES_ONLY_PARAMS = ["tau_r_0", "gamma_tau_r"]
 
 # --- Simulation ---
 SPINUP_YEARS = 1
-OPT_YEARS = 2
+OPT_YEARS = 1
 DT = "1d"
 
 # --- Twin experiment ---
@@ -86,7 +87,7 @@ BOUNDS = {
     "efficiency": (0.01, 5 * TRUE_PARAMS["efficiency"]),
 }
 
-# NUTS priors (only for gradient-rich parameters)
+# NUTS priors
 # HalfNormal for parameters inside exponentials (concentrate mass near small values)
 # scale chosen so that ~95% of mass is below 2× the true value
 NUTS_PRIORS = PriorSet(
@@ -131,12 +132,62 @@ blueprint = Blueprint.from_dict(
             },
         },
         "process": [
-            {"func": "lmtl:gillooly_temperature", "inputs": {"temp": "forcings.temperature"}, "outputs": {"return": {"target": "derived.temp_norm", "type": "derived"}}},
-            {"func": "lmtl:recruitment_age", "inputs": {"temp": "derived.temp_norm", "tau_r_0": "parameters.tau_r_0", "gamma": "parameters.gamma_tau_r", "t_ref": "parameters.t_ref"}, "outputs": {"return": {"target": "derived.rec_age", "type": "derived"}}},
-            {"func": "lmtl:npp_injection", "inputs": {"npp": "forcings.primary_production", "efficiency": "parameters.efficiency", "production": "state.production"}, "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}}},
-            {"func": "lmtl:aging_flow", "inputs": {"production": "state.production", "cohort_ages": "parameters.cohort_ages", "rec_age": "derived.rec_age"}, "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}}},
-            {"func": "lmtl:recruitment_flow", "inputs": {"production": "state.production", "cohort_ages": "parameters.cohort_ages", "rec_age": "derived.rec_age"}, "outputs": {"prod_loss": {"target": "tendencies.production", "type": "tendency"}, "biomass_gain": {"target": "tendencies.biomass", "type": "tendency"}}},
-            {"func": "lmtl:mortality", "inputs": {"biomass": "state.biomass", "temp": "derived.temp_norm", "lambda_0": "parameters.lambda_0", "gamma": "parameters.gamma_lambda", "t_ref": "parameters.t_ref"}, "outputs": {"return": {"target": "tendencies.biomass", "type": "tendency"}}},
+            {
+                "func": "lmtl:gillooly_temperature",
+                "inputs": {"temp": "forcings.temperature"},
+                "outputs": {"return": {"target": "derived.temp_norm", "type": "derived"}},
+            },
+            {
+                "func": "lmtl:recruitment_age",
+                "inputs": {
+                    "temp": "derived.temp_norm",
+                    "tau_r_0": "parameters.tau_r_0",
+                    "gamma": "parameters.gamma_tau_r",
+                    "t_ref": "parameters.t_ref",
+                },
+                "outputs": {"return": {"target": "derived.rec_age", "type": "derived"}},
+            },
+            {
+                "func": "lmtl:npp_injection",
+                "inputs": {
+                    "npp": "forcings.primary_production",
+                    "efficiency": "parameters.efficiency",
+                    "production": "state.production",
+                },
+                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
+            },
+            {
+                "func": "lmtl:aging_flow",
+                "inputs": {
+                    "production": "state.production",
+                    "cohort_ages": "parameters.cohort_ages",
+                    "rec_age": "derived.rec_age",
+                },
+                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
+            },
+            {
+                "func": "lmtl:recruitment_flow",
+                "inputs": {
+                    "production": "state.production",
+                    "cohort_ages": "parameters.cohort_ages",
+                    "rec_age": "derived.rec_age",
+                },
+                "outputs": {
+                    "prod_loss": {"target": "tendencies.production", "type": "tendency"},
+                    "biomass_gain": {"target": "tendencies.biomass", "type": "tendency"},
+                },
+            },
+            {
+                "func": "lmtl:mortality",
+                "inputs": {
+                    "biomass": "state.biomass",
+                    "temp": "derived.temp_norm",
+                    "lambda_0": "parameters.lambda_0",
+                    "gamma": "parameters.gamma_lambda",
+                    "t_ref": "parameters.t_ref",
+                },
+                "outputs": {"return": {"target": "tendencies.biomass", "type": "tendency"}},
+            },
         ],
     }
 )
@@ -161,12 +212,14 @@ day_of_year = dates.dayofyear.values
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 temp_da = xr.DataArray(
     np.broadcast_to(temp_c[:, None, None], (len(dates), ny, nx)),
-    dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon},
+    dims=["T", "Y", "X"],
+    coords={"T": dates, "Y": lat, "X": lon},
 )
 npp_sec = (1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)) / 86400.0
 npp_da = xr.DataArray(
     np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx)),
-    dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon},
+    dims=["T", "Y", "X"],
+    coords={"T": dates, "Y": lat, "X": lon},
 )
 
 config = Config.from_dict(
@@ -390,8 +443,12 @@ if __name__ == "__main__":
 
     ax_bio.plot(time_days, np.array(true_biomass), "k-", linewidth=2, label="True", alpha=0.7)
     ax_bio.scatter(
-        obs_local_indices * dt_seconds / 86400.0, np.array(observations),
-        c="red", s=20, zorder=5, label="Observations",
+        obs_local_indices * dt_seconds / 86400.0,
+        np.array(observations),
+        c="red",
+        s=20,
+        zorder=5,
+        label="Observations",
     )
 
     # CMA-ES prediction
@@ -445,8 +502,11 @@ if __name__ == "__main__":
         ax_trace.plot(samples, linewidth=0.5, alpha=0.7, color="steelblue")
         ax_trace.axhline(y=true_val, color="red", linewidth=1.5, linestyle="--", label="True")
         ax_trace.axhline(
-            y=float(best_cmaes.params[p]), color="tab:orange",
-            linewidth=1, linestyle=":", label="CMA-ES",
+            y=float(best_cmaes.params[p]),
+            color="tab:orange",
+            linewidth=1,
+            linestyle=":",
+            label="CMA-ES",
         )
         ax_trace.set_ylabel(p)
         if i == 0:
@@ -463,14 +523,23 @@ if __name__ == "__main__":
         else:
             ax_hist.axvline(x=float(np.mean(samples)), color="steelblue", linewidth=4, alpha=0.7)
             ax_hist.text(
-                0.5, 0.5, "std ≈ 0\n(not explored)", transform=ax_hist.transAxes,
-                ha="center", va="center", fontsize=9, color="gray",
+                0.5,
+                0.5,
+                "std ≈ 0\n(not explored)",
+                transform=ax_hist.transAxes,
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="gray",
             )
         ax_hist.axvline(x=true_val, color="red", linewidth=1.5, linestyle="--", label="True")
         ax_hist.axvline(x=float(np.mean(samples)), color="tab:green", linewidth=1.5, label="NUTS mean")
         ax_hist.axvline(
-            x=float(best_cmaes.params[p]), color="tab:orange",
-            linewidth=1, linestyle=":", label="CMA-ES",
+            x=float(best_cmaes.params[p]),
+            color="tab:orange",
+            linewidth=1,
+            linestyle=":",
+            label="CMA-ES",
         )
         ax_hist.set_ylabel("Density")
         if i == 0:
@@ -538,12 +607,22 @@ if __name__ == "__main__":
             # Clip high loss values for better contrast
             vmax = min(float(np.percentile(loss_grid, 95)), 5.0)
             cf = ax.contourf(
-                grid_x, grid_y, loss_grid,
-                levels=20, cmap="viridis", vmin=0, vmax=vmax,
+                grid_x,
+                grid_y,
+                loss_grid,
+                levels=20,
+                cmap="viridis",
+                vmin=0,
+                vmax=vmax,
             )
             ax.contour(
-                grid_x, grid_y, loss_grid,
-                levels=10, colors="white", linewidths=0.3, alpha=0.5,
+                grid_x,
+                grid_y,
+                loss_grid,
+                levels=10,
+                colors="white",
+                linewidths=0.3,
+                alpha=0.5,
             )
 
             # Mark true values
@@ -553,9 +632,14 @@ if __name__ == "__main__":
             for k, mode in enumerate(cmaes_result.modes):
                 marker = "o" if k == 0 else "s"
                 ax.plot(
-                    float(mode.params[p_x]), float(mode.params[p_y]),
-                    marker, color="tab:orange", markersize=7, markeredgecolor="white",
-                    markeredgewidth=0.5, label=f"CMA #{k+1}" if i == 1 and j == 0 else None,
+                    float(mode.params[p_x]),
+                    float(mode.params[p_y]),
+                    marker,
+                    color="tab:orange",
+                    markersize=7,
+                    markeredgecolor="white",
+                    markeredgewidth=0.5,
+                    label=f"CMA #{k + 1}" if i == 1 and j == 0 else None,
                 )
 
             # Labels
@@ -574,6 +658,7 @@ if __name__ == "__main__":
     axes2[0, 0].set_visible(True)
     axes2[0, 0].axis("off")
     from matplotlib.lines import Line2D
+
     legend_elements = [
         Line2D([0], [0], marker="*", color="red", linestyle="None", markersize=12, label="True"),
         Line2D([0], [0], marker="o", color="tab:orange", linestyle="None", markersize=7, label="CMA-ES modes"),
