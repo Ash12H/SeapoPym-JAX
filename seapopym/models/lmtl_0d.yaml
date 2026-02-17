@@ -1,0 +1,123 @@
+id: lmtl-0d
+version: "1.0"
+
+declarations:
+  state:
+    biomass:
+      units: "g/m^2"
+      dims: [Y, X]
+    production:
+      units: "g/m^2"
+      dims: [Y, X, C]
+
+  parameters:
+    lambda_0:
+      units: "1/s"
+    gamma_lambda:
+      units: "1/delta_degC"
+    tau_r_0:
+      units: "s"
+    gamma_tau_r:
+      units: "1/delta_degC"
+    t_ref:
+      units: "degC"
+    efficiency:
+      units: "dimensionless"
+    cohort_ages:
+      units: "s"
+      dims: [C]
+    day_layer:
+      units: "dimensionless"
+    night_layer:
+      units: "dimensionless"
+    latitude:
+      units: "degrees"
+
+  forcings:
+    temperature:
+      units: "degC"
+      dims: [T, Z, Y, X]
+    primary_production:
+      units: "g/m^2/s"
+      dims: [T, Y, X]
+    day_of_year:
+      units: "dimensionless"
+      dims: [T, Y, X]
+
+process:
+  # --- Environment ---
+  - func: "lmtl:day_length"
+    inputs:
+      latitude: parameters.latitude
+      day_of_year: forcings.day_of_year
+    outputs:
+      return: { target: derived.day_length, type: derived }
+
+  - func: "lmtl:layer_weighted_mean"
+    inputs:
+      forcing: forcings.temperature
+      day_length: derived.day_length
+      day_layer: parameters.day_layer
+      night_layer: parameters.night_layer
+    outputs:
+      return: { target: derived.mean_temperature, type: derived }
+
+  # --- Temperature ---
+  - func: "lmtl:threshold_temperature"
+    inputs:
+      temp: derived.mean_temperature
+      min_temp: parameters.t_ref
+    outputs:
+      return: { target: derived.thresholded_temperature, type: derived }
+
+  - func: "lmtl:gillooly_temperature"
+    inputs:
+      temp: derived.thresholded_temperature
+    outputs:
+      return: { target: derived.temp_norm, type: derived }
+
+  # --- Derived quantities ---
+  - func: "lmtl:recruitment_age"
+    inputs:
+      temp: derived.temp_norm
+      tau_r_0: parameters.tau_r_0
+      gamma: parameters.gamma_tau_r
+      t_ref: parameters.t_ref
+    outputs:
+      return: { target: derived.rec_age, type: derived }
+
+  # --- Dynamics ---
+  - func: "lmtl:npp_injection"
+    inputs:
+      npp: forcings.primary_production
+      efficiency: parameters.efficiency
+      production: state.production
+    outputs:
+      return: { target: tendencies.production, type: tendency }
+
+  - func: "lmtl:aging_flow"
+    inputs:
+      production: state.production
+      cohort_ages: parameters.cohort_ages
+      rec_age: derived.rec_age
+    outputs:
+      return: { target: tendencies.production, type: tendency }
+
+  - func: "lmtl:recruitment_flow"
+    inputs:
+      production: state.production
+      cohort_ages: parameters.cohort_ages
+      rec_age: derived.rec_age
+    outputs:
+      prod_loss: { target: tendencies.production, type: tendency }
+      biomass_gain: { target: tendencies.biomass, type: tendency }
+
+  - func: "lmtl:mortality"
+    inputs:
+      biomass: state.biomass
+      temp: derived.temp_norm
+      lambda_0: parameters.lambda_0
+      gamma: parameters.gamma_lambda
+      t_ref: parameters.t_ref
+    outputs:
+      return: { target: tendencies.biomass, type: tendency }
