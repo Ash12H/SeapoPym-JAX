@@ -7,11 +7,15 @@ on parameter-space distance.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import jax
 import jax.numpy as jnp
+
+logger = logging.getLogger(__name__)
 
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
 from seapopym.optimization.optimizer import OptimizeResult
@@ -70,7 +74,7 @@ def run_ipop_cmaes(
     n_generations: int = 100,
     distance_threshold: float = 0.1,
     seed: int = 0,
-    verbose: bool = False,
+    progress_bar: bool = False,
 ) -> IPOPResult:
     """Run IPOP-CMA-ES with increasing population restarts.
 
@@ -88,7 +92,7 @@ def run_ipop_cmaes(
         n_generations: Number of generations per restart.
         distance_threshold: Minimum Euclidean distance between modes.
         seed: Random seed for reproducibility.
-        verbose: If True, print progress per restart.
+        progress_bar: If True, display inline progress indicator.
 
     Returns:
         IPOPResult with distinct modes sorted by loss.
@@ -122,25 +126,21 @@ def run_ipop_cmaes(
             bounds=bounds,
             seed=seed + i,
         )
-        if verbose:
-            import time
+        logger.info("Restart %d/%d: popsize=%d, %d generations", i + 1, n_restarts, popsize, n_generations)
+        t0 = time.time()
 
-            print(f"\n--- Restart {i + 1}/{n_restarts}: popsize={popsize}, {n_generations} generations ---")
-            t0 = time.time()
-
-        result = optimizer.run(loss_fn, start_params, n_generations=n_generations, verbose=verbose)
+        result = optimizer.run(loss_fn, start_params, n_generations=n_generations, progress_bar=progress_bar)
         all_results.append(result)
 
         if _is_new_mode(result, modes, distance_threshold, bounds):
             modes.append(result)
 
-        if verbose:
-            elapsed = time.time() - t0
-            actual_gens = result.n_iterations
-            print(
-                f"  -> loss={result.loss:.6e}, {actual_gens} gens, modes={len(modes)}, "
-                f"elapsed={elapsed:.1f}s ({elapsed / max(actual_gens, 1):.3f} s/gen)"
-            )
+        elapsed = time.time() - t0
+        actual_gens = result.n_iterations
+        logger.info(
+            "  -> loss=%.6e, %d gens, modes=%d, elapsed=%.1fs (%.3f s/gen)",
+            result.loss, actual_gens, len(modes), elapsed, elapsed / max(actual_gens, 1),
+        )
 
     # Sort modes by loss (best first)
     modes.sort(key=lambda r: r.loss)

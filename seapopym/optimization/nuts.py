@@ -9,12 +9,16 @@ samples with diagnostics.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import blackjax
+import blackjax.progress_bar
 import jax
 import jax.numpy as jnp
+
+logger = logging.getLogger(__name__)
 
 from seapopym.types import Array, Params
 
@@ -48,6 +52,7 @@ def run_nuts(
     seed: int = 0,
     target_acceptance_rate: float = 0.8,
     is_mass_matrix_diagonal: bool = True,
+    progress_bar: bool = False,
 ) -> NUTSResult:
     """Run NUTS sampling with automatic warmup.
 
@@ -64,6 +69,7 @@ def run_nuts(
         target_acceptance_rate: Target acceptance rate for step size adaptation.
         is_mass_matrix_diagonal: If True, adapt a diagonal mass matrix.
             If False, adapt a dense mass matrix (more expensive but captures correlations).
+        progress_bar: If True, display progress bars for warmup and sampling phases.
 
     Returns:
         NUTSResult with samples, log-posterior values, and diagnostics.
@@ -86,8 +92,11 @@ def run_nuts(
         log_posterior_fn,
         is_mass_matrix_diagonal=is_mass_matrix_diagonal,
         target_acceptance_rate=target_acceptance_rate,
+        progress_bar=progress_bar,
     )
     (state, kernel_params), _ = warmup.run(warmup_key, initial_params, num_steps=n_warmup)  # type: ignore[call-arg]
+
+    logger.info("Warmup: %d steps, step_size=%.4g", n_warmup, float(kernel_params["step_size"]))
 
     # Build sampling kernel
     kernel = blackjax.nuts(log_posterior_fn, **kernel_params).step
@@ -96,14 +105,17 @@ def run_nuts(
         state, info = kernel(rng_key, state)
         return state, (state.position, state.logdensity, info.is_divergent, info.acceptance_rate)  # type: ignore[attr-defined]
 
-    # Sample via scan
+    # Sample via scan (with optional progress bar)
     sample_keys = jax.random.split(sample_key, n_samples)
-    _, (positions, log_densities, divergences, acceptance_rates) = jax.lax.scan(
+    scan_fn = blackjax.progress_bar.gen_scan_fn(n_samples, progress_bar=progress_bar)
+    _, (positions, log_densities, divergences, acceptance_rates) = scan_fn(
         one_step, state, sample_keys
     )
 
     # Compute mean acceptance rate
     mean_acceptance = float(jnp.mean(acceptance_rates))
+
+    logger.info("Sampling: %d samples, accept=%.2f%%", n_samples, mean_acceptance * 100)
 
     return NUTSResult(
         samples=positions,

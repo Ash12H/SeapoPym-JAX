@@ -16,8 +16,12 @@ Observation model:
 Setup: 1y spin-up + 2y optimization, 5% observations, IPOP-CMA-ES.
 """
 
+import logging
 import math
 import time
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO)
 
 import jax
 import jax.numpy as jnp
@@ -27,9 +31,10 @@ import pandas as pd
 import xarray as xr
 
 import seapopym.functions.lmtl  # noqa: F401
-from seapopym.blueprint import Blueprint, Config
+from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine.step import build_step_fn
+from seapopym.models import LMTL_0D
 from seapopym.optimization.ipop import run_ipop_cmaes
 
 # Force CPU for 0D model (GPU overhead dominates for tiny workloads)
@@ -84,127 +89,17 @@ GROUP_PARAMS = {
     "night_layer": jnp.array([0, 0]),
 }
 
+PLOT_FILE = "examples/images/06_ipop_cmaes_2groups_lmtl_0d.png"
+
 # =============================================================================
-# BLUEPRINT (0D LMTL with Z=2 layers and DVM)
+# BLUEPRINT (0D LMTL from catalogue — includes DVM support)
 # =============================================================================
+
+blueprint = LMTL_0D
 
 max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
 cohort_ages_sec = np.arange(0, max_age_days + 1) * 86400.0
 n_cohorts = len(cohort_ages_sec)
-
-blueprint = Blueprint.from_dict(
-    {
-        "id": "lmtl-2groups-demo",
-        "version": "1.0",
-        "declarations": {
-            "state": {
-                "biomass": {"units": "g/m^2", "dims": ["Y", "X"]},
-                "production": {"units": "g/m^2", "dims": ["Y", "X", "C"]},
-            },
-            "parameters": {
-                "lambda_0": {"units": "1/s"},
-                "gamma_lambda": {"units": "1/delta_degC"},
-                "tau_r_0": {"units": "s"},
-                "gamma_tau_r": {"units": "1/delta_degC"},
-                "t_ref": {"units": "degC"},
-                "efficiency": {"units": "dimensionless"},
-                "cohort_ages": {"units": "s", "dims": ["C"]},
-                "day_layer": {"units": "dimensionless"},
-                "night_layer": {"units": "dimensionless"},
-                "latitude": {"units": "degrees"},
-            },
-            "forcings": {
-                "temperature": {"units": "degC", "dims": ["T", "Z", "Y", "X"]},
-                "primary_production": {"units": "g/m^2/s", "dims": ["T", "Y", "X"]},
-                "day_of_year": {"units": "dimensionless", "dims": ["T", "Y", "X"]},
-            },
-        },
-        "process": [
-            # 1. Day length (for DVM weighting)
-            {
-                "func": "lmtl:day_length",
-                "inputs": {
-                    "latitude": "parameters.latitude",
-                    "day_of_year": "forcings.day_of_year",
-                },
-                "outputs": {"return": {"target": "derived.day_length", "type": "derived"}},
-            },
-            # 2. DVM-weighted temperature (reduces Z dimension)
-            {
-                "func": "lmtl:layer_weighted_mean",
-                "inputs": {
-                    "forcing": "forcings.temperature",
-                    "day_length": "derived.day_length",
-                    "day_layer": "parameters.day_layer",
-                    "night_layer": "parameters.night_layer",
-                },
-                "outputs": {"return": {"target": "derived.mean_temperature", "type": "derived"}},
-            },
-            # 3. Temperature normalization (Gillooly)
-            {
-                "func": "lmtl:gillooly_temperature",
-                "inputs": {"temp": "derived.mean_temperature"},
-                "outputs": {"return": {"target": "derived.temp_norm", "type": "derived"}},
-            },
-            # 4. Recruitment age
-            {
-                "func": "lmtl:recruitment_age",
-                "inputs": {
-                    "temp": "derived.temp_norm",
-                    "tau_r_0": "parameters.tau_r_0",
-                    "gamma": "parameters.gamma_tau_r",
-                    "t_ref": "parameters.t_ref",
-                },
-                "outputs": {"return": {"target": "derived.rec_age", "type": "derived"}},
-            },
-            # 5. NPP injection (surface, same for both groups)
-            {
-                "func": "lmtl:npp_injection",
-                "inputs": {
-                    "npp": "forcings.primary_production",
-                    "efficiency": "parameters.efficiency",
-                    "production": "state.production",
-                },
-                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
-            },
-            # 6. Aging flow
-            {
-                "func": "lmtl:aging_flow",
-                "inputs": {
-                    "production": "state.production",
-                    "cohort_ages": "parameters.cohort_ages",
-                    "rec_age": "derived.rec_age",
-                },
-                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
-            },
-            # 7. Recruitment flow
-            {
-                "func": "lmtl:recruitment_flow",
-                "inputs": {
-                    "production": "state.production",
-                    "cohort_ages": "parameters.cohort_ages",
-                    "rec_age": "derived.rec_age",
-                },
-                "outputs": {
-                    "prod_loss": {"target": "tendencies.production", "type": "tendency"},
-                    "biomass_gain": {"target": "tendencies.biomass", "type": "tendency"},
-                },
-            },
-            # 8. Mortality
-            {
-                "func": "lmtl:mortality",
-                "inputs": {
-                    "biomass": "state.biomass",
-                    "temp": "derived.temp_norm",
-                    "lambda_0": "parameters.lambda_0",
-                    "gamma": "parameters.gamma_lambda",
-                    "t_ref": "parameters.t_ref",
-                },
-                "outputs": {"return": {"target": "tendencies.biomass", "type": "tendency"}},
-            },
-        ],
-    }
-)
 
 # =============================================================================
 # FORCINGS & CONFIG
@@ -414,7 +309,7 @@ if __name__ == "__main__":
         n_generations=N_GENERATIONS,
         distance_threshold=DISTANCE_THRESHOLD,
         seed=SEED,
-        verbose=True,
+        progress_bar=True,
     )
     elapsed = time.time() - t0
 
@@ -537,5 +432,6 @@ if __name__ == "__main__":
         fontsize=12,
     )
     fig.tight_layout()
-    plt.savefig("examples/ipop_cmaes_2groups_lmtl_0d_results.png", dpi=150)
-    print(f"\nPlot saved to examples/ipop_cmaes_2groups_lmtl_0d_results.png")
+    Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(PLOT_FILE, dpi=150)
+    print(f"\nPlot saved to {PLOT_FILE}")

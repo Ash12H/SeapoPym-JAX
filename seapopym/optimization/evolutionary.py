@@ -9,6 +9,7 @@ Parameters are normalized to [0,1] using bounds for proper CMA-ES scaling.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable
 from typing import Literal
@@ -16,6 +17,8 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 from evosax.algorithms import CMA_ES
+
+logger = logging.getLogger(__name__)
 
 from seapopym.optimization.optimizer import OptimizeResult
 from seapopym.types import Array, Params
@@ -118,7 +121,7 @@ class EvolutionaryOptimizer:
         n_generations: int = 100,
         tol_fun: float = 1e-9,
         patience: int = 50,
-        verbose: bool = False,
+        progress_bar: bool = False,
     ) -> OptimizeResult:
         """Run the evolutionary optimization with early stopping.
 
@@ -135,7 +138,7 @@ class EvolutionaryOptimizer:
             n_generations: Maximum number of generations to run.
             tol_fun: Relative improvement threshold for early stopping.
             patience: Number of generations without improvement before stopping.
-            verbose: If True, print progress every 50 generations.
+            progress_bar: If True, display inline progress indicator.
 
         Returns:
             OptimizeResult with optimized parameters and diagnostics.
@@ -205,16 +208,29 @@ class EvolutionaryOptimizer:
             # Early stopping
             if stall_count >= patience:
                 converged = True
-                if verbose:
-                    print(
-                        f"  Converged at generation {gen}: no improvement "
-                        f"over {patience} generations (best_loss={best_loss:.6e})"
-                    )
+                logger.info(
+                    "Converged at generation %d: no improvement over %d generations (best_loss=%.6e)",
+                    gen, patience, best_loss,
+                )
                 break
 
-            # Verbose output
-            if verbose and gen % 50 == 0:
-                print(f"  gen {gen}/{n_generations}: best_loss={best_loss:.6e}, stall={stall_count}/{patience}")
+            # Logging
+            if gen % 50 == 0:
+                logger.info(
+                    "gen %d/%d: best_loss=%.6e, stall=%d/%d",
+                    gen, n_generations, best_loss, stall_count, patience,
+                )
+
+            # Progress bar
+            if progress_bar:
+                print_rate = max(1, n_generations // 20)
+                if gen % print_rate == 0 or gen == n_generations - 1:
+                    print(f"\r  [{gen+1}/{n_generations}] loss={best_loss:.4e}", end="", flush=True)
+                if gen == n_generations - 1:
+                    print()  # newline at end
+
+        if progress_bar:
+            print()  # newline after progress bar
 
         # Denormalize best result
         best_flat_orig = self._denormalize(best_flat_norm, lower, upper)

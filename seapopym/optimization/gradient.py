@@ -242,7 +242,7 @@ class GradientRunner:
         optimizer: Optimizer | None = None,
         n_steps: int = 100,
         loss_type: Literal["mse", "rmse", "nrmse"] = "mse",
-        verbose: bool = False,
+        progress_bar: bool = False,
     ) -> OptimizeResult:
         """Run full optimization loop.
 
@@ -252,7 +252,7 @@ class GradientRunner:
             optimizer: Optimizer instance. If None, uses Adam with lr=0.01.
             n_steps: Maximum number of optimization steps.
             loss_type: Type of loss function.
-            verbose: If True, print progress.
+            progress_bar: If True, display inline progress indicator.
 
         Returns:
             OptimizeResult with optimized parameters.
@@ -279,7 +279,7 @@ class GradientRunner:
             loss_fn=partial_loss_fn,
             initial_params=initial_params,
             n_steps=n_steps,
-            verbose=verbose,
+            progress_bar=progress_bar,
         )
 
         return result

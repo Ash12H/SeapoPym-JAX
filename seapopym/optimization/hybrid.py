@@ -6,10 +6,13 @@ using gradient-based optimization for faster local convergence.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
+
+logger = logging.getLogger(__name__)
 
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
 from seapopym.optimization.optimizer import Optimizer, OptimizeResult
@@ -63,7 +66,7 @@ class HybridOptimizer:
         loss_fn: Callable[[Params], Array],
         initial_params: Params,
         n_generations: int = 50,
-        verbose: bool = False,
+        progress_bar: bool = False,
     ) -> OptimizeResult:
         """Run hybrid optimization.
 
@@ -74,13 +77,12 @@ class HybridOptimizer:
             loss_fn: Function mapping params -> scalar loss.
             initial_params: Starting parameter values.
             n_generations: Number of CMA-ES generations.
-            verbose: If True, print progress.
+            progress_bar: If True, display inline progress indicator.
 
         Returns:
             OptimizeResult with the best optimized parameters.
         """
-        if verbose:
-            print("=== Phase 1: CMA-ES Exploration ===")
+        logger.info("=== Phase 1: CMA-ES Exploration ===")
 
         # Phase 1: CMA-ES
         evo_opt = EvolutionaryOptimizer(
@@ -91,10 +93,9 @@ class HybridOptimizer:
         )
 
         # Run CMA-ES and collect top K candidates
-        top_candidates = self._run_cma_and_get_top_k(evo_opt, loss_fn, initial_params, n_generations, verbose)
+        top_candidates = self._run_cma_and_get_top_k(evo_opt, loss_fn, initial_params, n_generations, progress_bar)
 
-        if verbose:
-            print(f"\n=== Phase 2: Gradient Refinement (top {self.top_k}) ===")
+        logger.info("=== Phase 2: Gradient Refinement (top %d) ===", self.top_k)
 
         # Phase 2: Gradient refinement
         grad_opt = Optimizer(
@@ -105,7 +106,7 @@ class HybridOptimizer:
         )
 
         # Refine candidates (in batches if memory constrained)
-        refined_results = self._refine_candidates(grad_opt, loss_fn, top_candidates, verbose)
+        refined_results = self._refine_candidates(grad_opt, loss_fn, top_candidates)
 
         # Find best result
         best_result = min(refined_results, key=lambda r: r.loss)
@@ -132,7 +133,7 @@ class HybridOptimizer:
         loss_fn: Callable[[Params], Array],
         initial_params: Params,
         n_generations: int,
-        verbose: bool,
+        progress_bar: bool,
     ) -> list[tuple[Params, list[float], float]]:
         """Run CMA-ES and return top K candidates with their loss histories.
 
@@ -182,8 +183,15 @@ class HybridOptimizer:
             min_fitness = float(jnp.min(fitness))
             loss_history.append(min_fitness)
 
-            if verbose and gen % 10 == 0:
-                print(f"  Generation {gen}: best_loss = {min_fitness:.6e}")
+            if gen % 10 == 0:
+                logger.info("Generation %d: best_loss = %.6e", gen, min_fitness)
+
+            if progress_bar:
+                print_rate = max(1, n_generations // 20)
+                if gen % print_rate == 0 or gen == n_generations - 1:
+                    print(f"\r  [{gen+1}/{n_generations}] loss={min_fitness:.4e}", end="", flush=True)
+                if gen == n_generations - 1:
+                    print()
 
             final_population = population
             final_fitness = fitness
@@ -202,8 +210,7 @@ class HybridOptimizer:
             candidate_loss = float(final_fitness[int(idx)])
             top_candidates.append((params, loss_history.copy(), candidate_loss))
 
-        if verbose:
-            print(f"  Top {self.top_k} losses: {[c[2] for c in top_candidates]}")
+        logger.info("Top %d losses: %s", self.top_k, [c[2] for c in top_candidates])
 
         return top_candidates
 
@@ -212,7 +219,6 @@ class HybridOptimizer:
         grad_opt: Optimizer,
         loss_fn: Callable[[Params], Array],
         candidates: list[tuple[Params, list[float], float]],
-        verbose: bool,
     ) -> list[OptimizeResult]:
         """Refine candidates using gradient descent.
 
@@ -220,7 +226,6 @@ class HybridOptimizer:
             grad_opt: Gradient optimizer to use.
             loss_fn: Loss function.
             candidates: List of (params, loss_history, loss) tuples.
-            verbose: Print progress.
 
         Returns:
             List of OptimizeResult for each refined candidate.
@@ -232,22 +237,16 @@ class HybridOptimizer:
             batch_end = min(batch_start + self.parallel_gradients, len(candidates))
             batch = candidates[batch_start:batch_end]
 
-            if verbose:
-                print(f"  Refining candidates {batch_start + 1}-{batch_end}...")
+            logger.info("Refining candidates %d-%d...", batch_start + 1, batch_end)
 
-            # Run gradient descent for each candidate in batch
-            # Note: Could use vmap here for true parallelism, but Optimizer.run
-            # is not easily vmappable. For now, run sequentially within batch.
             for i, (params, _, _) in enumerate(batch):
                 result = grad_opt.run(
                     loss_fn=loss_fn,
                     initial_params=params,
                     n_steps=self.gradient_steps,
-                    verbose=False,
                 )
                 results.append(result)
 
-                if verbose:
-                    print(f"    Candidate {batch_start + i + 1}: loss {result.loss:.6e}")
+                logger.info("Candidate %d: loss %.6e", batch_start + i + 1, result.loss)
 
         return results

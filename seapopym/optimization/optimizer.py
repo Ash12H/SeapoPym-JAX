@@ -6,6 +6,7 @@ from Optax (and optionally JAXopt for L-BFGS).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -13,6 +14,8 @@ from typing import Any, Literal
 import jax
 import jax.numpy as jnp
 import optax
+
+logger = logging.getLogger(__name__)
 
 from seapopym.types import Array, Params
 
@@ -260,7 +263,7 @@ class Optimizer:
         n_steps: int = 100,
         tolerance: float = 1e-6,
         callback: Callable[[int, Params, float], None] | None = None,
-        verbose: bool = False,
+        progress_bar: bool = False,
     ) -> OptimizeResult:
         """Run the optimization loop.
 
@@ -271,7 +274,7 @@ class Optimizer:
             tolerance: Convergence tolerance (stop if loss change < tolerance).
             callback: Optional function called at each step with (iteration, params, loss).
                 Note: callback receives denormalized (original space) params.
-            verbose: If True, print progress every 10 iterations.
+            progress_bar: If True, display inline progress indicator.
 
         Returns:
             OptimizeResult with optimized parameters and diagnostics.
@@ -301,8 +304,7 @@ class Optimizer:
             # Check convergence
             if abs(prev_loss - loss_val) < tolerance:
                 converged = True
-                if verbose:
-                    print(f"Converged at iteration {i} with loss {loss_val:.6e}")
+                logger.info("Converged at iteration %d with loss %.6e", i, loss_val)
                 break
 
             # Update parameters (in normalized space)
@@ -312,11 +314,20 @@ class Optimizer:
             if callback is not None:
                 callback(i, self._denormalize(params_norm), loss_val)
 
-            # Verbose output
-            if verbose and i % 10 == 0:
-                print(f"Iteration {i}: loss = {loss_val:.6e}")
+            # Logging
+            if i % 10 == 0:
+                logger.info("Iteration %d/%d: loss = %.6e", i, n_steps, loss_val)
+
+            # Progress bar
+            if progress_bar:
+                print_rate = max(1, n_steps // 20)
+                if i % print_rate == 0 or i == n_steps - 1:
+                    print(f"\r  [{i+1}/{n_steps}] loss={loss_val:.4e}", end="", flush=True)
 
             prev_loss = loss_val
+
+        if progress_bar:
+            print()  # newline after progress bar
 
         # Denormalize final params
         final_params = self._denormalize(params_norm)

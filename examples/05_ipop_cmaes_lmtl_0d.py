@@ -10,8 +10,12 @@ Steps:
 4. Visualize modes found, convergence, and parameter recovery
 """
 
+import logging
 import math
 import time
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO)
 
 import jax
 import jax.numpy as jnp
@@ -22,9 +26,10 @@ import xarray as xr
 
 # Register LMTL functions (already defined in seapopym.functions.lmtl)
 import seapopym.functions.lmtl  # noqa: F401
-from seapopym.blueprint import Blueprint, Config
+from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine.step import build_step_fn
+from seapopym.models import LMTL_0D
 from seapopym.optimization.ipop import run_ipop_cmaes
 
 # Use GPU if available, fall back to CPU
@@ -43,7 +48,7 @@ N_PARAMS = 5
 #   restarts: 9 (Auger & Hansen 2005 benchmark)
 INITIAL_POPSIZE = 4 + int(3 * math.log(N_PARAMS))  # 8 for n=5
 N_GENERATIONS = int(100 + 150 * (N_PARAMS + 3) ** 2 / math.sqrt(INITIAL_POPSIZE))
-N_RESTARTS = 5
+N_RESTARTS = 8
 DISTANCE_THRESHOLD = 0.1
 SEED = 42
 
@@ -51,6 +56,7 @@ SEED = 42
 SPINUP_YEARS = 1  # Stabilize the system before optimization
 OPT_YEARS = 1  # Period on which observations are sampled
 DT = "1d"
+LATITUDE = 30.0  # degrees N
 
 # Twin experiment
 OBS_FRACTION = 0.1  # Fraction of year-2 timesteps sampled as observations
@@ -78,98 +84,18 @@ BOUNDS = {
 # Fixed parameters (not optimized)
 FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
 
+PLOT_FILE = "examples/images/05_ipop_cmaes_lmtl_0d.png"
+
 # =============================================================================
-# BLUEPRINT (0D LMTL)
+# BLUEPRINT (0D LMTL from catalogue)
 # =============================================================================
+
+blueprint = LMTL_0D
 
 max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
 cohort_ages_days = np.arange(0, max_age_days + 1)
 cohort_ages_sec = cohort_ages_days * 86400.0
 n_cohorts = len(cohort_ages_sec)
-
-blueprint = Blueprint.from_dict(
-    {
-        "id": "lmtl-ipop-demo",
-        "version": "1.0",
-        "declarations": {
-            "state": {
-                "biomass": {"units": "g/m^2", "dims": ["Y", "X"]},
-                "production": {"units": "g/m^2", "dims": ["Y", "X", "C"]},
-            },
-            "parameters": {
-                "lambda_0": {"units": "1/s"},
-                "gamma_lambda": {"units": "1/delta_degC"},
-                "tau_r_0": {"units": "s"},
-                "gamma_tau_r": {"units": "1/delta_degC"},
-                "t_ref": {"units": "degC"},
-                "efficiency": {"units": "dimensionless"},
-                "cohort_ages": {"units": "s", "dims": ["C"]},
-            },
-            "forcings": {
-                "temperature": {"units": "degC", "dims": ["T", "Y", "X"]},
-                "primary_production": {"units": "g/m^2/s", "dims": ["T", "Y", "X"]},
-            },
-        },
-        "process": [
-            {
-                "func": "lmtl:gillooly_temperature",
-                "inputs": {"temp": "forcings.temperature"},
-                "outputs": {"return": {"target": "derived.temp_norm", "type": "derived"}},
-            },
-            {
-                "func": "lmtl:recruitment_age",
-                "inputs": {
-                    "temp": "derived.temp_norm",
-                    "tau_r_0": "parameters.tau_r_0",
-                    "gamma": "parameters.gamma_tau_r",
-                    "t_ref": "parameters.t_ref",
-                },
-                "outputs": {"return": {"target": "derived.rec_age", "type": "derived"}},
-            },
-            {
-                "func": "lmtl:npp_injection",
-                "inputs": {
-                    "npp": "forcings.primary_production",
-                    "efficiency": "parameters.efficiency",
-                    "production": "state.production",
-                },
-                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
-            },
-            {
-                "func": "lmtl:aging_flow",
-                "inputs": {
-                    "production": "state.production",
-                    "cohort_ages": "parameters.cohort_ages",
-                    "rec_age": "derived.rec_age",
-                },
-                "outputs": {"return": {"target": "tendencies.production", "type": "tendency"}},
-            },
-            {
-                "func": "lmtl:recruitment_flow",
-                "inputs": {
-                    "production": "state.production",
-                    "cohort_ages": "parameters.cohort_ages",
-                    "rec_age": "derived.rec_age",
-                },
-                "outputs": {
-                    "prod_loss": {"target": "tendencies.production", "type": "tendency"},
-                    "biomass_gain": {"target": "tendencies.biomass", "type": "tendency"},
-                },
-            },
-            {
-                "func": "lmtl:mortality",
-                "inputs": {
-                    "biomass": "state.biomass",
-                    "temp": "derived.temp_norm",
-                    "lambda_0": "parameters.lambda_0",
-                    "gamma": "parameters.gamma_lambda",
-                    "t_ref": "parameters.t_ref",
-                },
-                "outputs": {"return": {"target": "tendencies.biomass", "type": "tendency"}},
-            },
-        ],
-    }
-)
 
 # =============================================================================
 # FORCINGS & CONFIG (spin-up + optimization period)
@@ -189,11 +115,20 @@ ny, nx = 1, 1
 lat = np.arange(ny)
 lon = np.arange(nx)
 
-# Forcing: Temperature (seasonal, 15 +/- 5 degC)
+# Day of year forcing (T, Y, X)
 day_of_year = dates.dayofyear.values
+doy_float = day_of_year.astype(float)
+doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny, nx))
+doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+
+# Forcing: Temperature (seasonal, T, Z=1, Y, X)
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
-temp_3d = np.broadcast_to(temp_c[:, None, None], (len(dates), ny, nx))
-temp_da = xr.DataArray(temp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny, nx))
+temp_da = xr.DataArray(
+    temp_4d,
+    dims=["T", "Z", "Y", "X"],
+    coords={"T": dates, "Z": np.arange(1), "Y": lat, "X": lon},
+)
 
 # Forcing: NPP (seasonal, 1 +/- 0.5 g/m^2/day)
 npp_day = 1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)
@@ -211,8 +146,15 @@ config = Config.from_dict(
             "t_ref": {"value": TRUE_PARAMS["t_ref"]},
             "efficiency": {"value": TRUE_PARAMS["efficiency"]},
             "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+            "day_layer": {"value": 0},
+            "night_layer": {"value": 0},
+            "latitude": {"value": LATITUDE},
         },
-        "forcings": {"temperature": temp_da, "primary_production": npp_da},
+        "forcings": {
+            "temperature": temp_da,
+            "primary_production": npp_da,
+            "day_of_year": doy_da,
+        },
         "initial_state": {
             "biomass": xr.DataArray(np.zeros((ny, nx)), dims=["Y", "X"], coords={"Y": lat, "X": lon}),
             "production": xr.DataArray(
@@ -248,6 +190,9 @@ def run_simulation(params: dict) -> jnp.ndarray:
     """Run full simulation (spin-up + opt period), return biomass time series."""
     full_params = {**params, **{k: jnp.array(v) for k, v in FIXED_PARAMS.items()}}
     full_params["cohort_ages"] = _model.parameters["cohort_ages"]
+    full_params["day_layer"] = _model.parameters["day_layer"]
+    full_params["night_layer"] = _model.parameters["night_layer"]
+    full_params["latitude"] = _model.parameters["latitude"]
 
     def scan_body(carry, t):
         state, p = carry
@@ -336,7 +281,7 @@ if __name__ == "__main__":
         n_generations=N_GENERATIONS,
         distance_threshold=DISTANCE_THRESHOLD,
         seed=SEED,
-        verbose=True,
+        progress_bar=True,
     )
 
     elapsed = time.time() - t0
@@ -425,5 +370,6 @@ if __name__ == "__main__":
     ax3.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
-    plt.savefig("examples/ipop_cmaes_lmtl_0d_results.png", dpi=150)
-    print("\nPlot saved to examples/ipop_cmaes_lmtl_0d_results.png")
+    Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(PLOT_FILE, dpi=150)
+    print(f"\nPlot saved to {PLOT_FILE}")
