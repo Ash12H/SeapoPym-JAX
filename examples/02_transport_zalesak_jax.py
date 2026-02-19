@@ -11,6 +11,7 @@ This test validates:
 """
 
 import time
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -28,7 +29,7 @@ jax.config.update("jax_enable_x64", True)
 # CONFIGURATION - Zalesak (1979) Slotted Disk
 # =============================================================================
 DOMAIN_SIZE = 1.0  # Normalized domain [0, 1]
-GRID_RESOLUTIONS = [32, 64, 128, 256]  # Test resolutions
+GRID_RESOLUTIONS = [32, 64, 128, 256, 512, 1024]  # Test resolutions
 
 # Slotted Disk parameters
 DISK_CENTER_X = 0.50
@@ -259,21 +260,50 @@ if __name__ == "__main__":
     print(f"  Gradient non-zero: {bool(jnp.any(grad != 0))}")
     print("  ✅ Differentiability OK")
 
-    # Plot comparison
+    # Plot comparison (3 columns x 4 rows: 6 pairs initial/final)
     print("\n--- Generating Figure ---")
-    fig, axes = plt.subplots(2, len(results), figsize=(4 * len(results), 8))
+    n_cols = 3
+    n_rows = 4
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
 
     for i, r in enumerate(results):
-        axes[0, i].imshow(r["state_init"], origin="lower", cmap="viridis", vmin=0, vmax=1)
-        axes[0, i].set_title(f"Initial {r['n_cells']}x{r['n_cells']}")
-        axes[0, i].axis("off")
+        col = i % n_cols
+        row_init = (i // n_cols) * 2
+        row_final = row_init + 1
 
-        axes[1, i].imshow(r["state_final"], origin="lower", cmap="viridis", vmin=0, vmax=1)
-        axes[1, i].set_title(f"Final (NRMSE={r['nrmse']:.3f})")
-        axes[1, i].axis("off")
+        axes[row_init, col].imshow(r["state_init"], origin="lower", cmap="viridis", vmin=0, vmax=1)
+        axes[row_init, col].set_title(f"Initial {r['n_cells']}x{r['n_cells']}")
+        axes[row_init, col].axis("off")
+
+        axes[row_final, col].imshow(r["state_final"], origin="lower", cmap="viridis", vmin=0, vmax=1)
+        axes[row_final, col].set_title(f"Final (NRMSE={r['nrmse']:.3f})")
+        axes[row_final, col].axis("off")
 
     plt.suptitle("Zalesak Test - JAX Transport (1 revolution)", fontsize=14)
     plt.tight_layout()
-    plt.savefig("examples/transport_zalesak_jax.png", dpi=150)
-    print("  ✅ Saved: examples/transport_zalesak_jax.png")
+    Path("examples/images").mkdir(parents=True, exist_ok=True)
+    fields_file = "examples/images/02_transport_zalesak_jax_fields.png"
+    plt.savefig(fields_file, dpi=150)
+    print(f"  ✅ Saved: {fields_file}")
+
+    # Convergence plot (NRMSE vs resolution)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    resolutions = np.array([r["n_cells"] for r in results])
+    nrmse_values = np.array([r["nrmse"] for r in results])
+
+    ax.loglog(resolutions, nrmse_values, "o-", color="tab:blue", linewidth=2, markersize=7)
+    ax.loglog(resolutions, nrmse_values[0] * (resolutions[0] / resolutions), "--",
+              color="gray", alpha=0.5, label=f"Order 1 (slope={slope:.2f})")
+    for i, r in enumerate(results):
+        ax.annotate(f"{r['nrmse']:.3f}", (resolutions[i], nrmse_values[i]),
+                    textcoords="offset points", xytext=(5, 8), fontsize=8)
+    ax.set_xlabel("Grid resolution (N)")
+    ax.set_ylabel("NRMSE")
+    ax.set_title(f"Convergence (slope={slope:.2f})")
+    ax.legend()
+    ax.grid(True, alpha=0.3, which="both")
+    fig.tight_layout()
+    convergence_file = "examples/images/02_transport_zalesak_jax_convergence.png"
+    plt.savefig(convergence_file, dpi=150)
+    print(f"  ✅ Saved: {convergence_file}")
     plt.show()

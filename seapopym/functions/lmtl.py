@@ -83,11 +83,9 @@ def day_length(latitude: jnp.ndarray, day_of_year: jnp.ndarray) -> jnp.ndarray:
     backend="jax",
     core_dims={"forcing": ["Z"]},
     units={
-        "forcing": "degC",
         "day_length": "dimensionless",
         "day_layer": "dimensionless",
         "night_layer": "dimensionless",
-        "return": "degC",
     },
 )
 def layer_weighted_mean(

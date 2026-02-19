@@ -1,4 +1,4 @@
-"""CMA-ES → NUTS Pipeline on LMTL 0D Model (Twin Experiment).
+"""CMA-ES → NUTS Pipeline on LMTL 0D Model (Twin Experiment, Noisy Observations).
 
 Two-stage Bayesian parameter estimation:
 1. IPOP-CMA-ES: gradient-free global search in 5D to find mode(s).
@@ -118,9 +118,11 @@ BOUNDS = {
 
 FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
 
-RESULTS_FILE = "examples/results/07_pipeline_results.pkl"
-CORNER_PLOT_FILE = "examples/images/07_pipeline_corner.png"
-BIOMASS_PLOT_FILE = "examples/images/07_pipeline_biomass.png"
+NOISE_LEVEL = 0.30  # 30% Gaussian noise on observations
+
+RESULTS_FILE = "examples/results/07b_noise_pipeline_results.pkl"
+CORNER_PLOT_FILE = "examples/images/07b_noise_pipeline_corner.png"
+BIOMASS_PLOT_FILE = "examples/images/07b_noise_pipeline_biomass.png"
 
 # =============================================================================
 # BLUEPRINT (0D LMTL from catalogue)
@@ -283,6 +285,8 @@ if __name__ == "__main__":
     obs_local_indices = np.sort(rng.choice(n_opt_steps, size=n_obs, replace=False))
     obs_global_indices = obs_local_indices + _spinup_steps
     observations = true_biomass[obs_local_indices]
+    noise = jnp.array(rng.normal(0, NOISE_LEVEL * np.array(observations), size=observations.shape))
+    observations = observations + noise
     obs_std = float(jnp.std(observations))
     print(f"  {n_obs} observations, std={obs_std:.6f}")
 
