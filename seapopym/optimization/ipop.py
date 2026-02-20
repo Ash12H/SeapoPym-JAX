@@ -1,8 +1,9 @@
-"""IPOP-CMA-ES: CMA-ES with increasing population restarts.
+"""IPOP: Increasing population restarts for evolutionary strategies.
 
 Implements the IPOP strategy (Auger & Hansen, 2005) where the population
-size doubles at each restart. Collects distinct modes by filtering
-on parameter-space distance.
+size doubles at each restart. Works with any evosax strategy supported
+by EvolutionaryOptimizer (CMA-ES, SimpleGA, etc.). Collects distinct modes
+by filtering on parameter-space distance.
 """
 
 from __future__ import annotations
@@ -65,18 +66,20 @@ def _is_new_mode(
     )
 
 
-def run_ipop_cmaes(
+def run_ipop(
     loss_fn: Callable[[Params], Array],
     initial_params: Params,
     bounds: dict[str, tuple[float, float]],
+    strategy: str = "cma_es",
     n_restarts: int = 5,
     initial_popsize: int = 32,
     n_generations: int = 100,
     distance_threshold: float = 0.1,
     seed: int = 0,
     progress_bar: bool = False,
+    **strategy_kwargs,
 ) -> IPOPResult:
-    """Run IPOP-CMA-ES with increasing population restarts.
+    """Run IPOP with increasing population restarts for any evosax strategy.
 
     At each restart the population doubles (IPOP strategy, Auger & Hansen 2005).
     Initial positions are sampled uniformly within bounds. Distinct modes
@@ -87,20 +90,23 @@ def run_ipop_cmaes(
         initial_params: Starting position for the first restart.
         bounds: Parameter bounds as {name: (min, max)}. Required for
             random initialization of restarts.
+        strategy: Evosax strategy name ("cma_es", "simple_ga").
         n_restarts: Number of restarts to perform.
         initial_popsize: Population size for the first restart (doubles each time).
         n_generations: Number of generations per restart.
         distance_threshold: Minimum Euclidean distance between modes.
         seed: Random seed for reproducibility.
         progress_bar: If True, display inline progress indicator.
+        **strategy_kwargs: Extra keyword arguments passed to EvolutionaryOptimizer
+            (e.g. crossover_rate, mutation_std for SimpleGA).
 
     Returns:
         IPOPResult with distinct modes sorted by loss.
 
     Example:
-        >>> result = run_ipop_cmaes(
+        >>> result = run_ipop(
         ...     loss_fn, initial_params={"x": jnp.array(0.0)},
-        ...     bounds={"x": (-5.0, 5.0)}, n_restarts=3,
+        ...     bounds={"x": (-5.0, 5.0)}, strategy="cma_es", n_restarts=3,
         ... )
         >>> result.modes[0].loss  # best mode
     """
@@ -122,11 +128,16 @@ def run_ipop_cmaes(
                 start_params[name] = jax.random.uniform(subkey, minval=low, maxval=high)
 
         optimizer = EvolutionaryOptimizer(
+            strategy=strategy,
             popsize=popsize,
             bounds=bounds,
             seed=seed + i,
+            **strategy_kwargs,
         )
-        logger.info("Restart %d/%d: popsize=%d, %d generations", i + 1, n_restarts, popsize, n_generations)
+        logger.info(
+            "Restart %d/%d (%s): popsize=%d, %d generations",
+            i + 1, n_restarts, strategy, popsize, n_generations,
+        )
         t0 = time.time()
 
         result = optimizer.run(loss_fn, start_params, n_generations=n_generations, progress_bar=progress_bar)
@@ -146,3 +157,29 @@ def run_ipop_cmaes(
     modes.sort(key=lambda r: r.loss)
 
     return IPOPResult(modes=modes, all_results=all_results, n_restarts=n_restarts)
+
+
+def run_ipop_cmaes(
+    loss_fn: Callable[[Params], Array],
+    initial_params: Params,
+    bounds: dict[str, tuple[float, float]],
+    n_restarts: int = 5,
+    initial_popsize: int = 32,
+    n_generations: int = 100,
+    distance_threshold: float = 0.1,
+    seed: int = 0,
+    progress_bar: bool = False,
+) -> IPOPResult:
+    """Run IPOP-CMA-ES. Convenience alias for ``run_ipop(strategy="cma_es", ...)``."""
+    return run_ipop(
+        loss_fn=loss_fn,
+        initial_params=initial_params,
+        bounds=bounds,
+        strategy="cma_es",
+        n_restarts=n_restarts,
+        initial_popsize=initial_popsize,
+        n_generations=n_generations,
+        distance_threshold=distance_threshold,
+        seed=seed,
+        progress_bar=progress_bar,
+    )

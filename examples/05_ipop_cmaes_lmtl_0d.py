@@ -54,13 +54,13 @@ SEED = 42
 
 # Simulation
 SPINUP_YEARS = 1  # Stabilize the system before optimization
-OPT_YEARS = 1  # Period on which observations are sampled
+OPT_YEARS = 2  # Period on which observations are sampled
 DT = "1d"
 LATITUDE = 30.0  # degrees N
 
 # Twin experiment
 OBS_FRACTION = 0.1  # Fraction of year-2 timesteps sampled as observations
-INITIAL_GUESS_FACTOR = 1  # Initial guess = factor × true values
+INITIAL_GUESS_FACTOR = 1.5  # Initial guess = factor × true values
 
 # True biological parameters (to be recovered)
 TRUE_PARAMS = {

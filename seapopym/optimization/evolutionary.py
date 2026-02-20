@@ -1,10 +1,10 @@
-"""Evolutionary optimization using CMA-ES via evosax.
+"""Evolutionary optimization using evosax strategies (CMA-ES, GA, etc.).
 
 Provides a wrapper around evosax strategies with the same API as Optimizer,
 enabling easy comparison between gradient-based and evolutionary methods.
 
 Population evaluation is JIT-compiled and vmapped for GPU acceleration.
-Parameters are normalized to [0,1] using bounds for proper CMA-ES scaling.
+Parameters are normalized to [0,1] using bounds for proper scaling.
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ from typing import Literal
 
 import jax
 import jax.numpy as jnp
-from evosax.algorithms import CMA_ES
+import optax
+from evosax.algorithms import CMA_ES, SimpleGA
 
 logger = logging.getLogger(__name__)
 
@@ -25,43 +26,52 @@ from seapopym.types import Array, Params
 
 
 class EvolutionaryOptimizer:
-    """CMA-ES optimizer with same API as Optimizer.
+    """Evolutionary optimizer wrapping evosax strategies (CMA-ES, SimpleGA).
 
-    Uses evosax's CMA-ES implementation for derivative-free optimization.
+    Uses evosax strategies for derivative-free optimization.
     Automatically handles conversion between parameter dicts and flat arrays.
 
     When bounds are provided, the optimization is performed in normalized
-    [0,1] space (Hansen recommendation) so that CMA-ES can handle parameters
-    spanning many orders of magnitude.
+    [0,1] space so that the strategy can handle parameters spanning many
+    orders of magnitude.
 
     Example:
         >>> optimizer = EvolutionaryOptimizer(popsize=32, bounds={"x": (0, 10)})
         >>> result = optimizer.run(loss_fn, {"x": jnp.array(5.0)}, n_generations=100)
+        >>> optimizer = EvolutionaryOptimizer(
+        ...     strategy="simple_ga", popsize=64, bounds={"x": (0, 10)},
+        ...     crossover_rate=0.5, mutation_std=0.1,
+        ... )
     """
 
     STRATEGIES = {
         "cma_es": CMA_ES,
+        "simple_ga": SimpleGA,
     }
 
     def __init__(
         self,
-        strategy: Literal["cma_es"] = "cma_es",
+        strategy: Literal["cma_es", "simple_ga"] = "cma_es",
         popsize: int = 32,
         bounds: dict[str, tuple[float, float]] | None = None,
         seed: int = 0,
+        crossover_rate: float = 0.5,
+        mutation_std: float = 0.1,
     ) -> None:
         if strategy not in self.STRATEGIES:
             msg = f"Unknown strategy '{strategy}'. Available: {list(self.STRATEGIES.keys())}"
             raise ValueError(msg)
 
-        # Ensure popsize is even (required by CMA-ES)
-        if popsize % 2 != 0:
+        # Ensure popsize is even (required by CMA-ES only)
+        if strategy == "cma_es" and popsize % 2 != 0:
             popsize += 1
 
         self.strategy_name = strategy
         self.popsize = popsize
         self.bounds = bounds or {}
         self.seed = seed
+        self.crossover_rate = crossover_rate
+        self.mutation_std = mutation_std
 
         self._strategy_cls = self.STRATEGIES[strategy]
 
@@ -114,6 +124,37 @@ class EvolutionaryOptimizer:
             idx += size
         return params
 
+    def _build_strategy(self, solution: Array):
+        """Construct the evosax strategy with appropriate parameters."""
+        if self.strategy_name == "simple_ga":
+            return self._strategy_cls(
+                population_size=self.popsize,
+                solution=solution,
+                std_schedule=optax.constant_schedule(self.mutation_std),
+            )
+        return self._strategy_cls(population_size=self.popsize, solution=solution)
+
+    def _build_params(self, strategy):
+        """Build strategy params, applying GA-specific overrides."""
+        params = strategy.default_params
+        if self.strategy_name == "simple_ga":
+            params = params.replace(crossover_rate=self.crossover_rate)
+        return params
+
+    def _init_state(self, strategy, key, x0_norm, es_params, eval_population):
+        """Initialize strategy state, handling API differences.
+
+        CMA_ES.init(key, mean, params) — distribution-based, takes a mean.
+        SimpleGA.init(key, population, fitness, params) — population-based,
+        takes an initial population and its fitness.
+        """
+        if self.strategy_name == "simple_ga":
+            # Generate initial population uniformly in [0,1]
+            pop = jax.random.uniform(key, shape=(self.popsize, x0_norm.shape[0]))
+            fitness = eval_population(pop)
+            return strategy.init(key, pop, fitness, es_params)
+        return strategy.init(key, x0_norm, es_params)
+
     def run(
         self,
         loss_fn: Callable[[Params], Array],
@@ -125,7 +166,7 @@ class EvolutionaryOptimizer:
     ) -> OptimizeResult:
         """Run the evolutionary optimization with early stopping.
 
-        The optimization runs in normalized [0,1] space. CMA-ES samples are
+        The optimization runs in normalized [0,1] space. Samples are
         clipped to [0,1] then denormalized before evaluating the loss.
 
         Stops early when the best loss has not improved by more than
@@ -134,7 +175,9 @@ class EvolutionaryOptimizer:
 
         Args:
             loss_fn: Function mapping params -> scalar loss.
-            initial_params: Starting parameter values (used as initial mean).
+            initial_params: Starting parameter values (used as initial mean
+                for CMA-ES; ignored by SimpleGA which starts from a random
+                population within bounds).
             n_generations: Maximum number of generations to run.
             tol_fun: Relative improvement threshold for early stopping.
             patience: Number of generations without improvement before stopping.
@@ -151,14 +194,6 @@ class EvolutionaryOptimizer:
         # Normalize initial point to [0,1]
         x0_norm = self._normalize(x0, lower, upper)
 
-        # Initialize strategy in normalized space
-        strategy = self._strategy_cls(population_size=self.popsize, solution=x0_norm)
-        es_params = strategy.default_params
-
-        key = jax.random.key(self.seed)
-        key, init_key = jax.random.split(key)
-        state = strategy.init(init_key, x0_norm, es_params)
-
         # JIT-compiled vectorized loss: normalized [0,1] -> loss
         def eval_one(flat_norm: Array) -> Array:
             flat_orig = self._denormalize(flat_norm, lower, upper)
@@ -166,6 +201,14 @@ class EvolutionaryOptimizer:
             return jnp.squeeze(loss_fn(params))
 
         eval_population = jax.jit(jax.vmap(eval_one))
+
+        # Initialize strategy in normalized space
+        strategy = self._build_strategy(x0_norm)
+        es_params = self._build_params(strategy)
+
+        key = jax.random.key(self.seed)
+        key, init_key = jax.random.split(key)
+        state = self._init_state(strategy, init_key, x0_norm, es_params, eval_population)
 
         # Normalized bounds for clipping
         norm_lower = jnp.zeros_like(x0_norm)

@@ -1,14 +1,22 @@
-"""IPOP-CMA-ES on LMTL 0D Model (Twin Experiment, Noisy Observations).
+"""CMA-ES vs SimpleGA comparison on LMTL 0D (Twin Experiment).
 
-Demonstrates multi-restart CMA-ES with increasing population (IPOP strategy,
-Auger & Hansen 2005) on a 0D LMTL ecosystem model with 30% Gaussian noise
-added to observations.
+Compares IPOP-CMA-ES and IPOP-SimpleGA on a 0D LMTL ecosystem model
+across multiple noise levels. Both algorithms use the same IPOP restart
+framework (Auger & Hansen 2005) and the same total evaluation budget,
+isolating the effect of the optimization algorithm.
+
+CMA-ES adapts a full covariance matrix capturing parameter correlations,
+while SimpleGA uses elitist selection + uniform crossover + Gaussian mutation
+without any covariance model.
 
 Steps:
 1. Spin-up: simulate SPINUP_YEARS to stabilize the system
-2. Optimization year: generate synthetic observations on OPT_YEARS + add noise
-3. Run IPOP-CMA-ES to recover the parameters
-4. Visualize modes found, convergence, and parameter recovery
+2. For each noise level (0%, 10%, 20%):
+   a. Generate synthetic observations + noise
+   b. Run IPOP-CMA-ES
+   c. Run IPOP-SimpleGA (same restarts, same budget)
+   d. Record best loss and parameter recovery error
+3. Visualize comparison across noise levels
 """
 
 import logging
@@ -31,46 +39,45 @@ from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine.step import build_step_fn
 from seapopym.models import LMTL_0D
-from seapopym.optimization.ipop import run_ipop_cmaes
+from seapopym.optimization.ipop import run_ipop
 
 # Use GPU if available, fall back to CPU
 print(f"JAX devices: {jax.devices()}")
 
 # =============================================================================
-# CONFIGURATION — modify these to tune the experiment
+# CONFIGURATION
 # =============================================================================
 
-# Number of optimized parameters (used for Hansen defaults below)
 N_PARAMS = 5
 
-# IPOP-CMA-ES — Hansen defaults (pycma, Auger & Hansen 2005)
-#   popsize:  4 + floor(3 * ln(n))
-#   maxiter:  100 + 150 * (n+3)^2 / sqrt(popsize)
-#   restarts: 9 (Auger & Hansen 2005 benchmark)
+# IPOP settings (Hansen defaults for n=5)
 INITIAL_POPSIZE = 4 + int(3 * math.log(N_PARAMS))  # 8 for n=5
 N_GENERATIONS = int(100 + 150 * (N_PARAMS + 3) ** 2 / math.sqrt(INITIAL_POPSIZE))
-N_RESTARTS = 8
+N_RESTARTS = 5
 DISTANCE_THRESHOLD = 0.1
 SEED = 42
 
 # Simulation
-SPINUP_YEARS = 1  # Stabilize the system before optimization
-OPT_YEARS = 2  # Period on which observations are sampled
+SPINUP_YEARS = 1
+OPT_YEARS = 2
 DT = "1d"
-LATITUDE = 30.0  # degrees N
+LATITUDE = 30.0
 
 # Twin experiment
-OBS_FRACTION = 0.1  # Fraction of year-2 timesteps sampled as observations
-INITIAL_GUESS_FACTOR = 1.5  # Initial guess = factor × true values
+OBS_FRACTION = 0.1
+INITIAL_GUESS_FACTOR = 1.5
+
+# Noise sweep
+NOISE_LEVELS = [0.0, 0.10, 0.20]
 
 # True biological parameters (to be recovered)
 TRUE_PARAMS = {
-    "lambda_0": 1 / 150 / 86400,  # 1/s — base mortality rate
-    "gamma_lambda": 0.15,  # 1/degC — mortality temperature sensitivity
-    "tau_r_0": 10.38 * 86400,  # s — base recruitment age
-    "gamma_tau_r": 0.11,  # 1/degC — recruitment temperature sensitivity
-    "efficiency": 0.1668,  # dimensionless — NPP-to-biomass efficiency
-    "t_ref": 0.0,  # degC — reference temperature (fixed, not optimized)
+    "lambda_0": 1 / 150 / 86400,
+    "gamma_lambda": 0.15,
+    "tau_r_0": 10.38 * 86400,
+    "gamma_tau_r": 0.11,
+    "efficiency": 0.1668,
+    "t_ref": 0.0,  # fixed, not optimized
 }
 
 # Bounds for optimized parameters
@@ -82,12 +89,13 @@ BOUNDS = {
     "efficiency": (0.01, 5 * TRUE_PARAMS["efficiency"]),
 }
 
-# Fixed parameters (not optimized)
 FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
 
-NOISE_LEVEL = 0.15  # 30% Gaussian noise on observations
+# SimpleGA hyperparameters
+GA_CROSSOVER_RATE = 0.5
+GA_MUTATION_STD = 0.1
 
-PLOT_FILE = "examples/images/05b_noise_ipop_cmaes_lmtl_0d.png"
+PLOT_FILE = "examples/images/08_cmaes_vs_ga_lmtl_0d.png"
 
 # =============================================================================
 # BLUEPRINT (0D LMTL from catalogue)
@@ -113,18 +121,15 @@ end_pd = pd.to_datetime(end_date)
 n_days = (end_pd - start_pd).days + 5
 dates = pd.date_range(start=start_pd, periods=n_days, freq="D")
 
-# Grid 1x1 (0D)
 ny, nx = 1, 1
 lat = np.arange(ny)
 lon = np.arange(nx)
 
-# Day of year forcing (T, Y, X)
 day_of_year = dates.dayofyear.values
 doy_float = day_of_year.astype(float)
 doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny, nx))
 doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
-# Forcing: Temperature (seasonal, T, Z=1, Y, X)
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny, nx))
 temp_da = xr.DataArray(
@@ -133,7 +138,6 @@ temp_da = xr.DataArray(
     coords={"T": dates, "Z": np.arange(1), "Y": lat, "X": lon},
 )
 
-# Forcing: NPP (seasonal, 1 +/- 0.5 g/m^2/day)
 npp_day = 1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)
 npp_sec = npp_day / 86400.0
 npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
@@ -185,7 +189,6 @@ _n_timesteps = _model.n_timesteps
 _initial_state = _model.state
 _forcings_stacked = _model.forcings.get_all()
 
-# Spin-up / optimization split
 _spinup_steps = int(SPINUP_YEARS / total_years * _n_timesteps)
 
 
@@ -220,158 +223,181 @@ def run_simulation(params: dict) -> jnp.ndarray:
 # =============================================================================
 
 if __name__ == "__main__":
+    param_names = list(BOUNDS.keys())
+    true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
+
     print("=" * 60)
-    print("IPOP-CMA-ES on LMTL 0D (Twin Experiment)")
+    print("CMA-ES vs SimpleGA on LMTL 0D (Twin Experiment)")
     print(f"  Spin-up: {SPINUP_YEARS} year(s)  |  Optimization: {OPT_YEARS} year(s)")
     print(
-        f"  IPOP: {N_RESTARTS} restarts, pop {INITIAL_POPSIZE}→{INITIAL_POPSIZE * 2 ** (N_RESTARTS - 1)}, "
+        f"  IPOP: {N_RESTARTS} restarts, pop {INITIAL_POPSIZE}"
+        f"->{INITIAL_POPSIZE * 2 ** (N_RESTARTS - 1)}, "
         f"{N_GENERATIONS} gen"
     )
+    print(f"  Noise levels: {[f'{n*100:.0f}%' for n in NOISE_LEVELS]}")
     print("=" * 60)
 
-    # ----- Generate observations with TRUE parameters (year 2 only) -----
+    # ----- Generate TRUE biomass (once) -----
     print("\nGenerating observations with TRUE parameters...")
     t0 = time.time()
     true_params_jax = {k: jnp.array(TRUE_PARAMS[k]) for k in BOUNDS}
     true_biomass_full = run_simulation(true_params_jax)
-
-    # Split: year 1 = spin-up, year 2 = optimization
     true_biomass = true_biomass_full[_spinup_steps:]
     n_opt_steps = len(true_biomass)
+    print(f"  Simulation: {time.time() - t0:.2f}s  ({n_opt_steps} opt steps)")
 
-    print(
-        f"  Simulation: {time.time() - t0:.2f}s  ({_n_timesteps} total steps, "
-        f"{_spinup_steps} spin-up, {n_opt_steps} opt)"
-    )
-    print(f"  Year 2 biomass range: [{float(jnp.min(true_biomass)):.4f}, {float(jnp.max(true_biomass)):.4f}]")
-
-    # Sample observations on year 2
+    # Sample observation indices (shared across noise levels)
     n_obs = max(1, int(OBS_FRACTION * n_opt_steps))
     rng = np.random.default_rng(SEED)
     obs_local_indices = np.sort(rng.choice(n_opt_steps, size=n_obs, replace=False))
-    obs_global_indices = obs_local_indices + _spinup_steps  # indices in full simulation
-    observations = true_biomass[obs_local_indices]
-    noise = jnp.array(rng.normal(0, NOISE_LEVEL * np.array(observations), size=observations.shape))
-    observations = observations + noise
-    obs_std = float(jnp.std(observations))
-    print(f"  {n_obs} observations ({100 * n_obs / n_opt_steps:.1f}%), std={obs_std:.6f}")
-
-    # ----- Loss function (NRMSE-std, year 2 only) -----
-    def loss_fn(params: dict) -> jnp.ndarray:
-        """NRMSE-std loss computed on year 2 only."""
-        biomass_full = run_simulation(params)
-        pred = biomass_full[obs_global_indices]
-        rmse = jnp.sqrt(jnp.mean((pred - observations) ** 2))
-        return rmse / obs_std
-
-    # Sanity check: true params should give loss ≈ 0
-    true_loss = loss_fn(true_params_jax)
-    print(f"  Sanity check: loss(true_params) = {float(true_loss):.6e}")
+    obs_global_indices = obs_local_indices + _spinup_steps
+    clean_observations = true_biomass[obs_local_indices]
 
     # Initial guess
     initial_params = {k: jnp.array(INITIAL_GUESS_FACTOR * TRUE_PARAMS[k]) for k in BOUNDS}
-    initial_loss = loss_fn(initial_params)
-    print(f"\nInitial guess ({INITIAL_GUESS_FACTOR}x true), loss = {float(initial_loss):.6f}")
 
-    # ----- IPOP-CMA-ES -----
-    print("\nRunning IPOP-CMA-ES...")
-    t0 = time.time()
+    # ----- Run comparison across noise levels -----
+    results = {"cma_es": [], "simple_ga": []}
 
-    result = run_ipop_cmaes(
-        loss_fn=loss_fn,
-        initial_params=initial_params,
-        bounds=BOUNDS,
-        n_restarts=N_RESTARTS,
-        initial_popsize=INITIAL_POPSIZE,
-        n_generations=N_GENERATIONS,
-        distance_threshold=DISTANCE_THRESHOLD,
-        seed=SEED,
-        progress_bar=True,
-    )
+    for noise_level in NOISE_LEVELS:
+        print(f"\n{'=' * 60}")
+        print(f"Noise level: {noise_level * 100:.0f}%")
+        print("=" * 60)
 
-    elapsed = time.time() - t0
-    print(f"\nCompleted in {elapsed:.1f}s")
-    print(f"Found {len(result.modes)} distinct mode(s) across {result.n_restarts} restarts")
+        # Add noise to observations
+        if noise_level > 0:
+            noise_rng = np.random.default_rng(SEED + int(noise_level * 1000))
+            noise = jnp.array(
+                noise_rng.normal(0, noise_level * np.array(clean_observations), size=clean_observations.shape)
+            )
+            observations = clean_observations + noise
+        else:
+            observations = clean_observations
 
-    # ----- Results -----
-    param_names = list(BOUNDS.keys())
+        obs_std = float(jnp.std(observations))
 
+        # Loss function (NRMSE-std)
+        def _make_loss(obs, std):
+            def _loss(params: dict) -> jnp.ndarray:
+                biomass_full = run_simulation(params)
+                pred = biomass_full[obs_global_indices]
+                rmse = jnp.sqrt(jnp.mean((pred - obs) ** 2))
+                return rmse / std
+            return _loss
+
+        loss_fn = _make_loss(observations, obs_std)
+
+        for strategy, label in [("cma_es", "IPOP-CMA-ES"), ("simple_ga", "IPOP-SimpleGA")]:
+            print(f"\n  Running {label}...")
+            t0 = time.time()
+
+            strategy_kwargs = {}
+            if strategy == "simple_ga":
+                strategy_kwargs = {"crossover_rate": GA_CROSSOVER_RATE, "mutation_std": GA_MUTATION_STD}
+
+            result = run_ipop(
+                loss_fn=loss_fn,
+                initial_params=initial_params,
+                bounds=BOUNDS,
+                strategy=strategy,
+                n_restarts=N_RESTARTS,
+                initial_popsize=INITIAL_POPSIZE,
+                n_generations=N_GENERATIONS,
+                distance_threshold=DISTANCE_THRESHOLD,
+                seed=SEED,
+                progress_bar=True,
+                **strategy_kwargs,
+            )
+
+            elapsed = time.time() - t0
+            best = result.modes[0]
+
+            # Parameter recovery error (relative)
+            pred_vals = np.array([float(best.params[p]) for p in param_names])
+            rel_error = np.mean(np.abs(pred_vals - true_vals) / true_vals)
+
+            # Total function evaluations = sum(popsize_i * n_generations_i)
+            total_evals = sum(
+                INITIAL_POPSIZE * (2**i) * r.n_iterations
+                for i, r in enumerate(result.all_results)
+            )
+
+            results[strategy].append({
+                "noise": noise_level,
+                "loss": best.loss,
+                "rel_error": rel_error,
+                "n_modes": len(result.modes),
+                "total_evals": total_evals,
+                "elapsed": elapsed,
+                "params": {p: float(best.params[p]) for p in param_names},
+            })
+
+            print(f"    {label}: loss={best.loss:.6f}, rel_error={rel_error:.4f}, "
+                  f"evals={total_evals:,}, modes={len(result.modes)}, time={elapsed:.1f}s")
+
+    # ----- Summary table -----
     print("\n" + "=" * 60)
-    print("Modes found (sorted by loss)")
+    print("Summary")
     print("=" * 60)
 
-    header = f"{'Mode':<6} {'Loss':>10}"
-    for p in param_names:
-        header += f" {p[:8]:>10}"
+    header = (
+        f"{'Noise':>6} | {'CMA-ES loss':>12} {'GA loss':>12} | "
+        f"{'CMA-ES err':>12} {'GA err':>12} | {'CMA-ES evals':>13} {'GA evals':>13}"
+    )
     print(header)
     print("-" * len(header))
-
-    row = f"{'True':<6} {0.0:>10.6f}"
-    for p in param_names:
-        row += f" {TRUE_PARAMS[p]:>10.4g}"
-    print(row)
-
-    for i, mode in enumerate(result.modes):
-        row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
-        for p in param_names:
-            row += f" {float(mode.params[p]):>10.4g}"
-        print(row)
+    for i, noise in enumerate(NOISE_LEVELS):
+        cma = results["cma_es"][i]
+        ga = results["simple_ga"][i]
+        print(
+            f"{noise*100:5.0f}% | {cma['loss']:12.6f} {ga['loss']:12.6f} | "
+            f"{cma['rel_error']:12.4f} {ga['rel_error']:12.4f} | "
+            f"{cma['total_evals']:13,} {ga['total_evals']:13,}"
+        )
 
     # ----- Visualization -----
-    n_modes = len(result.modes)
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 
-    # Plot 1: Loss per restart
+    noise_pct = [n * 100 for n in NOISE_LEVELS]
+
+    # Plot 1: Best loss vs noise
     ax1 = axes[0]
-    restart_losses = [float(r.loss) for r in result.all_results]
-    mode_indices = [i for i, r in enumerate(result.all_results) if any(m.loss == r.loss for m in result.modes)]
-    ax1.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
-    ax1.bar(mode_indices, [restart_losses[i] for i in mode_indices], color="orangered", alpha=0.9)
-    ax1.set_xlabel("Restart")
-    ax1.set_ylabel("Loss (NRMSE-std)")
-    ax1.set_title("Loss per restart")
-    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
-    ax1.set_xticks(range(len(restart_losses)))
-    ax1.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
+    cma_losses = [r["loss"] for r in results["cma_es"]]
+    ga_losses = [r["loss"] for r in results["simple_ga"]]
+    ax1.plot(noise_pct, cma_losses, "o-", color="steelblue", linewidth=2, markersize=8, label="IPOP-CMA-ES")
+    ax1.plot(noise_pct, ga_losses, "s--", color="orangered", linewidth=2, markersize=8, label="IPOP-SimpleGA")
+    ax1.set_xlabel("Noise level (%)")
+    ax1.set_ylabel("Best loss (NRMSE-std)")
+    ax1.set_title("Convergence quality vs noise")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
 
-    # Plot 2: Biomass trajectories (year 2 only)
+    # Plot 2: Parameter recovery error vs noise
     ax2 = axes[1]
-    dt_seconds = _model.dt
-    time_days = np.arange(n_opt_steps) * dt_seconds / 86400.0
-    ax2.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
-    ax2.scatter(obs_local_indices * dt_seconds / 86400.0, observations, c="red", s=20, zorder=5, label="Observations")
-
-    colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
-    for i, mode in enumerate(result.modes):
-        pred_full = run_simulation(mode.params)
-        pred = pred_full[_spinup_steps:]
-        ax2.plot(time_days, pred, "--", color=colors[i], linewidth=1.5, label=f"Mode #{i + 1}")
-
-    ax2.set_xlabel("Day (year 2)")
-    ax2.set_ylabel("Biomass (g/m²)")
-    ax2.set_title("Biomass trajectories (year 2)")
-    ax2.legend(fontsize=8)
+    cma_errors = [r["rel_error"] for r in results["cma_es"]]
+    ga_errors = [r["rel_error"] for r in results["simple_ga"]]
+    ax2.plot(noise_pct, cma_errors, "o-", color="steelblue", linewidth=2, markersize=8, label="IPOP-CMA-ES")
+    ax2.plot(noise_pct, ga_errors, "s--", color="orangered", linewidth=2, markersize=8, label="IPOP-SimpleGA")
+    ax2.set_xlabel("Noise level (%)")
+    ax2.set_ylabel("Mean relative parameter error")
+    ax2.set_title("Parameter recovery vs noise")
+    ax2.legend()
     ax2.grid(True, alpha=0.3)
 
-    # Plot 3: Parameter recovery
+    # Plot 3: Total function evaluations vs noise
     ax3 = axes[2]
-    x = np.arange(len(param_names))
-    width = 0.8 / (n_modes + 1)
-
-    ax3.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", color="black", alpha=0.3)
-    true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
-
-    for i, mode in enumerate(result.modes):
-        pred_vals = np.array([float(mode.params[p]) for p in param_names])
-        ratios = pred_vals / true_vals
-        ax3.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
-
+    cma_evals = [r["total_evals"] for r in results["cma_es"]]
+    ga_evals = [r["total_evals"] for r in results["simple_ga"]]
+    x = np.arange(len(NOISE_LEVELS))
+    width = 0.35
+    ax3.bar(x - width / 2, cma_evals, width, color="steelblue", label="IPOP-CMA-ES")
+    ax3.bar(x + width / 2, ga_evals, width, color="orangered", label="IPOP-SimpleGA")
+    ax3.set_xlabel("Noise level (%)")
+    ax3.set_ylabel("Total function evaluations")
+    ax3.set_title("Computational budget (with early stopping)")
     ax3.set_xticks(x)
-    ax3.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
-    ax3.set_ylabel("Ratio to true value")
-    ax3.set_title("Parameter recovery")
-    ax3.axhline(y=1, color="k", linestyle="--", alpha=0.5)
-    ax3.legend(fontsize=8)
+    ax3.set_xticklabels([f"{n*100:.0f}%" for n in NOISE_LEVELS])
+    ax3.legend()
     ax3.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
