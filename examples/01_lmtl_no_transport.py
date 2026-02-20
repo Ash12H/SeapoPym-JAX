@@ -3,7 +3,7 @@
 This script demonstrates the LMTL (Low/Mid Trophic Level) ecosystem model
 using a pre-defined blueprint from the model catalogue with JAX backend.
 
-Processes (from LMTL_0D blueprint):
+Processes (from LMTL_NO_TRANSPORT blueprint):
 1. Day length (CBM photoperiod model)
 2. DVM-weighted mean temperature (layer_weighted_mean)
 3. Threshold temperature (max(T, T_ref))
@@ -29,7 +29,7 @@ import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine import StreamingRunner
-from seapopym.models import LMTL_0D
+from seapopym.models import LMTL_NO_TRANSPORT
 
 # =============================================================================
 # 1. PARAMETERS
@@ -50,7 +50,7 @@ PLOT_FILE = "examples/images/01_lmtl_no_transport.png"
 # 2. BLUEPRINT
 # =============================================================================
 
-blueprint = LMTL_0D
+blueprint = LMTL_NO_TRANSPORT
 
 max_age_days = int(np.ceil(LMTL_TAU_R_0))
 cohort_ages_sec = np.arange(0, max_age_days + 1) * 86400.0
@@ -113,8 +113,8 @@ config = Config.from_dict(
             "t_ref": {"value": LMTL_T_REF},
             "efficiency": {"value": LMTL_E},
             "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
-            "day_layer": {"value": 0},
-            "night_layer": {"value": 0},
+            "day_layer": xr.DataArray([0], dims=["F"]),
+            "night_layer": xr.DataArray([0], dims=["F"]),
             "latitude": {"value": LATITUDE},
         },
         "forcings": {
@@ -123,9 +123,9 @@ config = Config.from_dict(
             "day_of_year": doy_da,
         },
         "initial_state": {
-            "biomass": xr.DataArray(np.zeros((ny, nx)), dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+            "biomass": xr.DataArray(np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}),
             "production": xr.DataArray(
-                np.zeros((ny, nx, n_cohorts)), dims=["Y", "X", "C"], coords={"Y": lat, "X": lon}
+                np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
             ),
         },
         "execution": {

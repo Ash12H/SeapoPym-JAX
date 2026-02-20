@@ -1,14 +1,14 @@
-id: lmtl-2d
+id: seapodym-lmtl-no-transport
 version: "1.0"
 
 declarations:
   state:
     biomass:
       units: "g/m^2"
-      dims: [Y, X]
+      dims: [F, Y, X]
     production:
       units: "g/m^2"
-      dims: [Y, X, C]
+      dims: [F, Y, X, C]
 
   parameters:
     lambda_0:
@@ -28,8 +28,10 @@ declarations:
       dims: [C]
     day_layer:
       units: "dimensionless"
+      dims: [F]
     night_layer:
       units: "dimensionless"
+      dims: [F]
     latitude:
       units: "degrees"
 
@@ -43,34 +45,6 @@ declarations:
     day_of_year:
       units: "dimensionless"
       dims: [T, Y, X]
-    # Transport forcings
-    u:
-      units: "m/s"
-      dims: [T, Y, X]
-    v:
-      units: "m/s"
-      dims: [T, Y, X]
-    D:
-      units: "m^2/s"
-      dims: [T, Y, X]
-    dx:
-      units: "m"
-      dims: [Y, X]
-    dy:
-      units: "m"
-      dims: [Y, X]
-    face_height:
-      units: "m"
-      dims: [Y, X]
-    face_width:
-      units: "m"
-      dims: [Y, X]
-    cell_area:
-      units: "m^2"
-      dims: [Y, X]
-    mask:
-      units: "dimensionless"
-      dims: [Y, X]
 
 process:
   # --- Environment ---
@@ -104,13 +78,19 @@ process:
     outputs:
       return: { target: derived.temp_norm, type: derived }
 
+  - func: "lmtl:gillooly_temperature"
+    inputs:
+      temp: parameters.t_ref
+    outputs:
+      return: { target: derived.t_ref_norm, type: derived }
+
   # --- Derived quantities ---
   - func: "lmtl:recruitment_age"
     inputs:
       temp: derived.temp_norm
       tau_r_0: parameters.tau_r_0
       gamma: parameters.gamma_tau_r
-      t_ref: parameters.t_ref
+      t_ref: derived.t_ref_norm
     outputs:
       return: { target: derived.rec_age, type: derived }
 
@@ -146,40 +126,6 @@ process:
       temp: derived.temp_norm
       lambda_0: parameters.lambda_0
       gamma: parameters.gamma_lambda
-      t_ref: parameters.t_ref
+      t_ref: derived.t_ref_norm
     outputs:
       return: { target: tendencies.biomass, type: tendency }
-
-  # --- Transport (biomass) ---
-  - func: "phys:transport_tendency"
-    inputs:
-      state: state.biomass
-      u: forcings.u
-      v: forcings.v
-      D: forcings.D
-      dx: forcings.dx
-      dy: forcings.dy
-      face_height: forcings.face_height
-      face_width: forcings.face_width
-      cell_area: forcings.cell_area
-      mask: forcings.mask
-    outputs:
-      advection_rate: { target: tendencies.biomass, type: tendency }
-      diffusion_rate: { target: tendencies.biomass, type: tendency }
-
-  # --- Transport (production) ---
-  - func: "phys:transport_tendency"
-    inputs:
-      state: state.production
-      u: forcings.u
-      v: forcings.v
-      D: forcings.D
-      dx: forcings.dx
-      dy: forcings.dy
-      face_height: forcings.face_height
-      face_width: forcings.face_width
-      cell_area: forcings.cell_area
-      mask: forcings.mask
-    outputs:
-      advection_rate: { target: tendencies.production, type: tendency }
-      diffusion_rate: { target: tendencies.production, type: tendency }

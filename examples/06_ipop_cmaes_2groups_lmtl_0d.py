@@ -1,7 +1,7 @@
 """IPOP-CMA-ES with 2 Functional Groups on LMTL 0D (Twin Experiment).
 
-Demonstrates multi-group optimization using jax.vmap to run 2 groups in
-parallel, sharing the same 5 biological parameters:
+Demonstrates multi-group optimization using the native F dimension to run
+2 groups in parallel, sharing the same 5 biological parameters:
 
 - Group 0 (surface): stays at surface (day_layer=0, night_layer=0)
 - Group 1 (DVM):     diel vertical migration (day_layer=1, night_layer=0)
@@ -34,7 +34,7 @@ import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine.step import build_step_fn
-from seapopym.models import LMTL_0D
+from seapopym.models import LMTL_NO_TRANSPORT
 from seapopym.optimization.ipop import run_ipop_cmaes
 
 # Force CPU for 0D model (GPU overhead dominates for tiny workloads)
@@ -81,21 +81,13 @@ BOUNDS = {
 
 FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"], "latitude": LATITUDE}
 
-# Group definitions (DVM patterns)
-# Group 0: surface only (day=surface, night=surface)
-# Group 1: DVM (day=deep, night=surface)
-GROUP_PARAMS = {
-    "day_layer": jnp.array([0, 1]),
-    "night_layer": jnp.array([0, 0]),
-}
-
 PLOT_FILE = "examples/images/06_ipop_cmaes_2groups_lmtl_0d.png"
 
 # =============================================================================
-# BLUEPRINT (0D LMTL from catalogue — includes DVM support)
+# BLUEPRINT (LMTL no-transport, with native F dimension for 2 groups)
 # =============================================================================
 
-blueprint = LMTL_0D
+blueprint = LMTL_NO_TRANSPORT
 
 max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
 cohort_ages_sec = np.arange(0, max_age_days + 1) * 86400.0
@@ -117,6 +109,7 @@ dates = pd.date_range(
 ny, nx = 1, 1
 lat, lon = np.arange(ny), np.arange(nx)
 n_layers = 2
+n_groups = 2
 
 # Day of year forcing (T, Y, X) — broadcast spatially
 doy = dates.dayofyear.values.astype(float)
@@ -124,8 +117,8 @@ doy_3d = np.broadcast_to(doy[:, None, None], (len(dates), ny, nx))
 doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
 # Temperature: 2 depth layers
-# Surface (Z=0): 15 ± 5°C seasonal
-# Deep    (Z=1):  8 ± 2°C (cooler, damped seasonal)
+# Surface (Z=0): 15 +/- 5degC seasonal
+# Deep    (Z=1):  8 +/- 2degC (cooler, damped seasonal)
 temp_surface = 15.0 + 5.0 * np.sin(2 * np.pi * doy / 365.0)
 temp_deep = 8.0 + 2.0 * np.sin(2 * np.pi * doy / 365.0)
 temp_4d = np.stack(
@@ -147,6 +140,8 @@ npp_sec = npp_day / 86400.0
 npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
 npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
+# Group 0: surface only (day=0, night=0)
+# Group 1: DVM (day=1, night=0)
 config = Config.from_dict(
     {
         "parameters": {
@@ -157,8 +152,8 @@ config = Config.from_dict(
             "t_ref": {"value": TRUE_PARAMS["t_ref"]},
             "efficiency": {"value": TRUE_PARAMS["efficiency"]},
             "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
-            "day_layer": {"value": 0},  # default: surface (overridden by vmap)
-            "night_layer": {"value": 0},
+            "day_layer": xr.DataArray([0, 1], dims=["F"]),
+            "night_layer": xr.DataArray([0, 0], dims=["F"]),
             "latitude": {"value": LATITUDE},
         },
         "forcings": {
@@ -167,9 +162,11 @@ config = Config.from_dict(
             "day_of_year": doy_da,
         },
         "initial_state": {
-            "biomass": xr.DataArray(np.zeros((ny, nx)), dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+            "biomass": xr.DataArray(
+                np.zeros((n_groups, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
+            ),
             "production": xr.DataArray(
-                np.zeros((ny, nx, n_cohorts)), dims=["Y", "X", "C"], coords={"Y": lat, "X": lon}
+                np.zeros((n_groups, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
             ),
         },
         "execution": {
@@ -195,10 +192,12 @@ _forcings_stacked = _model.forcings.get_all()
 _spinup_steps = int(SPINUP_YEARS / total_years * _n_timesteps)
 
 
-def run_simulation(params: dict) -> jnp.ndarray:
-    """Run full simulation, return biomass time series."""
+def run_simulation(params: dict) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Run full simulation, return per-group biomass time series (T,) each."""
     full_params = {**params, **{k: jnp.array(v) for k, v in FIXED_PARAMS.items()}}
     full_params["cohort_ages"] = _model.parameters["cohort_ages"]
+    full_params["day_layer"] = _model.parameters["day_layer"]
+    full_params["night_layer"] = _model.parameters["night_layer"]
 
     def scan_body(carry, t):
         state, p = carry
@@ -210,24 +209,14 @@ def run_simulation(params: dict) -> jnp.ndarray:
                 forcings_t[name] = arr
         new_carry, outputs = _step_fn((state, p), forcings_t)
         new_state, _ = new_carry
-        return (new_state, p), jnp.mean(outputs["biomass"])
+        # biomass shape: (F, Y, X) — extract per-group mean
+        biomass = outputs["biomass"]
+        bio_g0 = jnp.mean(biomass[0])
+        bio_g1 = jnp.mean(biomass[1])
+        return (new_state, p), (bio_g0, bio_g1)
 
-    _, biomass = jax.lax.scan(scan_body, (_initial_state, full_params), jnp.arange(_n_timesteps))
-    return biomass
-
-
-# vmap over groups: day_layer and night_layer vary, rest broadcast
-_group_in_axes = {k: None for k in ALL_OPT_PARAMS}
-_group_in_axes["day_layer"] = 0
-_group_in_axes["night_layer"] = 0
-run_groups = jax.vmap(run_simulation, in_axes=(_group_in_axes,))
-
-
-def run_both_groups(opt_params: dict) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Run simulation for both groups. Returns (biomass_g0, biomass_g1)."""
-    all_params = {**opt_params, **GROUP_PARAMS}
-    biomass = run_groups(all_params)  # (2, T)
-    return biomass[0], biomass[1]
+    _, (bio_g0, bio_g1) = jax.lax.scan(scan_body, (_initial_state, full_params), jnp.arange(_n_timesteps))
+    return bio_g0, bio_g1
 
 
 # =============================================================================
@@ -248,7 +237,7 @@ if __name__ == "__main__":
     print("\nGenerating observations with TRUE parameters...")
     t0 = time.time()
     true_params_jax = {k: jnp.array(TRUE_PARAMS[k]) for k in ALL_OPT_PARAMS}
-    bio_g0_full, bio_g1_full = run_both_groups(true_params_jax)
+    bio_g0_full, bio_g1_full = run_simulation(true_params_jax)
 
     # Post spin-up
     bio_g0 = bio_g0_full[_spinup_steps:]
@@ -282,9 +271,7 @@ if __name__ == "__main__":
 
     def loss_fn(opt_params: dict) -> jnp.ndarray:
         """NRMSE loss with day/night observation operator."""
-        all_params = {**opt_params, **GROUP_PARAMS}
-        biomass = run_groups(all_params)  # (2, T)
-        bg0, bg1 = biomass[0], biomass[1]
+        bg0, bg1 = run_simulation(opt_params)
 
         # Day: surface only (g0). Night: both groups (g0 + g1).
         pred = bg0[_obs_global] + _night_w * bg1[_obs_global]
@@ -366,7 +353,7 @@ if __name__ == "__main__":
         c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
     )
     for i, mode in enumerate(result.modes):
-        bg0_m, bg1_m = run_both_groups(mode.params)
+        bg0_m, bg1_m = run_simulation(mode.params)
         ax.plot(time_days, np.array(bg0_m[_spinup_steps:]), "-", color=colors[i],
                 linewidth=1.5, alpha=0.8, label=f"Mode #{i+1} G0")
         ax.plot(time_days, np.array(bg1_m[_spinup_steps:]), "--", color=colors[i],
@@ -412,7 +399,7 @@ if __name__ == "__main__":
 
     # --- Bottom right: Surface observation fit ---
     ax = axes[1, 1]
-    bg0_best, bg1_best = run_both_groups(best.params)
+    bg0_best, bg1_best = run_simulation(best.params)
     bg0_opt = np.array(bg0_best[_spinup_steps:])
     bg1_opt = np.array(bg1_best[_spinup_steps:])
     pred_best = bg0_opt[obs_local_idx] + night_weight * bg1_opt[obs_local_idx]

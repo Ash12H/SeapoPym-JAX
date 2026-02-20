@@ -11,11 +11,11 @@ def load_model(name: str) -> Blueprint:
     """Charge un blueprint depuis le catalogue.
 
     Args:
-        name: Nom du modele (ex: "lmtl_0d", "lmtl_2d").
+        name: Nom du modele (ex: "seapodym_lmtl", "seapodym_lmtl_no_transport").
     """
     path = _MODELS_DIR / f"{name}.yaml"
     return Blueprint.from_yaml(path)
 
 
-LMTL_0D = load_model("lmtl_0d")
-LMTL_2D = load_model("lmtl_2d")
+LMTL_NO_TRANSPORT = load_model("seapodym_lmtl_no_transport")
+LMTL = load_model("seapodym_lmtl")

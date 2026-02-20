@@ -23,7 +23,7 @@ import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine.step import build_step_fn
-from seapopym.models import LMTL_0D
+from seapopym.models import LMTL_NO_TRANSPORT
 
 # =============================================================================
 # CONFIGURATION
@@ -62,7 +62,7 @@ IMAGE_DIR = Path("examples/images")
 # BUILD MODEL (once, 0D grid)
 # =============================================================================
 
-blueprint = LMTL_0D
+blueprint = LMTL_NO_TRANSPORT
 
 max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
 cohort_ages_sec = np.arange(0, max_age_days + 1) * 86400.0
@@ -107,8 +107,8 @@ config = Config.from_dict(
             "t_ref": {"value": TRUE_PARAMS["t_ref"]},
             "efficiency": {"value": TRUE_PARAMS["efficiency"]},
             "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
-            "day_layer": {"value": DAY_LAYER},
-            "night_layer": {"value": NIGHT_LAYER},
+            "day_layer": xr.DataArray([DAY_LAYER], dims=["F"]),
+            "night_layer": xr.DataArray([NIGHT_LAYER], dims=["F"]),
             "latitude": {"value": LATITUDE},
         },
         "forcings": {
@@ -117,9 +117,9 @@ config = Config.from_dict(
             "day_of_year": doy_da,
         },
         "initial_state": {
-            "biomass": xr.DataArray(np.zeros((ny, nx)), dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+            "biomass": xr.DataArray(np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}),
             "production": xr.DataArray(
-                np.zeros((ny, nx, n_cohorts)), dims=["Y", "X", "C"], coords={"Y": lat, "X": lon}
+                np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
             ),
         },
         "execution": {
