@@ -46,59 +46,10 @@ class TestSparseObservations:
 
 
 class TestBuildStepFnModes:
-    """Tests for step function modes."""
+    """Tests for step function signature."""
 
-    def test_step_fn_backward_compatible(self):
-        """Default step_fn should have (state, forcings) signature."""
-        from seapopym.blueprint import Blueprint, Config, functional
-        from seapopym.compiler import compile_model
-        from seapopym.engine.step import build_step_fn
-
-        # Minimal model
-        @functional(name="test:identity", backend="jax", units={"x": "g", "return": "g/s"})
-        def identity(x):
-            return x * 0.0  # No change
-
-        blueprint = Blueprint.from_dict(
-            {
-                "id": "test",
-                "version": "1.0",
-                "declarations": {
-                    "state": {"x": {"units": "g", "dims": []}},
-                    "parameters": {},
-                    "forcings": {},
-                },
-                "process": [
-                    {
-                        "func": "test:identity",
-                        "inputs": {"x": "state.x"},
-                        "outputs": {"return": {"target": "tendencies.x", "type": "tendency"}},
-                    }
-                ],
-            }
-        )
-
-        import xarray as xr
-
-        config = Config.from_dict(
-            {
-                "parameters": {},
-                "forcings": {},
-                "initial_state": {"x": xr.DataArray(1.0)},
-                "execution": {"time_start": "2000-01-01", "time_end": "2000-01-02", "dt": "1d"},
-            }
-        )
-
-        model = compile_model(blueprint, config, backend="jax")
-        step_fn = build_step_fn(model, params_as_argument=False)
-
-        # Should accept (state, forcings)
-        state = {"x": jnp.array(1.0)}
-        new_state, outputs = step_fn(state, {})
-        assert "x" in new_state
-
-    def test_step_fn_params_as_argument(self):
-        """step_fn with params_as_argument should have ((state, params), forcings) signature."""
+    def test_step_fn_carry_signature(self):
+        """step_fn should have ((state, params), forcings) signature."""
         from seapopym.blueprint import Blueprint, Config, functional
         from seapopym.compiler import compile_model
         from seapopym.engine.step import build_step_fn
@@ -138,7 +89,7 @@ class TestBuildStepFnModes:
         )
 
         model = compile_model(blueprint, config, backend="jax")
-        step_fn = build_step_fn(model, params_as_argument=True)
+        step_fn = build_step_fn(model)
 
         # Should accept ((state, params), forcings)
         state = {"x": jnp.array(1.0)}
@@ -196,7 +147,7 @@ class TestGradientComputation:
         )
 
         model = compile_model(blueprint, config, backend="jax")
-        step_fn = build_step_fn(model, params_as_argument=True)
+        step_fn = build_step_fn(model)
 
         def loss_fn(params):
             state = {"x": jnp.array(1.0)}
@@ -255,7 +206,7 @@ class TestGradientComputation:
         )
 
         model = compile_model(blueprint, config, backend="jax")
-        step_fn = build_step_fn(model, params_as_argument=True)
+        step_fn = build_step_fn(model)
 
         def loss_fn(params):
             state = {"x": jnp.array(1.0)}

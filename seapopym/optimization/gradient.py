@@ -81,7 +81,7 @@ class GradientRunner:
             model: Compiled model to optimize.
         """
         self.model = model
-        self._step_fn = build_step_fn(model, params_as_argument=True)
+        self._step_fn = build_step_fn(model)
 
     def run_with_params(
         self,

@@ -60,7 +60,7 @@ class SobolRunner:
         self._x_indices = jnp.array([p[1] for p in extraction_points], dtype=jnp.int32)
 
         # Build step function with params externalized
-        self._step_fn = build_step_fn(model, params_as_argument=True)
+        self._step_fn = build_step_fn(model)
 
         # Cache of JIT-compiled vmapped scans, keyed by chunk length.
         # Typically 1 entry (chunk_size), or 2 if remainder != 0.

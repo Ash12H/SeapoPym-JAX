@@ -212,7 +212,7 @@ config = Config.from_dict(
 
 print("Compiling model...")
 _model = compile_model(blueprint, config, backend="jax")
-_step_fn = build_step_fn(_model, params_as_argument=True)
+_step_fn = build_step_fn(_model)
 _n_timesteps = _model.n_timesteps
 _initial_state = _model.state
 _forcings_stacked = _model.forcings.get_all()
