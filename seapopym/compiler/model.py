@@ -20,12 +20,9 @@ if TYPE_CHECKING:
     from seapopym.compiler.compiler import TimeGrid
     from seapopym.compiler.forcing import ForcingStore
 
+from seapopym.dims import CANONICAL_DIMS
 from seapopym.blueprint.nodes import ComputeNode, DataNode
 from seapopym.types import Array
-
-
-# Canonical dimension order as per SPEC_02 §4.1
-CANONICAL_DIMS: tuple[str, ...] = ("E", "T", "F", "C", "Z", "Y", "X")
 
 
 @dataclass

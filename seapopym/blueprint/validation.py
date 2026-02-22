@@ -168,7 +168,7 @@ class BlueprintValidator:
 
     def _validate_units(self, blueprint: Blueprint, result: ValidationResult) -> None:
         """Validate unit compatibility using Pint (strict checking)."""
-        from seapopym.compiler.units import UnitValidator
+        from .units import UnitValidator
 
         validator = UnitValidator()
         unit_errors = validator.validate_process_chain(blueprint, result.resolved_functions)
@@ -191,7 +191,7 @@ class BlueprintValidator:
         engine slices forcings per-timestep before passing them to
         functions. T is therefore excluded from dimension checks here.
         """
-        from seapopym.compiler.transpose import get_canonical_order
+        from seapopym.dims import get_canonical_order
 
         data_nodes: dict[str, DataNode] = {}
 

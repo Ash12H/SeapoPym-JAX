@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from seapopym.compiler.model import CANONICAL_DIMS
+from seapopym.dims import CANONICAL_DIMS
 
 
 def compute_broadcast_dims(

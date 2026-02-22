@@ -271,7 +271,7 @@ class MemoryWriter:
 
         import xarray as xr
 
-        from seapopym.compiler.transpose import get_canonical_order
+        from seapopym.dims import get_canonical_order
 
         # 1. Concatenate arrays along time axis
         merged_data = {}
