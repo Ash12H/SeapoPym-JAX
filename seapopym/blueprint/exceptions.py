@@ -1,14 +1,14 @@
 """Custom exceptions for the Blueprint module.
 
-Error codes follow SPEC_01 conventions:
+Error codes:
 - E1xx: Validation errors
 - E101: Function not found in registry
 - E102: Signature mismatch
 - E103: Dimension mismatch
 - E104: Unit mismatch
-- E105: Grid alignment error
 - E106: Missing data
 - E107: Output count mismatch
+- E108: Cycle in dependency graph
 """
 
 from __future__ import annotations
@@ -26,38 +26,18 @@ class BlueprintError(Exception):
         super().__init__(f"[{self.code}] {self.message}")
 
 
-# === Legacy errors (kept for backward compatibility) ===
-
-
-class MissingInputError(BlueprintError):
-    """Raised when an input variable cannot be resolved for a unit."""
-
-    code = "E100"
-    message = "Input variable cannot be resolved"
-
-
-class CycleError(BlueprintError):
-    """Raised when a cycle is detected in the dependency graph."""
-
-    code = "E110"
-    message = "Cycle detected in dependency graph"
-
-
-class ConfigurationError(BlueprintError):
-    """Raised when there is a configuration issue (e.g. duplicate names)."""
-
-    code = "E120"
-    message = "Configuration error"
-
-
-# === SPEC_01 Validation Errors ===
-
-
 class ValidationError(BlueprintError):
     """Base class for validation errors."""
 
     code = "E1XX"
     message = "Validation failed"
+
+
+class CycleError(ValidationError):
+    """E108: Cycle detected in the dependency graph."""
+
+    code = "E108"
+    message = "Cycle detected in dependency graph"
 
 
 class FunctionNotFoundError(ValidationError):

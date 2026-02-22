@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import networkx as nx
 
 from .exceptions import (
+    CycleError,
     DimensionMismatchError,
     FunctionNotFoundError,
     MissingDataError,
@@ -325,6 +326,12 @@ class BlueprintValidator:
                 graph.add_node(out_node)
                 data_nodes[out_spec.target] = out_node
                 graph.add_edge(compute_node, out_node)
+
+        # Check for cycles
+        if not nx.is_directed_acyclic_graph(graph):
+            cycles = list(nx.simple_cycles(graph))
+            cycle_names = [[getattr(n, "name", str(n)) for n in c] for c in cycles[:3]]
+            result.add_error(CycleError(f"Dependency graph contains cycles: {cycle_names}"))
 
         result.graph = graph
 

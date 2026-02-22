@@ -19,15 +19,12 @@ Example:
     ...     return biomass * rate * jnp.exp(temp / 10)
 """
 
-# New declarative API (SPEC_01)
 from .exceptions import (
     BlueprintError,
-    ConfigurationError,
     CycleError,
     DimensionMismatchError,
     FunctionNotFoundError,
     MissingDataError,
-    MissingInputError,
     OutputCountMismatchError,
     SignatureMismatchError,
     UnitMismatchError,
@@ -94,7 +91,5 @@ __all__ = [
     "UnitMismatchError",
     "MissingDataError",
     "OutputCountMismatchError",
-    "MissingInputError",
     "CycleError",
-    "ConfigurationError",
 ]
