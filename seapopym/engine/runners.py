@@ -93,8 +93,9 @@ class StreamingRunner:
         # Build step function
         step_fn = build_step_fn(self.model)
 
-        # Initialize state
+        # Initialize carry: (state, params)
         state = dict(self.model.state)  # Copy to avoid modifying original
+        params = dict(self.model.parameters)
 
         # Determine variables to export
         output_vars = export_variables if export_variables is not None else list(state.keys())
@@ -129,9 +130,9 @@ class StreamingRunner:
                 forcings_chunk = self.model.forcings.get_chunk(start_t, end_t)
 
                 # Run scan on chunk
-                state, outputs = self.backend.scan(
+                (state, params), outputs = self.backend.scan(
                     step_fn=step_fn,
-                    init=state,
+                    init=(state, params),
                     xs=forcings_chunk,
                     length=chunk_len,
                 )
