@@ -92,26 +92,3 @@ def load_file(path: str | Path) -> dict[str, Any]:
             return load_yaml(path)
         except yaml.YAMLError:
             raise ValueError(f"Unknown file format for '{path}'. Supported: .yaml, .yml, .json") from None
-
-
-def detect_format(source: str | Path | dict[str, Any]) -> str:
-    """Detect the format of a source.
-
-    Args:
-        source: File path or dictionary.
-
-    Returns:
-        Format string: "dict", "yaml", "json", or "unknown".
-    """
-    if isinstance(source, dict):
-        return "dict"
-
-    path = Path(source)
-    suffix = path.suffix.lower()
-
-    if suffix in (".yaml", ".yml"):
-        return "yaml"
-    elif suffix == ".json":
-        return "json"
-    else:
-        return "unknown"

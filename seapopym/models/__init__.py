@@ -14,7 +14,7 @@ def load_model(name: str) -> Blueprint:
         name: Nom du modele (ex: "seapodym_lmtl", "seapodym_lmtl_no_transport").
     """
     path = _MODELS_DIR / f"{name}.yaml"
-    return Blueprint.from_yaml(path)
+    return Blueprint.load(path)
 
 
 LMTL_NO_TRANSPORT = load_model("seapodym_lmtl_no_transport")

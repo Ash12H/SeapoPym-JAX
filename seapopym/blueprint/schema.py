@@ -211,37 +211,15 @@ class Blueprint(BaseModel):
         if isinstance(source, dict):
             return cls.from_dict(source)
 
-        path = Path(source)
-        if path.suffix in (".yaml", ".yml"):
-            return cls.from_yaml(path)
-        elif path.suffix == ".json":
-            return cls.from_json(path)
-        else:
-            # Try YAML by default
-            return cls.from_yaml(path)
+        from .loaders import load_file
+
+        data = load_file(source)
+        return cls.from_dict(data)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Blueprint:
         """Create Blueprint from a dictionary."""
         return cls.model_validate(data)
-
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> Blueprint:
-        """Load Blueprint from a YAML file."""
-        import yaml
-
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        return cls.from_dict(data)
-
-    @classmethod
-    def from_json(cls, path: str | Path) -> Blueprint:
-        """Load Blueprint from a JSON file."""
-        import json
-
-        with open(path) as f:
-            data = json.load(f)
-        return cls.from_dict(data)
 
     def get_variable(self, path: str) -> VariableDeclaration | None:
         """Get a variable declaration by its dotted path.
@@ -400,36 +378,15 @@ class Config(BaseModel):
         if isinstance(source, dict):
             return cls.from_dict(source)
 
-        path = Path(source)
-        if path.suffix in (".yaml", ".yml"):
-            return cls.from_yaml(path)
-        elif path.suffix == ".json":
-            return cls.from_json(path)
-        else:
-            return cls.from_yaml(path)
+        from .loaders import load_file
+
+        data = load_file(source)
+        return cls.from_dict(data)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:
         """Create Config from a dictionary."""
         return cls.model_validate(data)
-
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> Config:
-        """Load Config from a YAML file."""
-        import yaml
-
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        return cls.from_dict(data)
-
-    @classmethod
-    def from_json(cls, path: str | Path) -> Config:
-        """Load Config from a JSON file."""
-        import json
-
-        with open(path) as f:
-            data = json.load(f)
-        return cls.from_dict(data)
 
     def get_parameter_value(self, path: str) -> Any:
         """Get a parameter value by dotted path.
