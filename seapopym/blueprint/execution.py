@@ -16,6 +16,3 @@ class ExecutionPlan:
     initial_variables: list[str]
     produced_variables: list[str]
     tendency_map: dict[str, list[str]] = field(default_factory=dict)  # {var_cible: [tendances]}
-
-    # Pour le futur : mapping des scopes pour l'optimisation
-    # scope_map: Dict[str, str] = field(default_factory=dict)
