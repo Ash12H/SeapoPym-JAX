@@ -52,7 +52,10 @@ def _parse_dt(dt_str: str) -> float:
     try:
         return float(dt_str)
     except ValueError:
-        return 86400.0  # Default: 1 day
+        raise ValueError(
+            f"Invalid dt format: '{dt_str}'. Expected '<number><unit>' "
+            f"where unit is s, m, h, or d (e.g. '1d', '6h', '30m')."
+        )
 
 
 @dataclass
@@ -189,41 +192,29 @@ class Compiler:
         self,
         blueprint: Blueprint,
         config: Config,
-        validate: bool = True,
     ) -> CompiledModel:
         """Compile a Blueprint + Config into a CompiledModel.
 
         Args:
             blueprint: Model definition.
             config: Experiment configuration with data.
-            validate: Whether to run validation first.
 
         Returns:
             CompiledModel ready for execution.
 
         Raises:
-            ValidationError: If validation fails.
+            BlueprintValidationError: If blueprint validation fails.
+            ConfigValidationError: If config validation fails.
             ShapeInferenceError: If shapes cannot be inferred.
             GridAlignmentError: If dimensions are inconsistent.
         """
-        # Step 1: Validate (optional but recommended)
-        if validate:
-            bp_result = validate_blueprint(blueprint, self.backend)
-            if not bp_result.valid:
-                raise bp_result.errors[0]
+        # Step 1: Validate (raises aggregated errors if invalid)
+        bp_result = validate_blueprint(blueprint, self.backend)
+        validate_config(config, blueprint, self.backend)
 
-            cfg_result = validate_config(config, blueprint, self.backend)
-            if not cfg_result.valid:
-                raise cfg_result.errors[0]
-
-            graph = bp_result.graph
-        else:
-            # Still need the graph
-            bp_result = validate_blueprint(blueprint, self.backend)
-            graph = bp_result.graph
-
-        if graph is None:
-            raise ValueError("Failed to build dependency graph")
+        compute_nodes = bp_result.compute_nodes
+        data_nodes = bp_result.data_nodes
+        tendency_map = dict(blueprint.tendencies)
 
         # Step 2: Compute temporal grid from execution params
         time_grid = TimeGrid.from_config(
@@ -258,7 +249,9 @@ class Compiler:
         # Step 9: Build CompiledModel
         return CompiledModel(
             blueprint=blueprint,
-            graph=graph,
+            compute_nodes=compute_nodes,
+            data_nodes=data_nodes,
+            tendency_map=tendency_map,
             state=state,
             forcings=forcings,
             parameters=parameters,
@@ -463,37 +456,16 @@ class Compiler:
         parameters: dict[str, Array] = {}
         trainable: list[str] = []
 
-        def process_params(data: dict[str, Any], prefix: str = "") -> None:
-            for name, value in data.items():
-                full_name = f"{prefix}{name}" if prefix else name
+        for name, pv in config.parameters.items():
+            if pv.trainable:
+                trainable.append(name)
 
-                if isinstance(value, dict):
-                    if "value" in value:
-                        # It's a ParameterValue-like dict
-                        pv = ParameterValue.model_validate(value)
-                        param_value = pv.value
-                        if pv.trainable:
-                            trainable.append(full_name)
-                    else:
-                        # Nested group
-                        process_params(value, f"{full_name}.")
-                        continue
-                elif isinstance(value, ParameterValue):
-                    param_value = value.value
-                    if value.trainable:
-                        trainable.append(full_name)
-                else:
-                    param_value = value
+            if self.backend == "jax":
+                import jax.numpy as jnp
 
-                # Convert to array
-                if self.backend == "jax":
-                    import jax.numpy as jnp
-
-                    parameters[full_name] = jnp.asarray(param_value)
-                else:
-                    parameters[full_name] = np.asarray(param_value)
-
-        process_params(config.parameters)
+                parameters[name] = jnp.asarray(pv.value)
+            else:
+                parameters[name] = np.asarray(pv.value)
         return parameters, trainable
 
 
@@ -501,7 +473,6 @@ def compile_model(
     blueprint: Blueprint,
     config: Config,
     backend: Literal["jax", "numpy"] = "jax",
-    validate: bool = True,
 ) -> CompiledModel:
     """Convenience function to compile a model.
 
@@ -509,10 +480,9 @@ def compile_model(
         blueprint: Model definition.
         config: Experiment configuration.
         backend: Target backend.
-        validate: Whether to validate first.
 
     Returns:
         CompiledModel ready for execution.
     """
     compiler = Compiler(backend=backend)
-    return compiler.compile(blueprint, config, validate=validate)
+    return compiler.compile(blueprint, config)

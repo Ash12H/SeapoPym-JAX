@@ -7,49 +7,56 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class DataNode:
-    """Représente une variable de données dans le graphe (ex: 'temperature', 'phyto_biomass')."""
+    """A data variable in the dependency graph (e.g. 'state.biomass', 'forcings.temperature').
+
+    Identity is based on `name` only (the variable path). Other fields are metadata.
+    """
 
     name: str
-    dims: tuple[Any, ...] | None = None  # Pour validation future (ex: ('time', 'lat', 'lon'))
-    units: str | None = None  # Unité attendue (ex: 'degC', 'm/s')
-    is_tendency_of: str | None = None  # Si c'est une tendance, de quelle variable ?
-    is_state: bool = False  # Si c'est une variable d'état (persistante)
-    is_parameter: bool = False  # Si c'est un paramètre (constante/config)
+    dims: tuple[str, ...] | None = None
+    units: str | None = None
+    is_state: bool = False
+    is_parameter: bool = False
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DataNode):
+            return NotImplemented
+        return self.name == other.name
 
     def __hash__(self) -> int:
-        """Return hash based on node name."""
         return hash(self.name)
 
 
-@dataclass
+@dataclass(eq=False)
 class ComputeNode:
-    """Représente une unité de calcul (fonction) dans le graphe.
+    """A computation unit (function) in the dependency graph.
+
+    Identity is based on `name` only (metadata for visualization/debug).
 
     Attributes:
-        func: La fonction à exécuter.
-        name: Identifiant unique.
-        output_mapping: Mapping des sorties.
-        input_mapping: Mapping des entrées.
-        scope: Portée de l'unité.
-        group: Nom du groupe fonctionnel auquel appartient cette unité.
-        core_dims: Dimensions sur lesquelles la fonction opère (non broadcastées).
-                   Format: {"input_name": ["dim1", "dim2"]}.
-        input_dims: Dimensions réelles de chaque input après transposition canonique.
-                    Format: {"input_name": ("C", "Y", "X")}.
+        func: The function to execute.
+        name: Unique identifier (auto-generated from outputs if not provided).
+        output_mapping: Maps output keys to graph variable names.
+        input_mapping: Maps function argument names to graph variable names.
+        core_dims: Dimensions operated on (not broadcast). Format: {"input_name": ["dim1"]}.
+        input_dims: Actual dims per input after canonical transpose. Format: {"input_name": ("C", "Y", "X")}.
+        out_dims: Output dimensions from function metadata.
     """
 
     func: Callable[..., Any]
-    name: str  # Identifiant unique de l'étape (ex: 'compute_mortality_tuna')
-    output_mapping: dict[str, str] = field(default_factory=dict)  # key_retour -> graph_var_name
-    input_mapping: dict[str, str] = field(default_factory=dict)  # arg_name -> graph_var_name
-    scope: str = "local"  # 'local' ou 'global'
-    group: str | None = None  # Nom du groupe fonctionnel (ex: 'Tuna')
+    name: str
+    output_mapping: dict[str, str] = field(default_factory=dict)
+    input_mapping: dict[str, str] = field(default_factory=dict)
     core_dims: dict[str, list[str]] = field(default_factory=dict)
     input_dims: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    out_dims: list[str] | None = None  # Output dimensions from function metadata
+    out_dims: list[str] | None = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ComputeNode):
+            return NotImplemented
+        return self.name == other.name
 
     def __hash__(self) -> int:
-        """Return hash based on node name."""
         return hash(self.name)

@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock
 
-import networkx as nx
 import numpy as np
 import pytest
 import xarray as xr
@@ -18,18 +17,13 @@ def mock_model():
     # Mock coords
     model.coords = {"time": np.arange(10), "lat": np.arange(5), "lon": np.arange(5)}
 
-    # Mock graph
-    graph = nx.DiGraph()
-    # Add nodes with dimensions
-    node_bio = DataNode(name="biomass", dims=("time", "lat", "lon"))
-    node_prod = DataNode(name="production", dims=("time", "lat", "lon"))
-    node_hidden = DataNode(name="hidden", dims=("time", "lat", "lon"))  # Not requested
+    # Mock data_nodes (replaces graph)
+    model.data_nodes = {
+        "biomass": DataNode(name="biomass", dims=("time", "lat", "lon")),
+        "production": DataNode(name="production", dims=("time", "lat", "lon")),
+        "hidden": DataNode(name="hidden", dims=("time", "lat", "lon")),
+    }
 
-    graph.add_node(node_bio)
-    graph.add_node(node_prod)
-    graph.add_node(node_hidden)
-
-    model.graph = graph
     return model
 
 

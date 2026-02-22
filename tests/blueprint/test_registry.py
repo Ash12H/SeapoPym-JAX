@@ -81,6 +81,19 @@ class TestFunctionalDecorator:
             def bad_func(x):
                 return x
 
+    def test_overwrite_warns(self):
+        """Test that re-registering the same name emits a warning."""
+
+        @functional(name="test:dup", backend="jax")
+        def first(x):
+            return x
+
+        with pytest.warns(UserWarning, match="already registered"):
+
+            @functional(name="test:dup", backend="jax")
+            def second(x):
+                return x * 2
+
     def test_invalid_backend(self):
         """Test that invalid backend raises error."""
         with pytest.raises(ValueError, match="Unknown backend"):
@@ -194,3 +207,14 @@ class TestFunctionMetadata:
 
         assert required == ["required1", "required2"]
         assert "optional" not in required
+
+    def test_output_names_default(self):
+        """Test output_names fallback when outputs is None."""
+
+        @functional(name="test:single", backend="jax")
+        def single_func(x):
+            return x
+
+        metadata = get_function("test:single", "jax")
+        assert metadata.outputs is None
+        assert metadata.output_names == ["return"]

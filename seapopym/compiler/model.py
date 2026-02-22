@@ -15,17 +15,14 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 
 if TYPE_CHECKING:
-    import networkx as nx
-
     from seapopym.blueprint import Blueprint
+    from seapopym.blueprint.schema import TendencySource
     from seapopym.compiler.compiler import TimeGrid
     from seapopym.compiler.forcing import ForcingStore
 
+from seapopym.dims import CANONICAL_DIMS
+from seapopym.blueprint.nodes import ComputeNode, DataNode
 from seapopym.types import Array
-
-
-# Canonical dimension order as per SPEC_02 §4.1
-CANONICAL_DIMS: tuple[str, ...] = ("E", "T", "F", "C", "Z", "Y", "X")
 
 
 @dataclass
@@ -37,7 +34,9 @@ class CompiledModel:
 
     Attributes:
         blueprint: Original blueprint definition.
-        graph: Dependency graph from validation (NetworkX DiGraph).
+        compute_nodes: Ordered list of compute nodes (process steps).
+        data_nodes: Dict mapping variable paths to DataNode metadata.
+        tendency_map: Mapping from state variable names to tendency sources.
         state: State variables that evolve each timestep.
         forcings: Input data (temperature, currents, etc.). Includes mask.
         parameters: Model constants (growth_rate, mortality, etc.).
@@ -53,8 +52,10 @@ class CompiledModel:
     # Source
     blueprint: Blueprint
 
-    # Dependency graph
-    graph: nx.DiGraph
+    # Computation structure (replaces graph)
+    compute_nodes: list[ComputeNode] = field(default_factory=list)
+    data_nodes: dict[str, DataNode] = field(default_factory=dict)
+    tendency_map: dict[str, list[TendencySource]] = field(default_factory=dict)
 
     # Data pytrees
     state: dict[str, Array] = field(default_factory=dict)
@@ -113,7 +114,9 @@ class CompiledModel:
 
         return CompiledModel(
             blueprint=self.blueprint,
-            graph=self.graph,
+            compute_nodes=self.compute_nodes,
+            data_nodes=self.data_nodes,
+            tendency_map=self.tendency_map,
             state={k: convert(v) for k, v in self.state.items()},
             forcings=numpy_store,
             parameters={k: convert(v) for k, v in self.parameters.items()},

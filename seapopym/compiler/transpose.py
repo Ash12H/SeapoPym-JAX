@@ -12,8 +12,9 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from seapopym.dims import CANONICAL_DIMS, get_canonical_order
+
 from .exceptions import TransposeError
-from .model import CANONICAL_DIMS
 
 from seapopym.types import Array
 
@@ -42,23 +43,6 @@ def apply_dimension_mapping(
         return ds
 
     return ds.rename(rename_dict)
-
-
-def get_canonical_order(dims: tuple[str, ...] | list[str]) -> tuple[str, ...]:
-    """Get the canonical order for a subset of dimensions.
-
-    Args:
-        dims: Dimension names present in the data.
-
-    Returns:
-        Tuple of dimension names in canonical order.
-
-    Example:
-        >>> get_canonical_order(["X", "Y", "T"])
-        ("T", "Y", "X")
-    """
-    # Filter canonical dims to only those present
-    return tuple(d for d in CANONICAL_DIMS if d in dims)
 
 
 def transpose_canonical(

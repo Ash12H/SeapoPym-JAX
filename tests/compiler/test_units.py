@@ -6,7 +6,7 @@ import pytest
 
 from seapopym.blueprint import Blueprint
 from seapopym.blueprint.registry import functional
-from seapopym.compiler.exceptions import UnitError
+from seapopym.blueprint.exceptions import UnitError
 from seapopym.compiler.units import UnitValidator
 
 
@@ -112,9 +112,10 @@ class TestUnitValidator:
                             "biomass": "state.biomass",
                             "rate": "parameters.growth_rate",
                         },
-                        "outputs": {"tendency": {"target": "tendencies.biomass", "type": "tendency"}},
+                        "outputs": {"tendency": "derived.growth_flux"},
                     }
                 ],
+                "tendencies": {"biomass": [{"source": "derived.growth_flux"}]},
             }
         )
 
@@ -155,7 +156,7 @@ class TestUnitValidator:
                             "biomass": "state.biomass",
                             "velocity": "parameters.vel",
                         },
-                        "outputs": {"result": {"target": "derived.flux", "type": "derived"}},
+                        "outputs": {"result": "derived.flux"},
                     }
                 ],
             }
@@ -200,9 +201,10 @@ class TestUnitValidator:
                             "biomass": "state.biomass",
                             "rate": "parameters.rate",
                         },
-                        "outputs": {"tendency": {"target": "tendencies.biomass", "type": "tendency"}},
+                        "outputs": {"tendency": "derived.bad_growth_flux"},
                     }
                 ],
+                "tendencies": {"biomass": [{"source": "derived.bad_growth_flux"}]},
             }
         )
 
@@ -248,9 +250,10 @@ class TestUnitValidator:
                             "biomass": "state.biomass",
                             "rate": "parameters.growth_rate",
                         },
-                        "outputs": {"tendency": {"target": "tendencies.biomass", "type": "tendency"}},
+                        "outputs": {"tendency": "derived.conv_growth_flux"},
                     }
                 ],
+                "tendencies": {"biomass": [{"source": "derived.conv_growth_flux"}]},
             }
         )
 

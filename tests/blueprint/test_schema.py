@@ -10,8 +10,8 @@ from seapopym.blueprint import (
     Declarations,
     ExecutionParams,
     ParameterValue,
-    ProcessOutput,
     ProcessStep,
+    TendencySource,
     VariableDeclaration,
 )
 
@@ -70,7 +70,7 @@ class TestProcessStep:
         step = ProcessStep(
             func="biol:growth",
             inputs={"biomass": "state.biomass", "rate": "parameters.growth_rate"},
-            outputs={"tendency": ProcessOutput(target="tendencies.growth", type="tendency")},
+            outputs={"tendency": "derived.growth_flux"},
         )
         assert step.func == "biol:growth"
         assert "biomass" in step.inputs
@@ -83,6 +83,30 @@ class TestProcessStep:
                 inputs={},
                 outputs={},
             )
+
+    def test_output_must_be_derived(self):
+        """Test that output targets must start with 'derived.'."""
+        with pytest.raises(ValueError, match="must start with 'derived.'"):
+            ProcessStep(
+                func="biol:growth",
+                inputs={"x": "state.x"},
+                outputs={"out": "tendencies.growth"},
+            )
+
+
+class TestTendencySource:
+    """Tests for TendencySource."""
+
+    def test_default_sign(self):
+        """Test default sign is +1.0."""
+        src = TendencySource(source="derived.growth_flux")
+        assert src.source == "derived.growth_flux"
+        assert src.sign == 1.0
+
+    def test_negative_sign(self):
+        """Test negative sign."""
+        src = TendencySource(source="derived.predation", sign=-1.0)
+        assert src.sign == -1.0
 
 
 class TestDeclarations:
@@ -106,22 +130,20 @@ class TestDeclarations:
         assert "parameters.growth_rate" in all_vars
         assert all_vars["state.biomass"].units == "g"
 
-    def test_hierarchical_declarations(self):
-        """Test hierarchical (functional group) declarations."""
+    def test_raw_dicts_coerced_to_variable_declaration(self):
+        """Test that raw dicts in YAML are correctly coerced to VariableDeclaration."""
         decl = Declarations(
-            state={
-                "tuna": {
-                    "biomass": {"units": "g", "dims": ["Y", "X", "C"]},
-                },
-                "zooplankton": {
-                    "biomass": {"units": "g", "dims": ["Y", "X"]},
-                },
-            }
+            state={"biomass": {"units": "g", "dims": ["Y", "X"]}},
+            forcings={"temperature": {"units": "degC", "dims": ["T", "Y", "X"]}},
         )
+        assert isinstance(decl.state["biomass"], VariableDeclaration)
+        assert decl.state["biomass"].units == "g"
+        assert isinstance(decl.forcings["temperature"], VariableDeclaration)
 
-        all_vars = decl.get_all_variables()
-        assert "state.tuna.biomass" in all_vars
-        assert "state.zooplankton.biomass" in all_vars
+    def test_invalid_declaration_value_rejected(self):
+        """Test that non-dict values are rejected in declarations."""
+        with pytest.raises(ValueError, match="Invalid declaration"):
+            Declarations(state={"biomass": "not a dict"})
 
 
 class TestBlueprint:
@@ -142,15 +164,19 @@ class TestBlueprint:
                 {
                     "func": "biol:growth",
                     "inputs": {"biomass": "state.biomass", "rate": "parameters.rate"},
-                    "outputs": {"out": {"target": "tendencies.growth", "type": "tendency"}},
+                    "outputs": {"out": "derived.growth_flux"},
                 }
             ],
+            "tendencies": {
+                "biomass": [{"source": "derived.growth_flux"}],
+            },
         }
 
         bp = Blueprint.from_dict(data)
         assert bp.id == "test-model"
         assert bp.version == "0.1.0"
         assert len(bp.process) == 1
+        assert "biomass" in bp.tendencies
 
     def test_load_from_yaml(self):
         """Test loading Blueprint from YAML file."""
@@ -181,6 +207,40 @@ class TestBlueprint:
         assert var is not None
         assert var.units == "g"
 
+    def test_tendency_validates_state_keys(self):
+        """Test that tendencies must reference valid state variables."""
+        with pytest.raises(ValueError, match="not a declared state variable"):
+            Blueprint.from_dict(
+                {
+                    "id": "test",
+                    "version": "0.1.0",
+                    "declarations": {
+                        "state": {"biomass": {"units": "g"}},
+                    },
+                    "process": [],
+                    "tendencies": {
+                        "nonexistent": [{"source": "derived.flux"}],
+                    },
+                }
+            )
+
+    def test_tendency_source_must_be_derived(self):
+        """Test that tendency sources must start with 'derived.'."""
+        with pytest.raises(ValueError, match="must start with 'derived.'"):
+            Blueprint.from_dict(
+                {
+                    "id": "test",
+                    "version": "0.1.0",
+                    "declarations": {
+                        "state": {"biomass": {"units": "g"}},
+                    },
+                    "process": [],
+                    "tendencies": {
+                        "biomass": [{"source": "state.biomass"}],
+                    },
+                }
+            )
+
 
 class TestConfig:
     """Tests for Config class."""
@@ -199,7 +259,7 @@ class TestConfig:
         }
 
         cfg = Config.from_dict(data)
-        assert cfg.parameters["growth_rate"]["value"] == 0.1
+        assert cfg.parameters["growth_rate"].value == 0.1
         assert cfg.execution.time_start == "2000-01-01"
         assert cfg.execution.time_end == "2001-01-01"
         assert cfg.execution.dt == "1d"
@@ -211,17 +271,16 @@ class TestConfig:
             pytest.skip("Fixture file not found")
 
         cfg = Config.load(yaml_path)
-        assert cfg.model == "./toy_model.yaml"
+        assert cfg.execution.dt == "1d"
+        assert cfg.parameters["growth_rate"].value == 0.1
 
     def test_get_parameter_value(self):
-        """Test getting parameter value by path."""
+        """Test getting parameter value by name."""
         cfg = Config.from_dict(
             {
                 "parameters": {
                     "simple": {"value": 0.1},
-                    "group": {
-                        "nested": {"value": 0.2},
-                    },
+                    "vector": {"value": [1.0, 2.0, 3.0], "trainable": True, "bounds": [0.0, 5.0]},
                 },
                 "forcings": {},
                 "initial_state": {},
@@ -232,8 +291,9 @@ class TestConfig:
             }
         )
 
-        assert cfg.get_parameter_value("simple")["value"] == 0.1
-        assert cfg.get_parameter_value("group.nested")["value"] == 0.2
+        assert cfg.get_parameter_value("simple").value == 0.1
+        assert cfg.get_parameter_value("vector").value == [1.0, 2.0, 3.0]
+        assert cfg.get_parameter_value("vector").trainable is True
         assert cfg.get_parameter_value("nonexistent") is None
 
 
@@ -252,3 +312,31 @@ class TestExecutionParams:
         params = ExecutionParams(time_start="2020-01-01", time_end="2020-12-31")
         assert params.time_start == "2020-01-01"
         assert params.time_end == "2020-12-31"
+
+    @pytest.mark.parametrize("dt", ["1d", "0.05d", "6h", "30m", "3600", "1s"])
+    def test_valid_dt_accepted(self, dt):
+        """Test that valid dt formats are accepted."""
+        params = ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", dt=dt)
+        assert params.dt == dt
+
+    @pytest.mark.parametrize("dt", ["foo", "2x", "d1", "abc123", "1.2.3d"])
+    def test_invalid_dt_rejected(self, dt):
+        """Test that invalid dt formats are rejected."""
+        with pytest.raises(ValueError, match="Invalid dt format"):
+            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", dt=dt)
+
+    def test_invalid_datetime_rejected(self):
+        """Test that unparseable datetime raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid datetime format"):
+            ExecutionParams(time_start="not-a-date", time_end="2001-01-01")
+
+    @pytest.mark.parametrize("batch_size", [0, -1])
+    def test_non_positive_batch_size_rejected(self, batch_size):
+        """Test that non-positive batch_size raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", batch_size=batch_size)
+
+    def test_inverted_time_range_rejected(self):
+        """Test that time_end < time_start raises ValueError."""
+        with pytest.raises(ValueError, match="must be after"):
+            ExecutionParams(time_start="2020-01-01", time_end="2019-01-01")

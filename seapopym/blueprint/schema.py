@@ -1,7 +1,7 @@
 """Pydantic schemas for Blueprint and Config.
 
 This module defines the declarative data structures for model definition (Blueprint)
-and experiment configuration (Config) as per SPEC_01.
+and experiment configuration (Config).
 """
 
 from __future__ import annotations
@@ -60,18 +60,18 @@ class ParameterValue(BaseModel):
 # === Process Definitions ===
 
 
-class ProcessOutput(BaseModel):
-    """Output specification for a process step.
+class TendencySource(BaseModel):
+    """A single source contributing to a tendency for a state variable.
 
     Attributes:
-        target: Target variable path (e.g., "tendencies.growth", "state.biomass").
-        type: Output type determining how the value is used.
+        source: Path to a derived variable (e.g., "derived.mortality_flux").
+        sign: Sign multiplier (default +1.0). Use -1.0 to invert the contribution.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    target: str
-    type: Literal["tendency", "derived", "diagnostic", "state"]
+    source: str
+    sign: float = 1.0
 
 
 class ProcessStep(BaseModel):
@@ -80,14 +80,14 @@ class ProcessStep(BaseModel):
     Attributes:
         func: Function identifier in format "namespace:function_name".
         inputs: Mapping from function argument names to variable paths.
-        outputs: Mapping from output keys to ProcessOutput specifications.
+        outputs: Mapping from output keys to derived variable paths.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     func: str
     inputs: dict[str, str]
-    outputs: dict[str, ProcessOutput]
+    outputs: dict[str, str]
 
     @field_validator("func")
     @classmethod
@@ -97,81 +97,68 @@ class ProcessStep(BaseModel):
             raise ValueError(f"Function name must be in format 'namespace:name', got '{v}'")
         return v
 
+    @field_validator("outputs")
+    @classmethod
+    def validate_output_targets(cls, v: dict[str, str]) -> dict[str, str]:
+        """Ensure all output targets start with 'derived.'."""
+        for key, target in v.items():
+            if not target.startswith("derived."):
+                raise ValueError(
+                    f"Output target '{target}' (key '{key}') must start with 'derived.'. "
+                    f"All process outputs are intermediate derived values."
+                )
+        return v
+
 
 # === Declarations Container ===
-
-
-# Type for nested variable declarations (supports functional groups)
-NestedVariableDeclaration = dict[str, VariableDeclaration | dict[str, VariableDeclaration]]
 
 
 class Declarations(BaseModel):
     """Container for all variable declarations.
 
-    Supports both flat and hierarchical (functional group) structures.
-
-    Example (flat):
+    Example:
         state:
           biomass:
             units: "g"
             dims: ["Y", "X"]
-
-    Example (hierarchical):
-        state:
-          tuna:
-            biomass:
-              units: "g"
-              dims: ["Y", "X", "C"]
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    state: dict[str, Any] = Field(default_factory=dict)
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    forcings: dict[str, Any] = Field(default_factory=dict)
-    derived: dict[str, Any] = Field(default_factory=dict)
+    state: dict[str, VariableDeclaration] = Field(default_factory=dict)
+    parameters: dict[str, VariableDeclaration] = Field(default_factory=dict)
+    forcings: dict[str, VariableDeclaration] = Field(default_factory=dict)
+    derived: dict[str, VariableDeclaration] = Field(default_factory=dict)
+
+    @field_validator("state", "parameters", "forcings", "derived", mode="before")
+    @classmethod
+    def coerce_declarations(cls, v: Any) -> dict[str, Any]:
+        """Coerce raw dicts to VariableDeclaration-compatible dicts."""
+        if not isinstance(v, dict):
+            return v
+        result = {}
+        for key, value in v.items():
+            if isinstance(value, VariableDeclaration | dict):
+                result[key] = value  # Pydantic will validate as VariableDeclaration
+            else:
+                raise ValueError(f"Invalid declaration for '{key}': expected dict, got {type(value)}")
+        return result
 
     def get_all_variables(self) -> dict[str, VariableDeclaration]:
         """Flatten all declarations into a single dict with dotted paths.
 
         Returns:
-            Dict mapping "category.group.var" or "category.var" to VariableDeclaration.
+            Dict mapping "category.var" to VariableDeclaration.
         """
         result: dict[str, VariableDeclaration] = {}
-
         for category_name, category in [
             ("state", self.state),
             ("parameters", self.parameters),
             ("forcings", self.forcings),
             ("derived", self.derived),
         ]:
-            result.update(self._flatten_category(category_name, category))
-
-        return result
-
-    def _flatten_category(self, prefix: str, category: dict[str, Any]) -> dict[str, VariableDeclaration]:
-        """Recursively flatten a category dict."""
-        result: dict[str, VariableDeclaration] = {}
-
-        for key, value in category.items():
-            full_key = f"{prefix}.{key}"
-
-            if isinstance(value, VariableDeclaration):
-                result[full_key] = value
-            elif isinstance(value, dict):
-                # Check if it's a VariableDeclaration dict or a group
-                if "units" in value or "dims" in value or "description" in value:
-                    # It's a variable declaration as dict
-                    result[full_key] = VariableDeclaration(**value)
-                else:
-                    # It's a functional group - recurse
-                    for sub_key, sub_value in value.items():
-                        sub_full_key = f"{full_key}.{sub_key}"
-                        if isinstance(sub_value, VariableDeclaration):
-                            result[sub_full_key] = sub_value
-                        elif isinstance(sub_value, dict):
-                            result[sub_full_key] = VariableDeclaration(**sub_value)
-
+            for key, var_decl in category.items():
+                result[f"{category_name}.{key}"] = var_decl
         return result
 
 
@@ -189,6 +176,7 @@ class Blueprint(BaseModel):
         version: Semantic version string.
         declarations: Variable declarations (state, parameters, forcings, derived).
         process: Ordered list of process steps forming the computation graph.
+        tendencies: Mapping from state variable names to lists of tendency sources.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -197,6 +185,26 @@ class Blueprint(BaseModel):
     version: str
     declarations: Declarations
     process: list[ProcessStep]
+    tendencies: dict[str, list[TendencySource]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_tendencies(self) -> Self:
+        """Validate that tendency state keys exist and sources reference derived paths."""
+        all_vars = self.declarations.get_all_variables()
+        state_keys = {k.removeprefix("state.") for k in all_vars if k.startswith("state.")}
+
+        for state_var, sources in self.tendencies.items():
+            if state_var not in state_keys:
+                raise ValueError(
+                    f"Tendency target '{state_var}' is not a declared state variable. "
+                    f"Available: {sorted(state_keys)}"
+                )
+            for src in sources:
+                if not src.source.startswith("derived."):
+                    raise ValueError(
+                        f"Tendency source '{src.source}' for '{state_var}' must start with 'derived.'."
+                    )
+        return self
 
     @classmethod
     def load(cls, source: str | Path | dict[str, Any]) -> Blueprint:
@@ -211,37 +219,15 @@ class Blueprint(BaseModel):
         if isinstance(source, dict):
             return cls.from_dict(source)
 
-        path = Path(source)
-        if path.suffix in (".yaml", ".yml"):
-            return cls.from_yaml(path)
-        elif path.suffix == ".json":
-            return cls.from_json(path)
-        else:
-            # Try YAML by default
-            return cls.from_yaml(path)
+        from .loaders import load_file
+
+        data = load_file(source)
+        return cls.from_dict(data)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Blueprint:
         """Create Blueprint from a dictionary."""
         return cls.model_validate(data)
-
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> Blueprint:
-        """Load Blueprint from a YAML file."""
-        import yaml
-
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        return cls.from_dict(data)
-
-    @classmethod
-    def from_json(cls, path: str | Path) -> Blueprint:
-        """Load Blueprint from a JSON file."""
-        import json
-
-        with open(path) as f:
-            data = json.load(f)
-        return cls.from_dict(data)
 
     def get_variable(self, path: str) -> VariableDeclaration | None:
         """Get a variable declaration by its dotted path.
@@ -298,6 +284,19 @@ class ExecutionParams(BaseModel):
     batch_size: int | None = None
     forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
     output_path: str | None = None
+
+    @field_validator("dt")
+    @classmethod
+    def validate_dt(cls, v: str) -> str:
+        """Validate timestep format (e.g. '1d', '6h', '30m', '0.05d')."""
+        import re
+
+        if re.fullmatch(r"\d+(\.\d+)?[smhd]", v) or re.fullmatch(r"\d+(\.\d+)?", v):
+            return v
+        raise ValueError(
+            f"Invalid dt format: '{v}'. Expected '<number><unit>' "
+            f"where unit is s, m, h, or d (e.g. '1d', '6h', '30m', '0.05d')."
+        )
 
     @field_validator("time_start", "time_end")
     @classmethod
@@ -370,8 +369,7 @@ class Config(BaseModel):
     parameter values, forcing data paths/arrays, initial state, etc.
 
     Attributes:
-        model: Optional path to the Blueprint file.
-        parameters: Parameter values (hierarchical, matching Blueprint).
+        parameters: Parameter values (flat, matching Blueprint declarations).
         forcings: Forcing data (paths or arrays).
         initial_state: Initial state data (paths or arrays).
         execution: Execution parameters (timestep, time range, etc.).
@@ -380,8 +378,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    model: str | None = None
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, ParameterValue] = Field(default_factory=dict)
     forcings: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)
     execution: ExecutionParams  # REQUIRED: time_start, time_end are mandatory
@@ -400,53 +397,23 @@ class Config(BaseModel):
         if isinstance(source, dict):
             return cls.from_dict(source)
 
-        path = Path(source)
-        if path.suffix in (".yaml", ".yml"):
-            return cls.from_yaml(path)
-        elif path.suffix == ".json":
-            return cls.from_json(path)
-        else:
-            return cls.from_yaml(path)
+        from .loaders import load_file
+
+        data = load_file(source)
+        return cls.from_dict(data)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:
         """Create Config from a dictionary."""
         return cls.model_validate(data)
 
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> Config:
-        """Load Config from a YAML file."""
-        import yaml
-
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        return cls.from_dict(data)
-
-    @classmethod
-    def from_json(cls, path: str | Path) -> Config:
-        """Load Config from a JSON file."""
-        import json
-
-        with open(path) as f:
-            data = json.load(f)
-        return cls.from_dict(data)
-
-    def get_parameter_value(self, path: str) -> Any:
-        """Get a parameter value by dotted path.
+    def get_parameter_value(self, path: str) -> ParameterValue | None:
+        """Get a parameter value by name.
 
         Args:
-            path: Parameter path like "growth_rate" or "tuna.growth_rate".
+            path: Parameter name (e.g. "growth_rate").
 
         Returns:
-            Parameter value or ParameterValue object.
+            ParameterValue if found, None otherwise.
         """
-        parts = path.split(".")
-        current = self.parameters
-
-        for part in parts:
-            if isinstance(current, dict) and part in current:
-                current = current[part]
-            else:
-                return None
-
-        return current
+        return self.parameters.get(path)

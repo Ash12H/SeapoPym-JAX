@@ -32,9 +32,10 @@ def _make_test_model():
                 {
                     "func": "test:sobol_linear",
                     "inputs": {"x": "state.x", "rate": "parameters.rate"},
-                    "outputs": {"return": {"target": "tendencies.x", "type": "tendency"}},
+                    "outputs": {"return": "derived.x_flux"},
                 }
             ],
+            "tendencies": {"x": [{"source": "derived.x_flux"}]},
         }
     )
 

@@ -1,8 +1,8 @@
 """Step function builder for time-stepping logic.
 
 The step function encapsulates the logic for a single timestep:
-1. Execute process graph to compute tendencies
-2. Apply Euler integration
+1. Execute process chain to compute derived values
+2. Integrate tendencies into state (Euler explicit)
 3. Apply mask
 4. Extract diagnostics
 """
@@ -31,37 +31,29 @@ def build_step_fn(
     """Build a step function from a compiled model.
 
     The returned function executes one timestep of the model:
-    1. Computes tendencies via the process graph
-    2. Integrates state using Euler explicit
+    1. Computes derived values via the process chain
+    2. Integrates state using tendency_map + Euler explicit
     3. Applies mask to state
     4. Returns new state and diagnostic outputs
 
     Args:
-        model: Compiled model containing graph, parameters, and metadata.
+        model: Compiled model containing compute_nodes, tendency_map, parameters, and metadata.
 
     Returns:
         Step function with signature ((state, params), forcings_t) -> ((new_state, params), outputs).
         This signature is compatible with jax.lax.scan and jax.grad.
     """
     # Extract what we need from model (closure captures these)
-    graph = model.graph
+    compute_nodes: list[ComputeNode] = model.compute_nodes
+    tendency_map = model.tendency_map
     default_parameters = model.parameters
     dt = model.dt
     backend = model.backend
 
-    # Get ordered list of ComputeNode from graph
-    # Nodes are already in topological order from validation
-    import networkx as nx
-
-    compute_nodes: list[ComputeNode] = [node for node in nx.topological_sort(graph) if isinstance(node, ComputeNode)]
-
     # Pre-compute vmapped functions for nodes with core_dims
-    # Store (vmapped_func, arg_order, transpose_axes) - arg_order for positional calling,
-    # transpose_axes to convert vmap output order back to canonical order
     vmapped_funcs: dict[str, tuple[Callable[..., Any], list[str] | None, tuple[int, ...] | None]] = {}
     for compute_node in compute_nodes:
         if compute_node.core_dims:
-            # Get argument order from input_mapping keys
             arg_order = list(compute_node.input_mapping.keys())
             broadcast_dims = compute_broadcast_dims(compute_node.input_dims, compute_node.core_dims)
             transpose_axes = compute_output_transpose_axes(broadcast_dims, compute_node.out_dims)
@@ -72,11 +64,10 @@ def build_step_fn(
                     compute_node.core_dims,
                     arg_order,
                 ),
-                arg_order,  # Store arg_order for positional calling
-                transpose_axes,  # Store transpose axes for output reordering
+                arg_order,
+                transpose_axes,
             )
         else:
-            # No core_dims, use original function (element-wise broadcasting)
             vmapped_funcs[compute_node.name] = (compute_node.func, None, None)
 
     def _execute_step(state: State, forcings_t: Forcings, parameters: Params) -> tuple[State, Outputs]:
@@ -90,44 +81,34 @@ def build_step_fn(
         Returns:
             Tuple of (new_state, outputs).
         """
-        # Get mask (default to 1.0 if not present)
         mask = forcings_t.get("mask", 1.0)
 
-        # Accumulate tendencies per state variable
-        tendencies: dict[str, list[Array]] = {}
-
-        # Store intermediate results for diagnostics
+        # Store all derived values
         intermediates: dict[str, Array] = {}
 
-        # Execute each ComputeNode in topological order
+        # Execute each ComputeNode in process order
         for compute_node in compute_nodes:
-            # Build function inputs from state, forcings, parameters, intermediates
             func_inputs = _resolve_inputs(compute_node.input_mapping, state, forcings_t, parameters, intermediates)
 
-            # Call the vmapped function (or original if no core_dims)
             func, arg_order, transpose_axes = vmapped_funcs[compute_node.name]
             if arg_order is not None:
-                # vmapped function requires positional arguments in specific order
                 result = func(*[func_inputs[arg] for arg in arg_order])
-                # Transpose output from vmap order to canonical order
                 if transpose_axes is not None:
                     result = _transpose_vmap_output(result, transpose_axes)
             else:
-                # Original function can use keyword arguments
                 result = func(**func_inputs)
 
-            # Handle outputs using the node's output_mapping
-            _handle_compute_outputs(result, compute_node.output_mapping, tendencies, intermediates)
+            # All outputs go to intermediates (keyed by derived short name)
+            _handle_compute_outputs(result, compute_node.output_mapping, intermediates)
 
-        # Euler explicit integration
-        new_state = _integrate_euler(state, tendencies, dt, backend)
+        # Euler explicit integration using tendency_map
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, backend)
 
         # Apply mask to state
         new_state = _apply_mask(new_state, mask, backend)
 
-        # Build outputs (include state for I/O)
+        # Build outputs (include state variables for saving)
         outputs: Outputs = {**intermediates}
-        # Also include state variables in outputs for saving
         for var_name, value in new_state.items():
             outputs[var_name] = value
 
@@ -178,7 +159,6 @@ def _transpose_vmap_output(result: Any, axes: tuple[int, ...]) -> Any:
         return arr
 
     if isinstance(result, tuple):
-        # Multi-output: transpose each if dimensions match
         return tuple(transpose_if_matching(r) for r in result)
     else:
         return transpose_if_matching(result)
@@ -210,7 +190,6 @@ def _resolve_inputs(
 
         if len(parts) < 2:
             # Direct reference (e.g., just "biomass")
-            # Try to find in state, then forcings, then parameters
             if var_path in state:
                 result[arg_name] = state[var_path]
             elif var_path in forcings_t:
@@ -231,7 +210,7 @@ def _resolve_inputs(
                 result[arg_name] = forcings_t[var_name]
             elif category == "parameters":
                 result[arg_name] = parameters[var_name]
-            elif category == "intermediates" or category == "derived":
+            elif category in ("intermediates", "derived"):
                 result[arg_name] = intermediates[var_name]
             else:
                 raise KeyError(f"Unknown category '{category}' in path '{var_path}'")
@@ -242,20 +221,17 @@ def _resolve_inputs(
 def _handle_compute_outputs(
     result: Any,
     output_mapping: dict[str, str],
-    tendencies: dict[str, list[Array]],
     intermediates: dict[str, Array],
 ) -> None:
-    """Handle ComputeNode outputs based on target path.
+    """Handle ComputeNode outputs — all go to intermediates.
 
     Args:
         result: Function return value (single array or tuple of arrays).
-        output_mapping: Mapping from output key to target path.
-        tendencies: Dict to accumulate tendencies.
-        intermediates: Dict to store intermediate results.
+        output_mapping: Mapping from output key to derived target path.
+        intermediates: Dict to store intermediate results (keyed by short name after 'derived.').
     """
     output_items = list(output_mapping.items())
 
-    # If multiple outputs, result MUST be a tuple/list matching the mapping order
     if len(output_items) > 1:
         if not isinstance(result, tuple | list):
             raise TypeError(f"Function returned {type(result)} but expected tuple for {len(output_items)} outputs.")
@@ -263,47 +239,28 @@ def _handle_compute_outputs(
             raise ValueError(f"Function returned {len(result)} items but expected {len(output_items)}.")
 
         for idx, (_out_key, target) in enumerate(output_items):
-            val = result[idx]
-            _dispatch_single_output(val, target, tendencies, intermediates)
+            # Strip "derived." prefix for intermediates key
+            var_name = target.removeprefix("derived.")
+            intermediates[var_name] = result[idx]
     else:
-        # Single output
         target = output_items[0][1]
-        _dispatch_single_output(result, target, tendencies, intermediates)
-
-
-def _dispatch_single_output(
-    val: Array, target: str, tendencies: dict[str, list[Array]], intermediates: dict[str, Array]
-) -> None:
-    """Helper to dispatch a single value to tendencies or intermediates."""
-    parts = target.split(".")
-
-    if len(parts) >= 2 and parts[0] == "tendencies":
-        # It's a tendency - parse state variable from target
-        # "tendencies.biomass" -> state_var = "biomass"
-        # "tendencies.biomass_growth" -> state_var = "biomass"
-        var_name = parts[1]
-        state_var = var_name.split("_")[0] if "_" in var_name else var_name
-
-        if state_var not in tendencies:
-            tendencies[state_var] = []
-        tendencies[state_var].append(val)
-    else:
-        # It's a derived/diagnostic value
-        var_name = parts[-1] if len(parts) > 1 else target
-        intermediates[var_name] = val
+        var_name = target.removeprefix("derived.")
+        intermediates[var_name] = result
 
 
 def _integrate_euler(
     state: State,
-    tendencies: dict[str, list[Array]],
+    intermediates: dict[str, Array],
+    tendency_map: dict[str, list],
     dt: float,
     backend: str,
 ) -> State:
-    """Integrate state using Euler explicit method.
+    """Integrate state using Euler explicit method with declarative tendency_map.
 
     Args:
         state: Current state.
-        tendencies: Accumulated tendencies per state variable.
+        intermediates: All computed derived values.
+        tendency_map: Mapping from state var name to list of TendencySource.
         dt: Timestep in seconds.
         backend: Backend name for array operations.
 
@@ -315,9 +272,13 @@ def _integrate_euler(
 
         new_state = {}
         for var_name, value in state.items():
-            if var_name in tendencies:
-                total_tendency = sum(tendencies[var_name])
-                new_state[var_name] = jnp.maximum(value + total_tendency * dt, 0.0)
+            if var_name in tendency_map:
+                sources = tendency_map[var_name]
+                total = sum(
+                    src.sign * intermediates[src.source.removeprefix("derived.")]
+                    for src in sources
+                )
+                new_state[var_name] = jnp.maximum(value + total * dt, 0.0)
             else:
                 new_state[var_name] = value
         return new_state
@@ -326,9 +287,13 @@ def _integrate_euler(
 
         new_state = {}
         for var_name, value in state.items():
-            if var_name in tendencies:
-                total_tendency = sum(tendencies[var_name])
-                new_state[var_name] = np.maximum(value + total_tendency * dt, 0.0)
+            if var_name in tendency_map:
+                sources = tendency_map[var_name]
+                total = sum(
+                    src.sign * intermediates[src.source.removeprefix("derived.")]
+                    for src in sources
+                )
+                new_state[var_name] = np.maximum(value + total * dt, 0.0)
             else:
                 new_state[var_name] = np.copy(value)
         return new_state
@@ -345,13 +310,11 @@ def _apply_mask(state: State, mask: Array, _backend: str) -> State:
     Returns:
         Masked state.
     """
-    # If mask is scalar 1.0, no masking needed
     if isinstance(mask, int | float) and mask == 1.0:
         return state
 
     new_state = {}
     for var_name, value in state.items():
-        # Broadcast mask to match value shape if needed
         new_state[var_name] = value * mask
 
     return new_state

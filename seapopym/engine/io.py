@@ -271,7 +271,7 @@ class MemoryWriter:
 
         import xarray as xr
 
-        from seapopym.compiler.transpose import get_canonical_order
+        from seapopym.dims import get_canonical_order
 
         # 1. Concatenate arrays along time axis
         merged_data = {}
@@ -318,15 +318,11 @@ class MemoryWriter:
         pass
 
     def _resolve_variable_dims(self) -> dict[str, tuple[str, ...]]:
-        """Resolve dimensions for all requested variables using the graph."""
-        from seapopym.blueprint.nodes import DataNode
-
-        # Map var_name -> dims tuple
+        """Resolve dimensions for all requested variables using data_nodes."""
         resolved = {}
 
-        # We scan graph nodes. This is fast enough for initialization.
-        for node in self.model.graph.nodes:
-            if not isinstance(node, DataNode) or node.dims is None:
+        for node in self.model.data_nodes.values():
+            if node.dims is None:
                 continue
 
             # Check if node name matches any requested variable
@@ -334,10 +330,8 @@ class MemoryWriter:
             node_short_name = node.name.split(".")[-1] if "." in node.name else node.name
 
             if node.name in self.variables:
-                # Exact match with full name
                 resolved[node.name] = tuple(d for d in node.dims)
             elif node_short_name in self.variables:
-                # Match with short name
                 resolved[node_short_name] = tuple(d for d in node.dims)
 
         return resolved

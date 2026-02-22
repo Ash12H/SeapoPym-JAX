@@ -19,21 +19,18 @@ Example:
     ...     return biomass * rate * jnp.exp(temp / 10)
 """
 
-# New declarative API (SPEC_01)
 from .exceptions import (
     BlueprintError,
-    ConfigurationError,
-    CycleError,
+    BlueprintValidationError,
+    ConfigValidationError,
     DimensionMismatchError,
     FunctionNotFoundError,
     MissingDataError,
-    MissingInputError,
     OutputCountMismatchError,
     SignatureMismatchError,
-    UnitMismatchError,
+    UnitError,
     ValidationError,
 )
-from .execution import ExecutionPlan
 from .nodes import ComputeNode, DataNode
 from .registry import (
     FunctionMetadata,
@@ -48,8 +45,8 @@ from .schema import (
     Declarations,
     ExecutionParams,
     ParameterValue,
-    ProcessOutput,
     ProcessStep,
+    TendencySource,
     VariableDeclaration,
 )
 from .validation import (
@@ -63,12 +60,11 @@ __all__ = [
     # Core classes
     "Blueprint",
     "Config",
-    "ExecutionPlan",
     # Schema classes
     "VariableDeclaration",
     "ParameterValue",
     "ProcessStep",
-    "ProcessOutput",
+    "TendencySource",
     "Declarations",
     "ExecutionParams",
     # Registry
@@ -91,10 +87,9 @@ __all__ = [
     "FunctionNotFoundError",
     "SignatureMismatchError",
     "DimensionMismatchError",
-    "UnitMismatchError",
+    "UnitError",
+    "BlueprintValidationError",
+    "ConfigValidationError",
     "MissingDataError",
     "OutputCountMismatchError",
-    "MissingInputError",
-    "CycleError",
-    "ConfigurationError",
 ]

@@ -1,14 +1,15 @@
 """Custom exceptions for the Blueprint module.
 
-Error codes follow SPEC_01 conventions:
+Error codes:
 - E1xx: Validation errors
+- E100: Blueprint validation (aggregated)
 - E101: Function not found in registry
 - E102: Signature mismatch
 - E103: Dimension mismatch
-- E104: Unit mismatch
-- E105: Grid alignment error
+- E105: Unit error
 - E106: Missing data
 - E107: Output count mismatch
+- E110: Config validation (aggregated)
 """
 
 from __future__ import annotations
@@ -24,33 +25,6 @@ class BlueprintError(Exception):
         """Initialize the exception with an optional custom message."""
         self.message = message or self.message
         super().__init__(f"[{self.code}] {self.message}")
-
-
-# === Legacy errors (kept for backward compatibility) ===
-
-
-class MissingInputError(BlueprintError):
-    """Raised when an input variable cannot be resolved for a unit."""
-
-    code = "E100"
-    message = "Input variable cannot be resolved"
-
-
-class CycleError(BlueprintError):
-    """Raised when a cycle is detected in the dependency graph."""
-
-    code = "E110"
-    message = "Cycle detected in dependency graph"
-
-
-class ConfigurationError(BlueprintError):
-    """Raised when there is a configuration issue (e.g. duplicate names)."""
-
-    code = "E120"
-    message = "Configuration error"
-
-
-# === SPEC_01 Validation Errors ===
 
 
 class ValidationError(BlueprintError):
@@ -114,22 +88,22 @@ class DimensionMismatchError(ValidationError):
         super().__init__(msg)
 
 
-class UnitMismatchError(ValidationError):
-    """E104: Variable units are incompatible."""
+class UnitError(ValidationError):
+    """E105: Unit validation error (incompatible or incorrect units).
 
-    code = "E104"
-    message = "Unit mismatch"
+    Raised when:
+    - Units declared in Blueprint don't match function signature expectations
+    - Output units from one function don't match input units of the next
+    - Units are dimensionally incompatible or have different canonical forms
+    - Tendencies lack required time dimension (/s)
+    """
 
-    def __init__(self, var_name: str, expected: str, actual: str | None = None) -> None:
-        """Initialize with variable name and unit info."""
-        self.var_name = var_name
-        self.expected = expected
-        self.actual = actual
-        if actual is not None:
-            msg = f"Unit mismatch for '{var_name}': expected '{expected}', got '{actual}'"
-        else:
-            msg = f"Unit mismatch for '{var_name}': expected '{expected}'"
-        super().__init__(msg)
+    code = "E105"
+    message = "Unit error"
+
+    def __init__(self, message: str) -> None:
+        """Initialize with descriptive error message."""
+        super().__init__(message)
 
 
 class MissingDataError(ValidationError):
@@ -157,3 +131,47 @@ class OutputCountMismatchError(ValidationError):
         self.expected = expected
         self.actual = actual
         super().__init__(f"Output count mismatch for '{func_name}': expected {expected}, got {actual}")
+
+
+class BlueprintValidationError(ValidationError):
+    """E100: Aggregation of all Blueprint validation errors.
+
+    Similar to pydantic.ValidationError: a single exception
+    containing all individual errors.
+    """
+
+    code = "E100"
+
+    def __init__(
+        self,
+        errors: list[ValidationError],
+        warnings: list[str] | None = None,
+    ) -> None:
+        self.validation_errors = errors
+        self.validation_warnings = warnings or []
+        summary = f"{len(errors)} blueprint validation error(s)"
+        details = "\n".join(f"  {e}" for e in errors)
+        super().__init__(f"{summary}\n{details}")
+
+    def error_count(self) -> int:
+        return len(self.validation_errors)
+
+
+class ConfigValidationError(ValidationError):
+    """E110: Aggregation of all Config validation errors."""
+
+    code = "E110"
+
+    def __init__(
+        self,
+        errors: list[ValidationError],
+        warnings: list[str] | None = None,
+    ) -> None:
+        self.validation_errors = errors
+        self.validation_warnings = warnings or []
+        summary = f"{len(errors)} config validation error(s)"
+        details = "\n".join(f"  {e}" for e in errors)
+        super().__init__(f"{summary}\n{details}")
+
+    def error_count(self) -> int:
+        return len(self.validation_errors)

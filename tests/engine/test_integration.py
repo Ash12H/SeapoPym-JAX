@@ -51,13 +51,13 @@ class TestE2EBasicSimulation:
                             "temp": "forcings.temperature",
                         },
                         "outputs": {
-                            "tendency": {
-                                "target": "tendencies.biomass",
-                                "type": "tendency",
-                            }
+                            "tendency": "derived.growth_flux",
                         },
                     }
                 ],
+                "tendencies": {
+                    "biomass": [{"source": "derived.growth_flux"}],
+                },
             }
         )
 
@@ -136,13 +136,13 @@ class TestE2EBasicSimulation:
                             "temp": "forcings.temperature",
                         },
                         "outputs": {
-                            "tendency": {
-                                "target": "tendencies.biomass",
-                                "type": "tendency",
-                            }
+                            "tendency": "derived.growth_flux",
                         },
                     }
                 ],
+                "tendencies": {
+                    "biomass": [{"source": "derived.growth_flux"}],
+                },
             }
         )
 
@@ -208,13 +208,13 @@ class TestE2EBasicSimulation:
                             "temp": "forcings.temperature",
                         },
                         "outputs": {
-                            "tendency": {
-                                "target": "tendencies.biomass",
-                                "type": "tendency",
-                            }
+                            "tendency": "derived.growth_flux",
                         },
                     }
                 ],
+                "tendencies": {
+                    "biomass": [{"source": "derived.growth_flux"}],
+                },
             }
         )
 
@@ -282,13 +282,13 @@ class TestE2EMaskBehavior:
                             "temp": "forcings.temperature",
                         },
                         "outputs": {
-                            "tendency": {
-                                "target": "tendencies.biomass",
-                                "type": "tendency",
-                            }
+                            "tendency": "derived.growth_flux",
                         },
                     }
                 ],
+                "tendencies": {
+                    "biomass": [{"source": "derived.growth_flux"}],
+                },
             }
         )
 
@@ -359,10 +359,7 @@ class TestE2EMultiProcess:
                             "temp": "forcings.temperature",
                         },
                         "outputs": {
-                            "tendency": {
-                                "target": "tendencies.biomass_growth",
-                                "type": "tendency",
-                            }
+                            "tendency": "derived.biomass_growth",
                         },
                     },
                     {
@@ -372,13 +369,16 @@ class TestE2EMultiProcess:
                             "rate": "parameters.mortality_rate",
                         },
                         "outputs": {
-                            "tendency": {
-                                "target": "tendencies.biomass_mortality",
-                                "type": "tendency",
-                            }
+                            "tendency": "derived.biomass_mortality",
                         },
                     },
                 ],
+                "tendencies": {
+                    "biomass": [
+                        {"source": "derived.biomass_growth"},
+                        {"source": "derived.biomass_mortality"},
+                    ],
+                },
             }
         )
 

@@ -53,13 +53,13 @@ def simple_blueprint():
                         "temp": "forcings.temperature",
                     },
                     "outputs": {
-                        "tendency": {
-                            "target": "tendencies.biomass",
-                            "type": "tendency",
-                        }
+                        "tendency": "derived.growth_flux",
                     },
                 }
             ],
+            "tendencies": {
+                "biomass": [{"source": "derived.growth_flux"}],
+            },
         }
     )
 
@@ -107,18 +107,15 @@ class TestBuildStepFn:
 
         # Test a single step
         state = {"biomass": np.ones((5, 5)) * 100.0}
+        params = model.parameters
         forcings_t = {
             "temperature": np.ones((5, 5)) * 20.0,
             "mask": np.ones((5, 5)),
         }
 
-        new_state, outputs = step_fn(state, forcings_t)
+        (new_state, _params), outputs = step_fn((state, params), forcings_t)
 
-        # Check state was updated (growth rate = 0.1/d, temp factor = 1.0)
-        # tendency = 100 * 0.1 * 1.0 = 10 g/d
-        # new_biomass = 100 + 10 * 86400 (dt in seconds)
-        # Actually, dt is in seconds, so with dt=86400, new = 100 + 10*86400 = huge
-        # Let's check the tendency calculation is correct
+        # Check state was updated
         assert "biomass" in new_state
         assert new_state["biomass"].shape == (5, 5)
 
@@ -140,12 +137,13 @@ class TestBuildStepFn:
 
         # Test a single step
         state = {"biomass": jnp.ones((5, 5)) * 100.0}
+        params = model.parameters
         forcings_t = {
             "temperature": jnp.ones((5, 5)) * 20.0,
             "mask": jnp.ones((5, 5)),
         }
 
-        new_state, outputs = step_fn(state, forcings_t)
+        (new_state, _params), outputs = step_fn((state, params), forcings_t)
 
         assert "biomass" in new_state
         assert new_state["biomass"].shape == (5, 5)
@@ -168,12 +166,13 @@ class TestBuildStepFn:
         mask[0, :] = 0  # First row masked
 
         state = {"biomass": np.ones((5, 5)) * 100.0}
+        params = model.parameters
         forcings_t = {
             "temperature": np.ones((5, 5)) * 20.0,
             "mask": mask,
         }
 
-        new_state, outputs = step_fn(state, forcings_t)
+        (new_state, _params), outputs = step_fn((state, params), forcings_t)
 
         # First row should be zero (masked)
         np.testing.assert_array_equal(new_state["biomass"][0, :], 0.0)
@@ -232,37 +231,67 @@ class TestIntegrateEuler:
 
     def test_euler_integration_numpy(self):
         """Test Euler integration with numpy."""
+        from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
         state = {"x": np.array([10.0, 20.0])}
-        tendencies = {"x": [np.array([1.0, 2.0])]}
+        intermediates = {"flux": np.array([1.0, 2.0])}
+        tendency_map = {"x": [TendencySource(source="derived.flux")]}
         dt = 1.0
 
-        new_state = _integrate_euler(state, tendencies, dt, "numpy")
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
 
         np.testing.assert_array_equal(new_state["x"], [11.0, 22.0])
 
     def test_euler_integration_multiple_tendencies(self):
         """Test Euler integration with multiple tendencies."""
+        from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
         state = {"x": np.array([10.0])}
-        tendencies = {"x": [np.array([1.0]), np.array([2.0])]}  # Two sources
+        intermediates = {"flux1": np.array([1.0]), "flux2": np.array([2.0])}
+        tendency_map = {
+            "x": [
+                TendencySource(source="derived.flux1"),
+                TendencySource(source="derived.flux2"),
+            ]
+        }
         dt = 1.0
 
-        new_state = _integrate_euler(state, tendencies, dt, "numpy")
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
 
         np.testing.assert_array_equal(new_state["x"], [13.0])  # 10 + (1+2)*1
 
     def test_euler_no_tendency(self):
         """Test Euler integration with no tendency (state unchanged)."""
+        from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
         state = {"x": np.array([10.0]), "y": np.array([5.0])}
-        tendencies = {"x": [np.array([1.0])]}  # No tendency for y
+        intermediates = {"flux": np.array([1.0])}
+        tendency_map = {"x": [TendencySource(source="derived.flux")]}  # No tendency for y
         dt = 1.0
 
-        new_state = _integrate_euler(state, tendencies, dt, "numpy")
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
 
         np.testing.assert_array_equal(new_state["x"], [11.0])
         np.testing.assert_array_equal(new_state["y"], [5.0])  # Unchanged
+
+    def test_euler_with_sign(self):
+        """Test Euler integration with negative sign on a tendency source."""
+        from seapopym.blueprint.schema import TendencySource
+        from seapopym.engine.step import _integrate_euler
+
+        state = {"x": np.array([10.0])}
+        intermediates = {"gain": np.array([3.0]), "loss": np.array([1.0])}
+        tendency_map = {
+            "x": [
+                TendencySource(source="derived.gain"),
+                TendencySource(source="derived.loss", sign=-1.0),
+            ]
+        }
+        dt = 1.0
+
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
+
+        np.testing.assert_array_equal(new_state["x"], [12.0])  # 10 + (3 - 1)*1

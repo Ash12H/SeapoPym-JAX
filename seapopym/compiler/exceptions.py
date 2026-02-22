@@ -1,11 +1,10 @@
 """Compiler-specific exceptions.
 
-Error codes as per SPEC_02 §9:
+Error codes:
 - E201: ShapeInferenceError
 - E202: GridAlignmentError
 - E203: MissingDimensionError
 - E204: TransposeError
-- E205: UnitError
 """
 
 from __future__ import annotations
@@ -74,23 +73,3 @@ class TransposeError(CompilerError):
         super().__init__(f"Cannot transpose '{variable}': {reason}")
 
 
-class UnitError(CompilerError):
-    """E205: Unit validation error (incompatible or incorrect units).
-
-    Raised when:
-    - Units declared in Blueprint don't match function signature expectations
-    - Output units from one function don't match input units of the next
-    - Units are dimensionally incompatible or have different canonical forms
-    - Tendencies lack required time dimension (/s)
-    """
-
-    code = "E205"
-
-    def __init__(self, message: str) -> None:
-        """Initialize with descriptive error message.
-
-        Args:
-            message: Detailed explanation of the unit mismatch,
-                     including expected vs actual units and context.
-        """
-        super().__init__(message)

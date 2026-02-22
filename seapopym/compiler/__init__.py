@@ -32,7 +32,6 @@ from .exceptions import (
     MissingDimensionError,
     ShapeInferenceError,
     TransposeError,
-    UnitError,
 )
 from .forcing import ForcingStore
 from .inference import infer_shapes
@@ -74,5 +73,4 @@ __all__ = [
     "GridAlignmentError",
     "MissingDimensionError",
     "TransposeError",
-    "UnitError",
 ]
