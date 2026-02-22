@@ -137,6 +137,30 @@ class TestValidateBlueprint:
             validate_blueprint(bp, backend="jax")
         assert any(e.code == "E107" for e in exc_info.value.validation_errors)
 
+    def test_extra_input_argument(self):
+        """Extra input arg not in function signature → E102."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"value": {"units": "g"}, "other": {"units": "1"}},
+                },
+                "process": [
+                    {
+                        "func": "test:simple",  # signature: (x)
+                        "inputs": {"x": "state.value", "typo": "state.other"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        e102 = [e for e in exc_info.value.validation_errors if e.code == "E102"]
+        assert len(e102) == 1
+        assert "typo" in e102[0].extra
+
     def test_nodes_built_on_success(self):
         """Test that compute_nodes and data_nodes are built when validation succeeds."""
         bp = Blueprint.from_dict(

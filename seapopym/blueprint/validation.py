@@ -138,15 +138,17 @@ class BlueprintValidator:
                 continue  # Already reported as error
 
             metadata = result.resolved_functions[step.func]
-            metadata.get_signature()
+            sig = metadata.get_signature()
             required_params = metadata.get_required_inputs()
+            all_params = set(sig.parameters.keys())
 
             # Check that all required parameters are provided
             provided_inputs = set(step.inputs.keys())
             missing = [p for p in required_params if p not in provided_inputs]
+            extra = sorted(provided_inputs - all_params)
 
-            if missing:
-                result.add_error(SignatureMismatchError(step.func, missing=missing))
+            if missing or extra:
+                result.add_error(SignatureMismatchError(step.func, missing=missing or None, extra=extra or None))
 
             # Check that all provided inputs reference valid variables
             for _arg_name, var_path in step.inputs.items():
