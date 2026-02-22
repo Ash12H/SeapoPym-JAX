@@ -4,12 +4,15 @@ import pytest
 
 from seapopym.blueprint import (
     Blueprint,
+    BlueprintValidationError,
     Config,
+    ConfigValidationError,
     clear_registry,
     functional,
     validate_blueprint,
     validate_config,
 )
+from seapopym.blueprint.validation import BlueprintValidator
 
 
 @pytest.fixture(autouse=True)
@@ -92,9 +95,9 @@ class TestValidateBlueprint:
             }
         )
 
-        result = validate_blueprint(bp, backend="jax")
-        assert not result.valid
-        assert any(e.code == "E101" for e in result.errors)
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        assert any(e.code == "E101" for e in exc_info.value.validation_errors)
 
     def test_missing_required_input(self):
         """Test validation fails for missing required input."""
@@ -118,9 +121,9 @@ class TestValidateBlueprint:
             }
         )
 
-        result = validate_blueprint(bp, backend="jax")
-        assert not result.valid
-        assert any(e.code == "E102" for e in result.errors)
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        assert any(e.code == "E102" for e in exc_info.value.validation_errors)
 
     def test_output_count_mismatch(self):
         """Test validation fails for wrong number of outputs."""
@@ -144,9 +147,9 @@ class TestValidateBlueprint:
             }
         )
 
-        result = validate_blueprint(bp, backend="jax")
-        assert not result.valid
-        assert any(e.code == "E107" for e in result.errors)
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        assert any(e.code == "E107" for e in exc_info.value.validation_errors)
 
     def test_nodes_built_on_success(self):
         """Test that compute_nodes and data_nodes are built when validation succeeds."""
@@ -203,12 +206,10 @@ class TestValidateBlueprint:
             }
         )
 
-        result = validate_blueprint(bp, backend="jax")
-        assert not result.valid
-        # Should generate an error, not a warning
-        assert any(e.code == "E205" for e in result.errors)
-        # Check specific message content if needed
-        error_msgs = [str(e) for e in result.errors if e.code == "E205"]
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        assert any(e.code == "E105" for e in exc_info.value.validation_errors)
+        error_msgs = [str(e) for e in exc_info.value.validation_errors if e.code == "E105"]
         assert any("Unit mismatch" in msg for msg in error_msgs)
 
     def test_tendency_unit_error(self):
@@ -241,11 +242,101 @@ class TestValidateBlueprint:
             }
         )
 
-        result = validate_blueprint(bp, backend="jax")
-        assert not result.valid
-        assert any(e.code == "E205" for e in result.errors)
-        error_msgs = [str(e) for e in result.errors if e.code == "E205"]
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        assert any(e.code == "E105" for e in exc_info.value.validation_errors)
+        error_msgs = [str(e) for e in exc_info.value.validation_errors if e.code == "E105"]
         assert any("lacks a time dimension" in msg for msg in error_msgs)
+
+    def test_aggregated_error_count(self):
+        """Test that BlueprintValidationError aggregates all errors."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {},
+                    "parameters": {},
+                    "forcings": {},
+                    "derived": {},
+                },
+                "process": [
+                    {
+                        "func": "nonexistent:func1",
+                        "inputs": {},
+                        "outputs": {},
+                    },
+                    {
+                        "func": "nonexistent:func2",
+                        "inputs": {},
+                        "outputs": {},
+                    },
+                ],
+            }
+        )
+
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+
+        err = exc_info.value
+        assert err.error_count() == 2
+        assert len(err.validation_errors) == err.error_count()
+        assert all(e.code == "E101" for e in err.validation_errors)
+
+    def test_aggregated_error_has_warnings(self):
+        """Test that BlueprintValidationError carries warnings."""
+        # Use the low-level validator to inspect warnings separately
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"value": {"units": "g"}},
+                    "parameters": {},
+                    "forcings": {},
+                    "derived": {},
+                },
+                "process": [
+                    {
+                        "func": "test:simple",
+                        "inputs": {"x": "state.value"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+
+        # Valid blueprint — no exception, just verify result has warnings list
+        result = validate_blueprint(bp, backend="jax")
+        assert isinstance(result.warnings, list)
+
+    def test_low_level_validator_returns_result(self):
+        """Test that BlueprintValidator.validate() returns result without raising."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {},
+                    "parameters": {},
+                    "forcings": {},
+                    "derived": {},
+                },
+                "process": [
+                    {
+                        "func": "nonexistent:func",
+                        "inputs": {},
+                        "outputs": {},
+                    }
+                ],
+            }
+        )
+
+        # Low-level: returns ValidationResult without raising
+        validator = BlueprintValidator(backend="jax")
+        result = validator.validate(bp)
+        assert not result.valid
+        assert any(e.code == "E101" for e in result.errors)
 
 
 class TestValidateConfig:
@@ -304,9 +395,9 @@ class TestValidateConfig:
             }
         )
 
-        result = validate_config(cfg, bp)
-        assert not result.valid
-        assert any(e.code == "E106" for e in result.errors)
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config(cfg, bp)
+        assert any(e.code == "E106" for e in exc_info.value.validation_errors)
 
     def test_missing_forcing(self):
         """Test validation fails for missing forcing."""
@@ -333,8 +424,8 @@ class TestValidateConfig:
             }
         )
 
-        result = validate_config(cfg, bp)
-        assert not result.valid
+        with pytest.raises(ConfigValidationError):
+            validate_config(cfg, bp)
 
     def test_missing_initial_state(self):
         """Test validation fails for missing initial state."""
@@ -361,5 +452,38 @@ class TestValidateConfig:
             }
         )
 
-        result = validate_config(cfg, bp)
-        assert not result.valid
+        with pytest.raises(ConfigValidationError):
+            validate_config(cfg, bp)
+
+    def test_config_aggregated_errors(self):
+        """Test that ConfigValidationError aggregates all errors."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"biomass": {"units": "g"}},
+                    "parameters": {"rate": {"units": "1/d"}},
+                    "forcings": {"temp": {"units": "degC"}},
+                    "derived": {},
+                },
+                "process": [],
+            }
+        )
+
+        cfg = Config.from_dict(
+            {
+                "parameters": {},  # Missing rate
+                "forcings": {},  # Missing temp
+                "initial_state": {},  # Missing biomass
+                "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31"},
+            }
+        )
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config(cfg, bp)
+
+        err = exc_info.value
+        assert err.error_count() == 3
+        assert len(err.validation_errors) == 3
+        assert isinstance(err.validation_warnings, list)

@@ -1,19 +1,28 @@
 """Validation pipeline for Blueprint and Config.
 
-This module implements the validation pipeline:
-1. Parse syntax (Blueprint/Config)
-2. Resolve functions (registry lookup)
-3. Check signatures
-4. Validate dimensions
-5. Validate units (Pint)
-6. Build compute/data nodes (no graph needed — process order is authoritative)
+Blueprint validation pipeline:
+1. Syntax — Pydantic parse (implicit, Blueprint already parsed).
+2. Resolve functions — registry lookup.
+3. Check signatures — required inputs, output count, variable existence.
+4. Build nodes & validate core dimensions — build ComputeNode/DataNode
+   list in process order; for each step, verify that every core_dim
+   declared by the function exists in the (declared or propagated)
+   dimensions of the corresponding input.
+5. Validate units — propagate units along the process chain (Pint).
+6. Validate tendencies — check sources reference produced derived variables.
+
+Steps 4-6 are independent: a unit error does not block dimension checks.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .exceptions import (
+    BlueprintValidationError,
+    ConfigValidationError,
     DimensionMismatchError,
     FunctionNotFoundError,
     MissingDataError,
@@ -23,7 +32,7 @@ from .exceptions import (
 )
 from .nodes import ComputeNode, DataNode
 from .registry import FunctionMetadata, get_function
-from .schema import Blueprint, Config
+from .schema import Blueprint, Config, ProcessStep
 
 
 @dataclass
@@ -94,19 +103,16 @@ class BlueprintValidator:
         if not result.valid:
             return result
 
-        # Step 4: Validate dimensions
-        self._validate_dimensions(blueprint, result)
+        # Steps 4-6 are independent — errors in one do not block the others.
+
+        # Step 4: Build nodes and validate core dimensions
+        self._build_nodes_and_validate_dims(blueprint, result)
 
         # Step 5: Validate units
         self._validate_units(blueprint, result)
 
-        # Step 6: Build compute and data nodes
-        if result.valid:
-            self._build_nodes(blueprint, result)
-
-        # Step 7: Validate tendencies
-        if result.valid:
-            self._validate_tendencies(blueprint, result)
+        # Step 6: Validate tendencies
+        self._validate_tendencies(blueprint, result)
 
         return result
 
@@ -158,76 +164,45 @@ class BlueprintValidator:
             for target in step.outputs.values():
                 produced_vars.add(target)
 
-    def _validate_dimensions(self, blueprint: Blueprint, result: ValidationResult) -> None:
-        """Step 4: Validate dimension compatibility."""
-        all_vars = blueprint.declarations.get_all_variables()
-
-        for step in blueprint.process:
-            if step.func not in result.resolved_functions:
-                continue
-
-            metadata = result.resolved_functions[step.func]
-
-            # Check core_dims match declared dims
-            for arg_name, core_dims in metadata.core_dims.items():
-                if arg_name not in step.inputs:
-                    continue
-
-                var_path = step.inputs[arg_name]
-                if var_path not in all_vars:
-                    continue
-
-                var_decl = all_vars[var_path]
-                if var_decl.dims is None:
-                    result.add_warning(
-                        f"Variable '{var_path}' has no declared dimensions, "
-                        f"but function '{step.func}' expects core_dims {core_dims}"
-                    )
-                    continue
-
-                # Check that core_dims are subset of declared dims
-                for dim in core_dims:
-                    if dim not in var_decl.dims:
-                        result.add_error(
-                            DimensionMismatchError(
-                                var_path,
-                                expected=core_dims,
-                                actual=var_decl.dims,
-                            )
-                        )
-
     def _validate_units(self, blueprint: Blueprint, result: ValidationResult) -> None:
-        """Step 5: Validate unit compatibility using Pint (strict checking)."""
+        """Validate unit compatibility using Pint (strict checking)."""
         from seapopym.compiler.units import UnitValidator
 
         validator = UnitValidator()
         unit_errors = validator.validate_process_chain(blueprint, result.resolved_functions)
 
         for error in unit_errors:
-            result.add_error(error)  # type: ignore[arg-type]
+            result.add_error(error)
 
-    def _build_nodes(self, blueprint: Blueprint, result: ValidationResult) -> None:
-        """Step 6: Build compute and data nodes from process steps.
+    def _build_nodes_and_validate_dims(self, blueprint: Blueprint, result: ValidationResult) -> None:
+        """Build ComputeNode/DataNode lists and validate core dimensions.
 
-        Process order in the Blueprint is authoritative — no graph or
-        topological sort needed.
+        Iterates over process steps in declaration order:
+        1. Resolve each input's dimensions (from declarations or from a
+           previously produced derived variable).
+        2. Validate that every core_dim declared by the function exists
+           in the resolved dimensions of the corresponding input.
+        3. Propagate output dimensions for derived variables so that
+           subsequent steps can validate against them.
+
+        Note: Forcings are declared with a T (time) dimension, but the
+        engine slices forcings per-timestep before passing them to
+        functions. T is therefore excluded from dimension checks here.
         """
+        from seapopym.compiler.transpose import get_canonical_order
+
         data_nodes: dict[str, DataNode] = {}
 
-        # Create DataNodes for all declared variables
+        # Seed data_nodes from Blueprint declarations
         all_vars = blueprint.declarations.get_all_variables()
         for var_path, var_decl in all_vars.items():
-            is_state = var_path.startswith("state.")
-            is_parameter = var_path.startswith("parameters.")
-
-            node = DataNode(
+            data_nodes[var_path] = DataNode(
                 name=var_path,
                 dims=tuple(var_decl.dims) if var_decl.dims else None,
                 units=var_decl.units,
-                is_state=is_state,
-                is_parameter=is_parameter,
+                is_state=var_path.startswith("state."),
+                is_parameter=var_path.startswith("parameters."),
             )
-            data_nodes[var_path] = node
 
         compute_nodes: list[ComputeNode] = []
 
@@ -237,32 +212,18 @@ class BlueprintValidator:
 
             metadata = result.resolved_functions[step.func]
 
-            # Output mapping: output_key → derived path
-            output_mapping = dict(step.outputs)
+            # --- Resolve input dimensions ---
+            input_dims = self._resolve_input_dims(step, data_nodes, get_canonical_order)
 
-            # Resolve input dimensions from DataNodes
-            from seapopym.compiler.transpose import get_canonical_order
+            # --- Validate core_dims ---
+            self._check_core_dims(step, metadata, input_dims, result)
 
-            input_dims: dict[str, tuple[str, ...]] = {}
-            for arg_name, var_path in step.inputs.items():
-                node_dims = data_nodes.get(var_path, DataNode(name=var_path)).dims
-                if node_dims is not None:
-                    dims_list = [str(d) for d in node_dims]
-                    if var_path.startswith("forcings.") and "T" in dims_list:
-                        dims_list.remove("T")
-                    input_dims[arg_name] = get_canonical_order(dims_list)
-                else:
-                    input_dims[arg_name] = ()
-
-            # Derive unique name
-            output_targets = list(step.outputs.values())
-            targets_suffix = ",".join(t.split(".", 1)[-1] for t in output_targets)
-            _unique_name = f"{step.func}[{targets_suffix}]"
-
+            # --- Build ComputeNode ---
+            targets_suffix = ",".join(t.split(".", 1)[-1] for t in step.outputs.values())
             compute_node = ComputeNode(
                 func=metadata.func,
-                name=_unique_name,
-                output_mapping=output_mapping,
+                name=f"{step.func}[{targets_suffix}]",
+                output_mapping=dict(step.outputs),
                 input_mapping=dict(step.inputs),
                 core_dims=metadata.core_dims,
                 input_dims=input_dims,
@@ -270,30 +231,85 @@ class BlueprintValidator:
             )
             compute_nodes.append(compute_node)
 
-            # Infer output dimensions
-            all_input_dims: set[str] = set()
-            for dims in input_dims.values():
-                all_input_dims.update(dims)
-            all_core_dims: set[str] = set()
-            for core in metadata.core_dims.values():
-                all_core_dims.update(core)
-            broadcast_dims_set = all_input_dims - all_core_dims
-            inferred_broadcast_dims = get_canonical_order(list(broadcast_dims_set))
-            if metadata.out_dims:
-                inferred_output_dims = inferred_broadcast_dims + tuple(metadata.out_dims)
-            else:
-                inferred_output_dims = inferred_broadcast_dims
-
-            # Create output DataNodes
+            # --- Propagate output dims for downstream steps ---
+            output_dims = self._compute_output_dims(input_dims, metadata, get_canonical_order)
             for target in step.outputs.values():
-                out_node = DataNode(
+                data_nodes[target] = DataNode(
                     name=target,
-                    dims=inferred_output_dims if inferred_output_dims else None,
+                    dims=output_dims if output_dims else None,
                 )
-                data_nodes[target] = out_node
 
         result.compute_nodes = compute_nodes
         result.data_nodes = data_nodes
+
+    @staticmethod
+    def _resolve_input_dims(
+        step: ProcessStep,
+        data_nodes: dict[str, DataNode],
+        get_canonical_order: Callable[..., Any],
+    ) -> dict[str, tuple[str, ...]]:
+        """Resolve the dimension tuple for each input of a process step.
+
+        Forcings have their T dimension stripped (the engine slices per-timestep).
+        """
+        input_dims: dict[str, tuple[str, ...]] = {}
+        for arg_name, var_path in step.inputs.items():
+            node_dims = data_nodes.get(var_path, DataNode(name=var_path)).dims
+            if node_dims is None:
+                input_dims[arg_name] = ()
+                continue
+            dims_list = [str(d) for d in node_dims]
+            # T is consumed by the engine's time loop, not seen by functions
+            if var_path.startswith("forcings.") and "T" in dims_list:
+                dims_list.remove("T")
+            input_dims[arg_name] = get_canonical_order(dims_list)
+        return input_dims
+
+    @staticmethod
+    def _check_core_dims(
+        step: ProcessStep,
+        metadata: FunctionMetadata,
+        input_dims: dict[str, tuple[str, ...]],
+        result: ValidationResult,
+    ) -> None:
+        """Verify that every core_dim declared by the function exists in the input's dims."""
+        for arg_name, core_dims in metadata.core_dims.items():
+            if arg_name not in step.inputs:
+                continue
+            var_path = step.inputs[arg_name]
+            resolved = input_dims.get(arg_name, ())
+            if not resolved:
+                result.add_warning(
+                    f"Variable '{var_path}' has no dimensions, "
+                    f"but function '{step.func}' expects core_dims {core_dims}"
+                )
+                continue
+            for dim in core_dims:
+                if dim not in resolved:
+                    result.add_error(
+                        DimensionMismatchError(var_path, expected=core_dims, actual=list(resolved))
+                    )
+
+    @staticmethod
+    def _compute_output_dims(
+        input_dims: dict[str, tuple[str, ...]],
+        metadata: FunctionMetadata,
+        get_canonical_order: Callable[..., Any],
+    ) -> tuple[str, ...]:
+        """Compute the output dimensions of a process step.
+
+        output_dims = broadcast_dims (all input dims minus core_dims) + out_dims.
+        """
+        all_dims: set[str] = set()
+        for dims in input_dims.values():
+            all_dims.update(dims)
+        core: set[str] = set()
+        for c in metadata.core_dims.values():
+            core.update(c)
+        broadcast = get_canonical_order(list(all_dims - core))
+        if metadata.out_dims:
+            return broadcast + tuple(metadata.out_dims)
+        return broadcast
 
     def _validate_tendencies(self, blueprint: Blueprint, result: ValidationResult) -> None:
         """Validate that tendency sources reference produced derived variables."""
@@ -323,9 +339,15 @@ def validate_blueprint(blueprint: Blueprint, backend: str = "jax") -> Validation
 
     Returns:
         ValidationResult with errors, warnings, and built nodes.
+
+    Raises:
+        BlueprintValidationError: If validation fails (contains all errors).
     """
     validator = BlueprintValidator(backend=backend)
-    return validator.validate(blueprint)
+    result = validator.validate(blueprint)
+    if not result.valid:
+        raise BlueprintValidationError(result.errors, result.warnings)
+    return result
 
 
 def validate_config(
@@ -348,6 +370,9 @@ def validate_config(
 
     Returns:
         ValidationResult with errors and warnings.
+
+    Raises:
+        ConfigValidationError: If validation fails (contains all errors).
     """
     result = ValidationResult()
     all_vars = blueprint.declarations.get_all_variables()
@@ -392,4 +417,6 @@ def validate_config(
         if not found:
             result.add_error(MissingDataError(var_path, data_type="initial_state"))
 
+    if not result.valid:
+        raise ConfigValidationError(result.errors, result.warnings)
     return result

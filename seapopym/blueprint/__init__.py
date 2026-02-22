@@ -21,12 +21,14 @@ Example:
 
 from .exceptions import (
     BlueprintError,
+    BlueprintValidationError,
+    ConfigValidationError,
     DimensionMismatchError,
     FunctionNotFoundError,
     MissingDataError,
     OutputCountMismatchError,
     SignatureMismatchError,
-    UnitMismatchError,
+    UnitError,
     ValidationError,
 )
 from .execution import ExecutionPlan
@@ -87,7 +89,9 @@ __all__ = [
     "FunctionNotFoundError",
     "SignatureMismatchError",
     "DimensionMismatchError",
-    "UnitMismatchError",
+    "UnitError",
+    "BlueprintValidationError",
+    "ConfigValidationError",
     "MissingDataError",
     "OutputCountMismatchError",
 ]

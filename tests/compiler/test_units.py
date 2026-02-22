@@ -6,7 +6,7 @@ import pytest
 
 from seapopym.blueprint import Blueprint
 from seapopym.blueprint.registry import functional
-from seapopym.compiler.exceptions import UnitError
+from seapopym.blueprint.exceptions import UnitError
 from seapopym.compiler.units import UnitValidator
 
 

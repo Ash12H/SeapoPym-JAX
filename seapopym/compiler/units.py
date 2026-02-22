@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from seapopym.blueprint import Blueprint
     from seapopym.blueprint.registry import FunctionMetadata
 
-from .exceptions import UnitError
+from seapopym.blueprint.exceptions import UnitError
 
 
 class UnitValidator:

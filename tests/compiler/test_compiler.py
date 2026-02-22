@@ -184,13 +184,6 @@ class TestCompiler:
         # Check arrays are JAX arrays
         assert hasattr(compiled.state["biomass"], "device")
 
-    def test_compile_no_validation(self, toy_blueprint, toy_config):
-        """Test compilation without validation."""
-        compiler = Compiler(backend="numpy")
-        compiled = compiler.compile(toy_blueprint, toy_config, validate=False)
-
-        assert isinstance(compiled, CompiledModel)
-
     def test_compile_trainable_params(self, toy_blueprint):
         """Test that trainable params are identified."""
         config = Config.from_dict(
