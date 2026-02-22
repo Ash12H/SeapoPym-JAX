@@ -1,22 +1,19 @@
 """Validation pipeline for Blueprint and Config.
 
-This module implements the 6-step validation pipeline as per SPEC_01:
+This module implements the validation pipeline:
 1. Parse syntax (Blueprint/Config)
 2. Resolve functions (registry lookup)
 3. Check signatures
 4. Validate dimensions
 5. Validate units (Pint)
-6. Build dependency graph (NetworkX)
+6. Build compute/data nodes (no graph needed — process order is authoritative)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import networkx as nx
-
 from .exceptions import (
-    CycleError,
     DimensionMismatchError,
     FunctionNotFoundError,
     MissingDataError,
@@ -37,14 +34,16 @@ class ValidationResult:
         valid: Whether validation passed.
         errors: List of validation errors (if any).
         warnings: List of non-fatal warnings.
-        graph: Dependency graph (if validation passed).
+        compute_nodes: Ordered list of compute nodes (process steps).
+        data_nodes: Dict mapping variable paths to DataNode metadata.
         resolved_functions: Map of function names to metadata.
     """
 
     valid: bool = True
     errors: list[ValidationError] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    graph: nx.DiGraph | None = None
+    compute_nodes: list[ComputeNode] = field(default_factory=list)
+    data_nodes: dict[str, DataNode] = field(default_factory=dict)
     resolved_functions: dict[str, FunctionMetadata] = field(default_factory=dict)
 
     def add_error(self, error: ValidationError) -> None:
@@ -60,7 +59,7 @@ class ValidationResult:
 class BlueprintValidator:
     """Validator for Blueprint definitions.
 
-    Implements the 6-step validation pipeline for validating a Blueprint
+    Implements the validation pipeline for validating a Blueprint
     against its declarations and the function registry.
     """
 
@@ -79,7 +78,7 @@ class BlueprintValidator:
             blueprint: The Blueprint to validate.
 
         Returns:
-            ValidationResult with errors, warnings, and built graph.
+            ValidationResult with errors, warnings, and built nodes.
         """
         result = ValidationResult()
 
@@ -101,9 +100,13 @@ class BlueprintValidator:
         # Step 5: Validate units
         self._validate_units(blueprint, result)
 
-        # Step 6: Build dependency graph
+        # Step 6: Build compute and data nodes
         if result.valid:
-            self._build_graph(blueprint, result)
+            self._build_nodes(blueprint, result)
+
+        # Step 7: Validate tendencies
+        if result.valid:
+            self._validate_tendencies(blueprint, result)
 
         return result
 
@@ -119,7 +122,6 @@ class BlueprintValidator:
     def _check_signatures(self, blueprint: Blueprint, result: ValidationResult) -> None:
         """Step 3: Check that function signatures match declared inputs."""
         all_vars = blueprint.declarations.get_all_variables()
-        # Add tendencies and derived as valid targets
         available_vars = set(all_vars.keys())
 
         # Track produced variables from process outputs
@@ -152,13 +154,12 @@ class BlueprintValidator:
                 if declared_outputs != expected_outputs:
                     result.add_error(OutputCountMismatchError(step.func, expected_outputs, declared_outputs))
 
-            # Register produced variables
-            for output_spec in step.outputs.values():
-                produced_vars.add(output_spec.target)
+            # Register produced variables (outputs are now simple strings)
+            for target in step.outputs.values():
+                produced_vars.add(target)
 
     def _validate_dimensions(self, blueprint: Blueprint, result: ValidationResult) -> None:
         """Step 4: Validate dimension compatibility."""
-        # Get all variable declarations
         all_vars = blueprint.declarations.get_all_variables()
 
         for step in blueprint.process:
@@ -196,33 +197,26 @@ class BlueprintValidator:
                         )
 
     def _validate_units(self, blueprint: Blueprint, result: ValidationResult) -> None:
-        """Step 5: Validate unit compatibility using Pint (strict checking).
-
-        This method uses UnitValidator to perform strict unit checking:
-        - Units must be exactly identical (canonical forms), not just compatible
-        - Warnings from old implementation are now ERRORS
-        - Validates entire process chain including tendencies
-        """
-        # Import here to avoid circular dependency
+        """Step 5: Validate unit compatibility using Pint (strict checking)."""
         from seapopym.compiler.units import UnitValidator
 
         validator = UnitValidator()
         unit_errors = validator.validate_process_chain(blueprint, result.resolved_functions)
 
-        # Add all unit errors to validation result
         for error in unit_errors:
-            # Cast to ValidationError (UnitError should inherit from it or compatible)
             result.add_error(error)  # type: ignore[arg-type]
 
-    def _build_graph(self, blueprint: Blueprint, result: ValidationResult) -> None:
-        """Step 6: Build the dependency graph using NetworkX."""
-        graph: nx.DiGraph = nx.DiGraph()
+    def _build_nodes(self, blueprint: Blueprint, result: ValidationResult) -> None:
+        """Step 6: Build compute and data nodes from process steps.
+
+        Process order in the Blueprint is authoritative — no graph or
+        topological sort needed.
+        """
         data_nodes: dict[str, DataNode] = {}
 
         # Create DataNodes for all declared variables
         all_vars = blueprint.declarations.get_all_variables()
         for var_path, var_decl in all_vars.items():
-            # Determine node type based on category
             is_state = var_path.startswith("state.")
             is_parameter = var_path.startswith("parameters.")
 
@@ -233,40 +227,35 @@ class BlueprintValidator:
                 is_state=is_state,
                 is_parameter=is_parameter,
             )
-            graph.add_node(node)
             data_nodes[var_path] = node
 
-        # Create ComputeNodes and edges for each process step
+        compute_nodes: list[ComputeNode] = []
+
         for step in blueprint.process:
             if step.func not in result.resolved_functions:
                 continue
 
             metadata = result.resolved_functions[step.func]
 
-            # Determine output mapping from ProcessStep
-            output_mapping = {out_key: out_spec.target for out_key, out_spec in step.outputs.items()}
+            # Output mapping: output_key → derived path
+            output_mapping = dict(step.outputs)
 
             # Resolve input dimensions from DataNodes
-            # Note: Dimensions are sorted to canonical order (the runtime order after transpose)
-            # Also: For forcings, remove T dimension since they're time-sliced at runtime
             from seapopym.compiler.transpose import get_canonical_order
 
             input_dims: dict[str, tuple[str, ...]] = {}
             for arg_name, var_path in step.inputs.items():
                 node_dims = data_nodes.get(var_path, DataNode(name=var_path)).dims
                 if node_dims is not None:
-                    # Cast to tuple[str, ...] and filter out T for forcings
                     dims_list = [str(d) for d in node_dims]
                     if var_path.startswith("forcings.") and "T" in dims_list:
                         dims_list.remove("T")
-                    # Sort to canonical order (runtime order after transpose)
                     input_dims[arg_name] = get_canonical_order(dims_list)
                 else:
-                    # Scalar or unknown dimensions
                     input_dims[arg_name] = ()
 
-            # Derive unique name from function + output targets
-            output_targets = [out_spec.target for out_spec in step.outputs.values()]
+            # Derive unique name
+            output_targets = list(step.outputs.values())
             targets_suffix = ",".join(t.split(".", 1)[-1] for t in output_targets)
             _unique_name = f"{step.func}[{targets_suffix}]"
 
@@ -279,57 +268,48 @@ class BlueprintValidator:
                 input_dims=input_dims,
                 out_dims=metadata.out_dims,
             )
-            graph.add_node(compute_node)
+            compute_nodes.append(compute_node)
 
-            # Add edges from inputs to compute node
-            for _arg_name, var_path in step.inputs.items():
-                if var_path in data_nodes:
-                    graph.add_edge(data_nodes[var_path], compute_node)
-
-            # Infer output dimensions from inputs
-            # For functions without core_dims: output has broadcast dims of all inputs
-            # For functions with core_dims: output has broadcast_dims + out_dims
+            # Infer output dimensions
             all_input_dims: set[str] = set()
             for dims in input_dims.values():
                 all_input_dims.update(dims)
-            # Remove core_dims from all inputs to get broadcast dims
             all_core_dims: set[str] = set()
             for core in metadata.core_dims.values():
                 all_core_dims.update(core)
             broadcast_dims_set = all_input_dims - all_core_dims
-            # Sort to canonical order
             inferred_broadcast_dims = get_canonical_order(list(broadcast_dims_set))
-            # Add out_dims if specified
             if metadata.out_dims:
                 inferred_output_dims = inferred_broadcast_dims + tuple(metadata.out_dims)
             else:
                 inferred_output_dims = inferred_broadcast_dims
 
-            # Create output DataNodes and add edges
-            for _out_key, out_spec in step.outputs.items():
-                # Determine if it's a tendency
-                is_tendency_of = None
-                if out_spec.type == "tendency":
-                    # Extract the state variable being modified
-                    # e.g., "tendencies.growth" -> look for matching state var
-                    pass  # Known limitation: tendency target resolution not yet implemented
-
+            # Create output DataNodes
+            for target in step.outputs.values():
                 out_node = DataNode(
-                    name=out_spec.target,
-                    is_tendency_of=is_tendency_of,
+                    name=target,
                     dims=inferred_output_dims if inferred_output_dims else None,
                 )
-                graph.add_node(out_node)
-                data_nodes[out_spec.target] = out_node
-                graph.add_edge(compute_node, out_node)
+                data_nodes[target] = out_node
 
-        # Check for cycles
-        if not nx.is_directed_acyclic_graph(graph):
-            cycles = list(nx.simple_cycles(graph))
-            cycle_names = [[getattr(n, "name", str(n)) for n in c] for c in cycles[:3]]
-            result.add_error(CycleError(f"Dependency graph contains cycles: {cycle_names}"))
+        result.compute_nodes = compute_nodes
+        result.data_nodes = data_nodes
 
-        result.graph = graph
+    def _validate_tendencies(self, blueprint: Blueprint, result: ValidationResult) -> None:
+        """Validate that tendency sources reference produced derived variables."""
+        # Collect all produced derived paths
+        produced_derived: set[str] = set()
+        for step in blueprint.process:
+            for target in step.outputs.values():
+                produced_derived.add(target)
+
+        for state_var, sources in blueprint.tendencies.items():
+            for src in sources:
+                if src.source not in produced_derived:
+                    result.add_warning(
+                        f"Tendency source '{src.source}' for state '{state_var}' "
+                        f"is not produced by any process step."
+                    )
 
 
 def validate_blueprint(blueprint: Blueprint, backend: str = "jax") -> ValidationResult:
@@ -342,7 +322,7 @@ def validate_blueprint(blueprint: Blueprint, backend: str = "jax") -> Validation
         backend: Target backend for function resolution.
 
     Returns:
-        ValidationResult with errors, warnings, and built graph.
+        ValidationResult with errors, warnings, and built nodes.
     """
     validator = BlueprintValidator(backend=backend)
     return validator.validate(blueprint)
@@ -377,7 +357,6 @@ def validate_config(
         if not var_path.startswith("parameters."):
             continue
 
-        # Extract parameter path from config
         param_path = var_path.replace("parameters.", "")
         param_value = config.get_parameter_value(param_path)
 
@@ -399,7 +378,6 @@ def validate_config(
             continue
 
         state_name = var_path.replace("state.", "")
-        # Handle hierarchical state (e.g., "tuna.biomass")
         parts = state_name.split(".")
 
         current = config.initial_state

@@ -17,7 +17,6 @@ class DataNode:
     name: str
     dims: tuple[str, ...] | None = None
     units: str | None = None
-    is_tendency_of: str | None = None
     is_state: bool = False
     is_parameter: bool = False
 

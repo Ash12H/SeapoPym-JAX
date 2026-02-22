@@ -8,7 +8,6 @@ Error codes:
 - E104: Unit mismatch
 - E106: Missing data
 - E107: Output count mismatch
-- E108: Cycle in dependency graph
 """
 
 from __future__ import annotations
@@ -31,13 +30,6 @@ class ValidationError(BlueprintError):
 
     code = "E1XX"
     message = "Validation failed"
-
-
-class CycleError(ValidationError):
-    """E108: Cycle detected in the dependency graph."""
-
-    code = "E108"
-    message = "Cycle detected in dependency graph"
 
 
 class FunctionNotFoundError(ValidationError):

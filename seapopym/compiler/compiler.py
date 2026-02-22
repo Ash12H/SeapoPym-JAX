@@ -207,8 +207,8 @@ class Compiler:
             GridAlignmentError: If dimensions are inconsistent.
         """
         # Step 1: Validate (optional but recommended)
+        bp_result = validate_blueprint(blueprint, self.backend)
         if validate:
-            bp_result = validate_blueprint(blueprint, self.backend)
             if not bp_result.valid:
                 raise bp_result.errors[0]
 
@@ -216,14 +216,9 @@ class Compiler:
             if not cfg_result.valid:
                 raise cfg_result.errors[0]
 
-            graph = bp_result.graph
-        else:
-            # Still need the graph
-            bp_result = validate_blueprint(blueprint, self.backend)
-            graph = bp_result.graph
-
-        if graph is None:
-            raise ValueError("Failed to build dependency graph")
+        compute_nodes = bp_result.compute_nodes
+        data_nodes = bp_result.data_nodes
+        tendency_map = dict(blueprint.tendencies)
 
         # Step 2: Compute temporal grid from execution params
         time_grid = TimeGrid.from_config(
@@ -258,7 +253,9 @@ class Compiler:
         # Step 9: Build CompiledModel
         return CompiledModel(
             blueprint=blueprint,
-            graph=graph,
+            compute_nodes=compute_nodes,
+            data_nodes=data_nodes,
+            tendency_map=tendency_map,
             state=state,
             forcings=forcings,
             parameters=parameters,

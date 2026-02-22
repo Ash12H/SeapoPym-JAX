@@ -60,7 +60,7 @@ class TestValidateBlueprint:
                     {
                         "func": "test:simple",
                         "inputs": {"x": "state.value"},
-                        "outputs": {"out": {"target": "derived.result", "type": "derived"}},
+                        "outputs": {"out": "derived.result"},
                     }
                 ],
             }
@@ -112,7 +112,7 @@ class TestValidateBlueprint:
                     {
                         "func": "test:growth",
                         "inputs": {"biomass": "state.biomass"},  # Missing 'rate'
-                        "outputs": {"out": {"target": "derived.result", "type": "derived"}},
+                        "outputs": {"out": "derived.result"},
                     }
                 ],
             }
@@ -138,7 +138,7 @@ class TestValidateBlueprint:
                     {
                         "func": "test:multi",  # Returns 2 outputs
                         "inputs": {"x": "state.x"},
-                        "outputs": {"out": {"target": "derived.result", "type": "derived"}},  # Only 1 declared
+                        "outputs": {"out": "derived.result"},  # Only 1 declared
                     }
                 ],
             }
@@ -148,8 +148,8 @@ class TestValidateBlueprint:
         assert not result.valid
         assert any(e.code == "E107" for e in result.errors)
 
-    def test_graph_built_on_success(self):
-        """Test that graph is built when validation succeeds."""
+    def test_nodes_built_on_success(self):
+        """Test that compute_nodes and data_nodes are built when validation succeeds."""
         bp = Blueprint.from_dict(
             {
                 "id": "test",
@@ -164,7 +164,7 @@ class TestValidateBlueprint:
                     {
                         "func": "test:simple",
                         "inputs": {"x": "state.value"},
-                        "outputs": {"out": {"target": "derived.result", "type": "derived"}},
+                        "outputs": {"out": "derived.result"},
                     }
                 ],
             }
@@ -172,8 +172,10 @@ class TestValidateBlueprint:
 
         result = validate_blueprint(bp, backend="jax")
         assert result.valid
-        assert result.graph is not None
-        assert len(result.graph.nodes) > 0
+        assert len(result.compute_nodes) == 1
+        assert len(result.data_nodes) > 0
+        assert "state.value" in result.data_nodes
+        assert "derived.result" in result.data_nodes
 
     def test_unit_mismatch_error(self):
         """Test validation fails for unit mismatch (strict equality)."""
@@ -195,7 +197,7 @@ class TestValidateBlueprint:
                     {
                         "func": "test:growth",
                         "inputs": {"biomass": "state.biomass", "rate": "parameters.rate"},
-                        "outputs": {"out": {"target": "derived.result", "type": "derived"}},
+                        "outputs": {"out": "derived.result"},
                     }
                 ],
             }
@@ -210,8 +212,7 @@ class TestValidateBlueprint:
         assert any("Unit mismatch" in msg for msg in error_msgs)
 
     def test_tendency_unit_error(self):
-        """Test validation fails if tendency lacks time dimension."""
-        # Create a dummy function returning dimensionless
+        """Test validation fails if tendency source lacks time dimension."""
         from seapopym.blueprint import functional
 
         @functional(name="test:bad_tendency", backend="jax", units={"return": "count"})
@@ -231,9 +232,12 @@ class TestValidateBlueprint:
                     {
                         "func": "test:bad_tendency",
                         "inputs": {"x": "state.pop"},
-                        "outputs": {"tendency": {"target": "tendencies.pop", "type": "tendency"}},
+                        "outputs": {"tendency": "derived.bad_flux"},
                     }
                 ],
+                "tendencies": {
+                    "pop": [{"source": "derived.bad_flux"}],
+                },
             }
         )
 

@@ -21,7 +21,6 @@ Example:
 
 from .exceptions import (
     BlueprintError,
-    CycleError,
     DimensionMismatchError,
     FunctionNotFoundError,
     MissingDataError,
@@ -45,8 +44,8 @@ from .schema import (
     Declarations,
     ExecutionParams,
     ParameterValue,
-    ProcessOutput,
     ProcessStep,
+    TendencySource,
     VariableDeclaration,
 )
 from .validation import (
@@ -65,7 +64,7 @@ __all__ = [
     "VariableDeclaration",
     "ParameterValue",
     "ProcessStep",
-    "ProcessOutput",
+    "TendencySource",
     "Declarations",
     "ExecutionParams",
     # Registry
@@ -91,5 +90,4 @@ __all__ = [
     "UnitMismatchError",
     "MissingDataError",
     "OutputCountMismatchError",
-    "CycleError",
 ]

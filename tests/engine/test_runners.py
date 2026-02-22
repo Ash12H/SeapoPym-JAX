@@ -55,13 +55,13 @@ def simple_blueprint():
                         "temp": "forcings.temperature",
                     },
                     "outputs": {
-                        "tendency": {
-                            "target": "tendencies.biomass",
-                            "type": "tendency",
-                        }
+                        "tendency": "derived.growth_flux",
                     },
                 }
             ],
+            "tendencies": {
+                "biomass": [{"source": "derived.growth_flux"}],
+            },
         }
     )
 

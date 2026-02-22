@@ -32,6 +32,8 @@ process:
       rate: "parameters.growth_rate"
       temp: "forcings.temperature"
     outputs:
-      tendency:
-        target: "tendencies.growth"
-        type: "tendency"
+      tendency: "derived.growth_flux"
+
+tendencies:
+  biomass:
+    - source: "derived.growth_flux"

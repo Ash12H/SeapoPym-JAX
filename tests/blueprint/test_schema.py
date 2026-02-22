@@ -10,8 +10,8 @@ from seapopym.blueprint import (
     Declarations,
     ExecutionParams,
     ParameterValue,
-    ProcessOutput,
     ProcessStep,
+    TendencySource,
     VariableDeclaration,
 )
 
@@ -70,7 +70,7 @@ class TestProcessStep:
         step = ProcessStep(
             func="biol:growth",
             inputs={"biomass": "state.biomass", "rate": "parameters.growth_rate"},
-            outputs={"tendency": ProcessOutput(target="tendencies.growth", type="tendency")},
+            outputs={"tendency": "derived.growth_flux"},
         )
         assert step.func == "biol:growth"
         assert "biomass" in step.inputs
@@ -83,6 +83,30 @@ class TestProcessStep:
                 inputs={},
                 outputs={},
             )
+
+    def test_output_must_be_derived(self):
+        """Test that output targets must start with 'derived.'."""
+        with pytest.raises(ValueError, match="must start with 'derived.'"):
+            ProcessStep(
+                func="biol:growth",
+                inputs={"x": "state.x"},
+                outputs={"out": "tendencies.growth"},
+            )
+
+
+class TestTendencySource:
+    """Tests for TendencySource."""
+
+    def test_default_sign(self):
+        """Test default sign is +1.0."""
+        src = TendencySource(source="derived.growth_flux")
+        assert src.source == "derived.growth_flux"
+        assert src.sign == 1.0
+
+    def test_negative_sign(self):
+        """Test negative sign."""
+        src = TendencySource(source="derived.predation", sign=-1.0)
+        assert src.sign == -1.0
 
 
 class TestDeclarations:
@@ -142,15 +166,19 @@ class TestBlueprint:
                 {
                     "func": "biol:growth",
                     "inputs": {"biomass": "state.biomass", "rate": "parameters.rate"},
-                    "outputs": {"out": {"target": "tendencies.growth", "type": "tendency"}},
+                    "outputs": {"out": "derived.growth_flux"},
                 }
             ],
+            "tendencies": {
+                "biomass": [{"source": "derived.growth_flux"}],
+            },
         }
 
         bp = Blueprint.from_dict(data)
         assert bp.id == "test-model"
         assert bp.version == "0.1.0"
         assert len(bp.process) == 1
+        assert "biomass" in bp.tendencies
 
     def test_load_from_yaml(self):
         """Test loading Blueprint from YAML file."""
@@ -180,6 +208,40 @@ class TestBlueprint:
         var = bp.get_variable("state.biomass")
         assert var is not None
         assert var.units == "g"
+
+    def test_tendency_validates_state_keys(self):
+        """Test that tendencies must reference valid state variables."""
+        with pytest.raises(ValueError, match="not a declared state variable"):
+            Blueprint.from_dict(
+                {
+                    "id": "test",
+                    "version": "0.1.0",
+                    "declarations": {
+                        "state": {"biomass": {"units": "g"}},
+                    },
+                    "process": [],
+                    "tendencies": {
+                        "nonexistent": [{"source": "derived.flux"}],
+                    },
+                }
+            )
+
+    def test_tendency_source_must_be_derived(self):
+        """Test that tendency sources must start with 'derived.'."""
+        with pytest.raises(ValueError, match="must start with 'derived.'"):
+            Blueprint.from_dict(
+                {
+                    "id": "test",
+                    "version": "0.1.0",
+                    "declarations": {
+                        "state": {"biomass": {"units": "g"}},
+                    },
+                    "process": [],
+                    "tendencies": {
+                        "biomass": [{"source": "state.biomass"}],
+                    },
+                }
+            )
 
 
 class TestConfig:

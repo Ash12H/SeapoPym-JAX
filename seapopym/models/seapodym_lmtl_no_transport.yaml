@@ -53,7 +53,7 @@ process:
       latitude: parameters.latitude
       day_of_year: forcings.day_of_year
     outputs:
-      return: { target: derived.day_length, type: derived }
+      return: derived.day_length
 
   - func: "lmtl:layer_weighted_mean"
     inputs:
@@ -62,7 +62,7 @@ process:
       day_layer: parameters.day_layer
       night_layer: parameters.night_layer
     outputs:
-      return: { target: derived.mean_temperature, type: derived }
+      return: derived.mean_temperature
 
   # --- Temperature ---
   - func: "lmtl:threshold_temperature"
@@ -70,19 +70,19 @@ process:
       temp: derived.mean_temperature
       min_temp: parameters.t_ref
     outputs:
-      return: { target: derived.thresholded_temperature, type: derived }
+      return: derived.thresholded_temperature
 
   - func: "lmtl:gillooly_temperature"
     inputs:
       temp: derived.thresholded_temperature
     outputs:
-      return: { target: derived.temp_norm, type: derived }
+      return: derived.temp_norm
 
   - func: "lmtl:gillooly_temperature"
     inputs:
       temp: parameters.t_ref
     outputs:
-      return: { target: derived.t_ref_norm, type: derived }
+      return: derived.t_ref_norm
 
   # --- Derived quantities ---
   - func: "lmtl:recruitment_age"
@@ -92,7 +92,7 @@ process:
       gamma: parameters.gamma_tau_r
       t_ref: derived.t_ref_norm
     outputs:
-      return: { target: derived.rec_age, type: derived }
+      return: derived.rec_age
 
   # --- Dynamics ---
   - func: "lmtl:npp_injection"
@@ -101,7 +101,7 @@ process:
       efficiency: parameters.efficiency
       production: state.production
     outputs:
-      return: { target: tendencies.production, type: tendency }
+      return: derived.npp_injection
 
   - func: "lmtl:aging_flow"
     inputs:
@@ -109,7 +109,7 @@ process:
       cohort_ages: parameters.cohort_ages
       rec_age: derived.rec_age
     outputs:
-      return: { target: tendencies.production, type: tendency }
+      return: derived.aging_flow
 
   - func: "lmtl:recruitment_flow"
     inputs:
@@ -117,8 +117,8 @@ process:
       cohort_ages: parameters.cohort_ages
       rec_age: derived.rec_age
     outputs:
-      prod_loss: { target: tendencies.production, type: tendency }
-      biomass_gain: { target: tendencies.biomass, type: tendency }
+      prod_loss: derived.recruitment_prod_loss
+      biomass_gain: derived.recruitment_gain
 
   - func: "lmtl:mortality"
     inputs:
@@ -128,4 +128,13 @@ process:
       gamma: parameters.gamma_lambda
       t_ref: derived.t_ref_norm
     outputs:
-      return: { target: tendencies.biomass, type: tendency }
+      return: derived.mortality_flux
+
+tendencies:
+  biomass:
+    - source: derived.mortality_flux
+    - source: derived.recruitment_gain
+  production:
+    - source: derived.npp_injection
+    - source: derived.aging_flow
+    - source: derived.recruitment_prod_loss

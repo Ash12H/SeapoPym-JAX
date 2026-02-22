@@ -71,9 +71,10 @@ class TestBuildStepFnModes:
                     {
                         "func": "test:scaled",
                         "inputs": {"x": "state.x", "scale": "parameters.scale"},
-                        "outputs": {"return": {"target": "tendencies.x", "type": "tendency"}},
+                        "outputs": {"return": "derived.x_flux"},
                     }
                 ],
+                "tendencies": {"x": [{"source": "derived.x_flux"}]},
             }
         )
 
@@ -129,9 +130,10 @@ class TestGradientComputation:
                     {
                         "func": "test:linear",
                         "inputs": {"x": "state.x", "rate": "parameters.rate"},
-                        "outputs": {"return": {"target": "tendencies.x", "type": "tendency"}},
+                        "outputs": {"return": "derived.x_flux"},
                     }
                 ],
+                "tendencies": {"x": [{"source": "derived.x_flux"}]},
             }
         )
 
@@ -188,9 +190,10 @@ class TestGradientComputation:
                     {
                         "func": "test:linear2",
                         "inputs": {"x": "state.x", "rate": "parameters.rate"},
-                        "outputs": {"return": {"target": "tendencies.x", "type": "tendency"}},
+                        "outputs": {"return": "derived.x_flux"},
                     }
                 ],
+                "tendencies": {"x": [{"source": "derived.x_flux"}]},
             }
         )
 

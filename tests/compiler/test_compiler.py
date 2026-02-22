@@ -58,10 +58,13 @@ class TestCompiler:
                             "temp": "forcings.temperature",
                         },
                         "outputs": {
-                            "tendency": {"target": "tendencies.growth", "type": "tendency"},
+                            "tendency": "derived.growth_flux",
                         },
                     },
                 ],
+                "tendencies": {
+                    "biomass": [{"source": "derived.growth_flux"}],
+                },
             }
         )
 
@@ -153,13 +156,22 @@ class TestCompiler:
         assert compiled.mask is not None
         assert compiled.mask.shape == (10, 10)
 
-    def test_compile_graph_exists(self, toy_blueprint, toy_config):
-        """Test that graph is included."""
+    def test_compile_nodes_exist(self, toy_blueprint, toy_config):
+        """Test that compute_nodes and data_nodes are included."""
         compiler = Compiler(backend="numpy")
         compiled = compiler.compile(toy_blueprint, toy_config)
 
-        assert compiled.graph is not None
-        assert len(compiled.graph.nodes) > 0
+        assert len(compiled.compute_nodes) > 0
+        assert len(compiled.data_nodes) > 0
+
+    def test_compile_tendency_map(self, toy_blueprint, toy_config):
+        """Test that tendency_map is populated."""
+        compiler = Compiler(backend="numpy")
+        compiled = compiler.compile(toy_blueprint, toy_config)
+
+        assert "biomass" in compiled.tendency_map
+        assert len(compiled.tendency_map["biomass"]) == 1
+        assert compiled.tendency_map["biomass"][0].source == "derived.growth_flux"
 
     def test_compile_jax_backend(self, toy_blueprint, toy_config):
         """Test compilation with JAX backend."""

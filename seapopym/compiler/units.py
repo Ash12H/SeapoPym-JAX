@@ -160,47 +160,54 @@ class UnitValidator:
                     errors.append(e)
 
             # Validate output units
-            func_return_unit = metadata.units.get("return")
-            if func_return_unit is None:
-                continue  # Function doesn't declare output unit
+            for out_key, target_path in step.outputs.items():
+                # Resolve the unit for this output:
+                # - multi-output: use the output key name (e.g. "prod_loss")
+                # - single-output: use "return"
+                if metadata.is_multi_output:
+                    out_unit = metadata.units.get(out_key)
+                else:
+                    out_unit = metadata.units.get("return")
 
-            for _out_key, out_spec in step.outputs.items():
-                target_path = out_spec.target
+                if out_unit is None:
+                    continue  # No unit declared, chain stops here
 
-                # Check if target is declared in Blueprint
+                # Check against declared vars if target exists in Blueprint
                 if target_path in all_vars:
                     target_unit = all_vars[target_path].units
                     if target_unit is not None:
                         try:
                             self.check_exact_match(
-                                func_return_unit,
+                                out_unit,
                                 target_unit,
-                                context=f"{step.func} output → {target_path}",
+                                context=f"{step.func} output '{out_key}' → {target_path}",
                             )
                         except UnitError as e:
                             errors.append(e)
 
                 # Register this variable for future chain validation
-                produced_vars[target_path] = func_return_unit
+                produced_vars[target_path] = out_unit
 
-                # Special check for tendencies: must have time dimension in seconds
-                if out_spec.type == "tendency":
-                    try:
-                        unit_obj = self.parse_unit(func_return_unit)
-                        # Check if dimensionality includes time^-1
-                        # For tendencies, we expect units like "individuals/s", "g/s", etc.
-                        # These have [time]^-1 in their dimensionality
-                        if "[time]" not in str(unit_obj.dimensionality):
-                            errors.append(
-                                UnitError(
-                                    f"Tendency '{target_path}' from '{step.func}' has unit '{func_return_unit}' "
-                                    f"which lacks a time dimension.\n"
-                                    f"  Tendencies must have units like 'X/s' (per second) for Euler solver.\n"
-                                    f"  Example: 'individuals/s', 'g/s', 'kg*m/s', etc."
-                                )
+        # Validate tendency sources: check that each tendency source has time^-1 dimension
+        for state_var, sources in blueprint.tendencies.items():
+            for src in sources:
+                source_unit = produced_vars.get(src.source)
+                if source_unit is None:
+                    continue  # Not produced or no unit info
+
+                try:
+                    unit_obj = self.parse_unit(source_unit)
+                    if "[time]" not in str(unit_obj.dimensionality):
+                        errors.append(
+                            UnitError(
+                                f"Tendency source '{src.source}' for state '{state_var}' has unit '{source_unit}' "
+                                f"which lacks a time dimension.\n"
+                                f"  Tendencies must have units like 'X/s' (per second) for Euler solver.\n"
+                                f"  Example: 'individuals/s', 'g/s', 'kg*m/s', etc."
                             )
-                    except UnitError:
-                        pass  # Already caught by parse_unit
+                        )
+                except UnitError:
+                    pass  # Already caught by parse_unit
 
         return errors
 

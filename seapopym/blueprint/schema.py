@@ -60,18 +60,18 @@ class ParameterValue(BaseModel):
 # === Process Definitions ===
 
 
-class ProcessOutput(BaseModel):
-    """Output specification for a process step.
+class TendencySource(BaseModel):
+    """A single source contributing to a tendency for a state variable.
 
     Attributes:
-        target: Target variable path (e.g., "tendencies.growth", "state.biomass").
-        type: Output type determining how the value is used.
+        source: Path to a derived variable (e.g., "derived.mortality_flux").
+        sign: Sign multiplier (default +1.0). Use -1.0 to invert the contribution.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    target: str
-    type: Literal["tendency", "derived", "diagnostic", "state"]
+    source: str
+    sign: float = 1.0
 
 
 class ProcessStep(BaseModel):
@@ -80,14 +80,14 @@ class ProcessStep(BaseModel):
     Attributes:
         func: Function identifier in format "namespace:function_name".
         inputs: Mapping from function argument names to variable paths.
-        outputs: Mapping from output keys to ProcessOutput specifications.
+        outputs: Mapping from output keys to derived variable paths.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     func: str
     inputs: dict[str, str]
-    outputs: dict[str, ProcessOutput]
+    outputs: dict[str, str]
 
     @field_validator("func")
     @classmethod
@@ -95,6 +95,18 @@ class ProcessStep(BaseModel):
         """Ensure function name follows namespace:name format."""
         if ":" not in v:
             raise ValueError(f"Function name must be in format 'namespace:name', got '{v}'")
+        return v
+
+    @field_validator("outputs")
+    @classmethod
+    def validate_output_targets(cls, v: dict[str, str]) -> dict[str, str]:
+        """Ensure all output targets start with 'derived.'."""
+        for key, target in v.items():
+            if not target.startswith("derived."):
+                raise ValueError(
+                    f"Output target '{target}' (key '{key}') must start with 'derived.'. "
+                    f"All process outputs are intermediate derived values."
+                )
         return v
 
 
@@ -189,6 +201,7 @@ class Blueprint(BaseModel):
         version: Semantic version string.
         declarations: Variable declarations (state, parameters, forcings, derived).
         process: Ordered list of process steps forming the computation graph.
+        tendencies: Mapping from state variable names to lists of tendency sources.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -197,6 +210,26 @@ class Blueprint(BaseModel):
     version: str
     declarations: Declarations
     process: list[ProcessStep]
+    tendencies: dict[str, list[TendencySource]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_tendencies(self) -> Self:
+        """Validate that tendency state keys exist and sources reference derived paths."""
+        all_vars = self.declarations.get_all_variables()
+        state_keys = {k.removeprefix("state.") for k in all_vars if k.startswith("state.")}
+
+        for state_var, sources in self.tendencies.items():
+            if state_var not in state_keys:
+                raise ValueError(
+                    f"Tendency target '{state_var}' is not a declared state variable. "
+                    f"Available: {sorted(state_keys)}"
+                )
+            for src in sources:
+                if not src.source.startswith("derived."):
+                    raise ValueError(
+                        f"Tendency source '{src.source}' for '{state_var}' must start with 'derived.'."
+                    )
+        return self
 
     @classmethod
     def load(cls, source: str | Path | dict[str, Any]) -> Blueprint:
