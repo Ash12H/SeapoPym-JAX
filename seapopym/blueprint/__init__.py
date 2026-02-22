@@ -31,7 +31,6 @@ from .exceptions import (
     UnitError,
     ValidationError,
 )
-from .execution import ExecutionPlan
 from .nodes import ComputeNode, DataNode
 from .registry import (
     FunctionMetadata,
@@ -61,7 +60,6 @@ __all__ = [
     # Core classes
     "Blueprint",
     "Config",
-    "ExecutionPlan",
     # Schema classes
     "VariableDeclaration",
     "ParameterValue",

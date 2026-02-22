@@ -40,7 +40,6 @@ class ComputeNode:
         name: Unique identifier (auto-generated from outputs if not provided).
         output_mapping: Maps output keys to graph variable names.
         input_mapping: Maps function argument names to graph variable names.
-        group: Functional group name (e.g. 'Tuna').
         core_dims: Dimensions operated on (not broadcast). Format: {"input_name": ["dim1"]}.
         input_dims: Actual dims per input after canonical transpose. Format: {"input_name": ("C", "Y", "X")}.
         out_dims: Output dimensions from function metadata.
@@ -50,7 +49,6 @@ class ComputeNode:
     name: str
     output_mapping: dict[str, str] = field(default_factory=dict)
     input_mapping: dict[str, str] = field(default_factory=dict)
-    group: str | None = None
     core_dims: dict[str, list[str]] = field(default_factory=dict)
     input_dims: dict[str, tuple[str, ...]] = field(default_factory=dict)
     out_dims: list[str] | None = None
