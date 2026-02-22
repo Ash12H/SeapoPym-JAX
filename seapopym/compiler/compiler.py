@@ -456,37 +456,16 @@ class Compiler:
         parameters: dict[str, Array] = {}
         trainable: list[str] = []
 
-        def process_params(data: dict[str, Any], prefix: str = "") -> None:
-            for name, value in data.items():
-                full_name = f"{prefix}{name}" if prefix else name
+        for name, pv in config.parameters.items():
+            if pv.trainable:
+                trainable.append(name)
 
-                if isinstance(value, dict):
-                    if "value" in value:
-                        # It's a ParameterValue-like dict
-                        pv = ParameterValue.model_validate(value)
-                        param_value = pv.value
-                        if pv.trainable:
-                            trainable.append(full_name)
-                    else:
-                        # Nested group
-                        process_params(value, f"{full_name}.")
-                        continue
-                elif isinstance(value, ParameterValue):
-                    param_value = value.value
-                    if value.trainable:
-                        trainable.append(full_name)
-                else:
-                    param_value = value
+            if self.backend == "jax":
+                import jax.numpy as jnp
 
-                # Convert to array
-                if self.backend == "jax":
-                    import jax.numpy as jnp
-
-                    parameters[full_name] = jnp.asarray(param_value)
-                else:
-                    parameters[full_name] = np.asarray(param_value)
-
-        process_params(config.parameters)
+                parameters[name] = jnp.asarray(pv.value)
+            else:
+                parameters[name] = np.asarray(pv.value)
         return parameters, trainable
 
 

@@ -369,7 +369,7 @@ class Config(BaseModel):
     parameter values, forcing data paths/arrays, initial state, etc.
 
     Attributes:
-        parameters: Parameter values (hierarchical, matching Blueprint).
+        parameters: Parameter values (flat, matching Blueprint declarations).
         forcings: Forcing data (paths or arrays).
         initial_state: Initial state data (paths or arrays).
         execution: Execution parameters (timestep, time range, etc.).
@@ -378,7 +378,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, ParameterValue] = Field(default_factory=dict)
     forcings: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)
     execution: ExecutionParams  # REQUIRED: time_start, time_end are mandatory
@@ -407,22 +407,13 @@ class Config(BaseModel):
         """Create Config from a dictionary."""
         return cls.model_validate(data)
 
-    def get_parameter_value(self, path: str) -> Any:
-        """Get a parameter value by dotted path.
+    def get_parameter_value(self, path: str) -> ParameterValue | None:
+        """Get a parameter value by name.
 
         Args:
-            path: Parameter path like "growth_rate" or "tuna.growth_rate".
+            path: Parameter name (e.g. "growth_rate").
 
         Returns:
-            Parameter value or ParameterValue object.
+            ParameterValue if found, None otherwise.
         """
-        parts = path.split(".")
-        current = self.parameters
-
-        for part in parts:
-            if isinstance(current, dict) and part in current:
-                current = current[part]
-            else:
-                return None
-
-        return current
+        return self.parameters.get(path)

@@ -259,7 +259,7 @@ class TestConfig:
         }
 
         cfg = Config.from_dict(data)
-        assert cfg.parameters["growth_rate"]["value"] == 0.1
+        assert cfg.parameters["growth_rate"].value == 0.1
         assert cfg.execution.time_start == "2000-01-01"
         assert cfg.execution.time_end == "2001-01-01"
         assert cfg.execution.dt == "1d"
@@ -272,17 +272,15 @@ class TestConfig:
 
         cfg = Config.load(yaml_path)
         assert cfg.execution.dt == "1d"
-        assert cfg.parameters["growth_rate"]["value"] == 0.1
+        assert cfg.parameters["growth_rate"].value == 0.1
 
     def test_get_parameter_value(self):
-        """Test getting parameter value by path."""
+        """Test getting parameter value by name."""
         cfg = Config.from_dict(
             {
                 "parameters": {
                     "simple": {"value": 0.1},
-                    "group": {
-                        "nested": {"value": 0.2},
-                    },
+                    "vector": {"value": [1.0, 2.0, 3.0], "trainable": True, "bounds": [0.0, 5.0]},
                 },
                 "forcings": {},
                 "initial_state": {},
@@ -293,8 +291,9 @@ class TestConfig:
             }
         )
 
-        assert cfg.get_parameter_value("simple")["value"] == 0.1
-        assert cfg.get_parameter_value("group.nested")["value"] == 0.2
+        assert cfg.get_parameter_value("simple").value == 0.1
+        assert cfg.get_parameter_value("vector").value == [1.0, 2.0, 3.0]
+        assert cfg.get_parameter_value("vector").trainable is True
         assert cfg.get_parameter_value("nonexistent") is None
 
 
