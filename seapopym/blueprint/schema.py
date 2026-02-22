@@ -113,77 +113,52 @@ class ProcessStep(BaseModel):
 # === Declarations Container ===
 
 
-# Type for nested variable declarations (supports functional groups)
-NestedVariableDeclaration = dict[str, VariableDeclaration | dict[str, VariableDeclaration]]
-
-
 class Declarations(BaseModel):
     """Container for all variable declarations.
 
-    Supports both flat and hierarchical (functional group) structures.
-
-    Example (flat):
+    Example:
         state:
           biomass:
             units: "g"
             dims: ["Y", "X"]
-
-    Example (hierarchical):
-        state:
-          tuna:
-            biomass:
-              units: "g"
-              dims: ["Y", "X", "C"]
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    state: dict[str, Any] = Field(default_factory=dict)
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    forcings: dict[str, Any] = Field(default_factory=dict)
-    derived: dict[str, Any] = Field(default_factory=dict)
+    state: dict[str, VariableDeclaration] = Field(default_factory=dict)
+    parameters: dict[str, VariableDeclaration] = Field(default_factory=dict)
+    forcings: dict[str, VariableDeclaration] = Field(default_factory=dict)
+    derived: dict[str, VariableDeclaration] = Field(default_factory=dict)
+
+    @field_validator("state", "parameters", "forcings", "derived", mode="before")
+    @classmethod
+    def coerce_declarations(cls, v: Any) -> dict[str, Any]:
+        """Coerce raw dicts to VariableDeclaration-compatible dicts."""
+        if not isinstance(v, dict):
+            return v
+        result = {}
+        for key, value in v.items():
+            if isinstance(value, VariableDeclaration | dict):
+                result[key] = value  # Pydantic will validate as VariableDeclaration
+            else:
+                raise ValueError(f"Invalid declaration for '{key}': expected dict, got {type(value)}")
+        return result
 
     def get_all_variables(self) -> dict[str, VariableDeclaration]:
         """Flatten all declarations into a single dict with dotted paths.
 
         Returns:
-            Dict mapping "category.group.var" or "category.var" to VariableDeclaration.
+            Dict mapping "category.var" to VariableDeclaration.
         """
         result: dict[str, VariableDeclaration] = {}
-
         for category_name, category in [
             ("state", self.state),
             ("parameters", self.parameters),
             ("forcings", self.forcings),
             ("derived", self.derived),
         ]:
-            result.update(self._flatten_category(category_name, category))
-
-        return result
-
-    def _flatten_category(self, prefix: str, category: dict[str, Any]) -> dict[str, VariableDeclaration]:
-        """Recursively flatten a category dict."""
-        result: dict[str, VariableDeclaration] = {}
-
-        for key, value in category.items():
-            full_key = f"{prefix}.{key}"
-
-            if isinstance(value, VariableDeclaration):
-                result[full_key] = value
-            elif isinstance(value, dict):
-                # Check if it's a VariableDeclaration dict or a group
-                if "units" in value or "dims" in value or "description" in value:
-                    # It's a variable declaration as dict
-                    result[full_key] = VariableDeclaration(**value)
-                else:
-                    # It's a functional group - recurse
-                    for sub_key, sub_value in value.items():
-                        sub_full_key = f"{full_key}.{sub_key}"
-                        if isinstance(sub_value, VariableDeclaration):
-                            result[sub_full_key] = sub_value
-                        elif isinstance(sub_value, dict):
-                            result[sub_full_key] = VariableDeclaration(**sub_value)
-
+            for key, var_decl in category.items():
+                result[f"{category_name}.{key}"] = var_decl
         return result
 
 
@@ -310,6 +285,19 @@ class ExecutionParams(BaseModel):
     forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
     output_path: str | None = None
 
+    @field_validator("dt")
+    @classmethod
+    def validate_dt(cls, v: str) -> str:
+        """Validate timestep format (e.g. '1d', '6h', '30m', '0.05d')."""
+        import re
+
+        if re.fullmatch(r"\d+(\.\d+)?[smhd]", v) or re.fullmatch(r"\d+(\.\d+)?", v):
+            return v
+        raise ValueError(
+            f"Invalid dt format: '{v}'. Expected '<number><unit>' "
+            f"where unit is s, m, h, or d (e.g. '1d', '6h', '30m', '0.05d')."
+        )
+
     @field_validator("time_start", "time_end")
     @classmethod
     def validate_datetime(cls, v: str) -> str:
@@ -381,7 +369,6 @@ class Config(BaseModel):
     parameter values, forcing data paths/arrays, initial state, etc.
 
     Attributes:
-        model: Optional path to the Blueprint file.
         parameters: Parameter values (hierarchical, matching Blueprint).
         forcings: Forcing data (paths or arrays).
         initial_state: Initial state data (paths or arrays).
@@ -391,7 +378,6 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    model: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     forcings: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)

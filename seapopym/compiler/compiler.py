@@ -52,7 +52,10 @@ def _parse_dt(dt_str: str) -> float:
     try:
         return float(dt_str)
     except ValueError:
-        return 86400.0  # Default: 1 day
+        raise ValueError(
+            f"Invalid dt format: '{dt_str}'. Expected '<number><unit>' "
+            f"where unit is s, m, h, or d (e.g. '1d', '6h', '30m')."
+        )
 
 
 @dataclass

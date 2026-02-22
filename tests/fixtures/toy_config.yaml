@@ -1,8 +1,6 @@
 # Toy config for testing Blueprint system
 # As per SPEC_01 Section 5
 
-model: "./toy_model.yaml"
-
 parameters:
   growth_rate:
     value: 0.1

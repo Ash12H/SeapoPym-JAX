@@ -7,12 +7,13 @@ from .nodes import ComputeNode
 
 @dataclass
 class ExecutionPlan:
-    """Résultat de la compilation du Blueprint.
+    """Compiled execution plan with ordered task groups.
 
-    Contient la séquence ordonnée des groupes de tâches à exécuter.
+    Contains the ordered sequence of task groups to execute,
+    along with variable tracking and tendency mapping.
     """
 
     task_groups: list[tuple[str, list[ComputeNode]]]  # [(group_name, [nodes]), ...]
     initial_variables: list[str]
     produced_variables: list[str]
-    tendency_map: dict[str, list[str]] = field(default_factory=dict)  # {var_cible: [tendances]}
+    tendency_map: dict[str, list[str]] = field(default_factory=dict)  # {target_var: [tendency_sources]}

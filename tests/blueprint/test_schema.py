@@ -130,22 +130,20 @@ class TestDeclarations:
         assert "parameters.growth_rate" in all_vars
         assert all_vars["state.biomass"].units == "g"
 
-    def test_hierarchical_declarations(self):
-        """Test hierarchical (functional group) declarations."""
+    def test_raw_dicts_coerced_to_variable_declaration(self):
+        """Test that raw dicts in YAML are correctly coerced to VariableDeclaration."""
         decl = Declarations(
-            state={
-                "tuna": {
-                    "biomass": {"units": "g", "dims": ["Y", "X", "C"]},
-                },
-                "zooplankton": {
-                    "biomass": {"units": "g", "dims": ["Y", "X"]},
-                },
-            }
+            state={"biomass": {"units": "g", "dims": ["Y", "X"]}},
+            forcings={"temperature": {"units": "degC", "dims": ["T", "Y", "X"]}},
         )
+        assert isinstance(decl.state["biomass"], VariableDeclaration)
+        assert decl.state["biomass"].units == "g"
+        assert isinstance(decl.forcings["temperature"], VariableDeclaration)
 
-        all_vars = decl.get_all_variables()
-        assert "state.tuna.biomass" in all_vars
-        assert "state.zooplankton.biomass" in all_vars
+    def test_invalid_declaration_value_rejected(self):
+        """Test that non-dict values are rejected in declarations."""
+        with pytest.raises(ValueError, match="Invalid declaration"):
+            Declarations(state={"biomass": "not a dict"})
 
 
 class TestBlueprint:
@@ -273,7 +271,8 @@ class TestConfig:
             pytest.skip("Fixture file not found")
 
         cfg = Config.load(yaml_path)
-        assert cfg.model == "./toy_model.yaml"
+        assert cfg.execution.dt == "1d"
+        assert cfg.parameters["growth_rate"]["value"] == 0.1
 
     def test_get_parameter_value(self):
         """Test getting parameter value by path."""
@@ -314,3 +313,15 @@ class TestExecutionParams:
         params = ExecutionParams(time_start="2020-01-01", time_end="2020-12-31")
         assert params.time_start == "2020-01-01"
         assert params.time_end == "2020-12-31"
+
+    @pytest.mark.parametrize("dt", ["1d", "0.05d", "6h", "30m", "3600", "1s"])
+    def test_valid_dt_accepted(self, dt):
+        """Test that valid dt formats are accepted."""
+        params = ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", dt=dt)
+        assert params.dt == dt
+
+    @pytest.mark.parametrize("dt", ["foo", "2x", "d1", "abc123", "1.2.3d"])
+    def test_invalid_dt_rejected(self, dt):
+        """Test that invalid dt formats are rejected."""
+        with pytest.raises(ValueError, match="Invalid dt format"):
+            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", dt=dt)
