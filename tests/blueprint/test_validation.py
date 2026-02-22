@@ -40,38 +40,24 @@ def setup_registry():
     def multi(x):
         return x, x * 2
 
+    @functional(name="test:core_func", backend="jax", core_dims={"x": ["C"]})
+    def core_func(x):
+        return x
+
+    @functional(name="test:core_out", backend="jax", core_dims={"field": ["C"]}, out_dims=["Z"])
+    def core_out(field):
+        return field
+
+    @functional(name="test:forcing_func", backend="jax")
+    def forcing_func(temp):
+        return temp
+
     yield
     clear_registry()
 
 
 class TestValidateBlueprint:
     """Tests for validate_blueprint."""
-
-    def test_valid_simple_blueprint(self):
-        """Test validation of a simple valid blueprint."""
-        bp = Blueprint.from_dict(
-            {
-                "id": "test",
-                "version": "0.1.0",
-                "declarations": {
-                    "state": {"value": {"units": "g"}},
-                    "parameters": {},
-                    "forcings": {},
-                    "derived": {},
-                },
-                "process": [
-                    {
-                        "func": "test:simple",
-                        "inputs": {"x": "state.value"},
-                        "outputs": {"out": "derived.result"},
-                    }
-                ],
-            }
-        )
-
-        result = validate_blueprint(bp, backend="jax")
-        assert result.valid
-        assert len(result.errors) == 0
 
     def test_function_not_found(self):
         """Test validation fails for unknown function."""
@@ -337,6 +323,175 @@ class TestValidateBlueprint:
         result = validator.validate(bp)
         assert not result.valid
         assert any(e.code == "E101" for e in result.errors)
+
+    def test_core_dims_mismatch(self):
+        """Input has dims [Y,X] but core_dims needs [C] → E103."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"value": {"units": "g", "dims": ["Y", "X"]}},
+                },
+                "process": [
+                    {
+                        "func": "test:core_func",
+                        "inputs": {"x": "state.value"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        assert any(e.code == "E103" for e in exc_info.value.validation_errors)
+
+    def test_core_dims_warning_on_scalar(self):
+        """Input without dims but core_dims expected → warning (no error)."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"value": {"units": "g"}},  # No dims
+                },
+                "process": [
+                    {
+                        "func": "test:core_func",
+                        "inputs": {"x": "state.value"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+        validator = BlueprintValidator(backend="jax")
+        result = validator.validate(bp)
+        assert any("no dimensions" in w for w in result.warnings)
+
+    def test_forcing_T_stripped(self):
+        """Forcing with [T,Y,X] → compute node input gets (Y,X) after T-stripping."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "forcings": {"temp": {"units": "degC", "dims": ["T", "Y", "X"]}},
+                },
+                "process": [
+                    {
+                        "func": "test:forcing_func",
+                        "inputs": {"temp": "forcings.temp"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+        result = validate_blueprint(bp, backend="jax")
+        assert result.valid
+        node = result.compute_nodes[0]
+        assert "T" not in node.input_dims["temp"]
+        assert "Y" in node.input_dims["temp"]
+        assert "X" in node.input_dims["temp"]
+
+    def test_undeclared_input_variable(self):
+        """Input refs state.nonexistent → E106."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"value": {"units": "g"}},
+                },
+                "process": [
+                    {
+                        "func": "test:simple",
+                        "inputs": {"x": "state.nonexistent"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+        with pytest.raises(BlueprintValidationError) as exc_info:
+            validate_blueprint(bp, backend="jax")
+        assert any(e.code == "E106" for e in exc_info.value.validation_errors)
+
+    def test_tendency_source_unproduced_warning(self):
+        """Tendency refs unproduced derived → warning."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"value": {"units": "g"}},
+                },
+                "process": [
+                    {
+                        "func": "test:simple",
+                        "inputs": {"x": "state.value"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+                "tendencies": {
+                    "value": [{"source": "derived.ghost"}],  # not produced
+                },
+            }
+        )
+        validator = BlueprintValidator(backend="jax")
+        result = validator.validate(bp)
+        assert any("derived.ghost" in w for w in result.warnings)
+
+    def test_output_dims_with_out_dims(self):
+        """core_dims + out_dims → broadcast + out_dims."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"field": {"units": "g", "dims": ["Y", "X", "C"]}},
+                },
+                "process": [
+                    {
+                        "func": "test:core_out",
+                        "inputs": {"field": "state.field"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+        result = validate_blueprint(bp, backend="jax")
+        assert result.valid
+        # broadcast = (Y, X) [C removed as core_dim], out_dims = [Z]
+        output_node = result.data_nodes["derived.result"]
+        assert output_node.dims is not None
+        assert "Z" in output_node.dims
+        assert "C" not in output_node.dims
+
+    def test_output_dims_broadcast_only(self):
+        """core_dims without out_dims → broadcast only."""
+        bp = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"value": {"units": "g", "dims": ["Y", "X", "C"]}},
+                },
+                "process": [
+                    {
+                        "func": "test:core_func",
+                        "inputs": {"x": "state.value"},
+                        "outputs": {"out": "derived.result"},
+                    }
+                ],
+            }
+        )
+        result = validate_blueprint(bp, backend="jax")
+        assert result.valid
+        # broadcast = (Y, X) [C removed as core_dim], no out_dims
+        output_node = result.data_nodes["derived.result"]
+        assert output_node.dims is not None
+        assert "C" not in output_node.dims
+        assert "Y" in output_node.dims
+        assert "X" in output_node.dims
 
 
 class TestValidateConfig:

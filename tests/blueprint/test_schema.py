@@ -325,3 +325,19 @@ class TestExecutionParams:
         """Test that invalid dt formats are rejected."""
         with pytest.raises(ValueError, match="Invalid dt format"):
             ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", dt=dt)
+
+    def test_invalid_datetime_rejected(self):
+        """Test that unparseable datetime raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid datetime format"):
+            ExecutionParams(time_start="not-a-date", time_end="2001-01-01")
+
+    @pytest.mark.parametrize("batch_size", [0, -1])
+    def test_non_positive_batch_size_rejected(self, batch_size):
+        """Test that non-positive batch_size raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", batch_size=batch_size)
+
+    def test_inverted_time_range_rejected(self):
+        """Test that time_end < time_start raises ValueError."""
+        with pytest.raises(ValueError, match="must be after"):
+            ExecutionParams(time_start="2020-01-01", time_end="2019-01-01")

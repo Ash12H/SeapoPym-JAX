@@ -194,3 +194,14 @@ class TestFunctionMetadata:
 
         assert required == ["required1", "required2"]
         assert "optional" not in required
+
+    def test_output_names_default(self):
+        """Test output_names fallback when outputs is None."""
+
+        @functional(name="test:single", backend="jax")
+        def single_func(x):
+            return x
+
+        metadata = get_function("test:single", "jax")
+        assert metadata.outputs is None
+        assert metadata.output_names == ["return"]
