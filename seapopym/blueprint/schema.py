@@ -1,7 +1,7 @@
 """Pydantic schemas for Blueprint and Config.
 
 This module defines the declarative data structures for model definition (Blueprint)
-and experiment configuration (Config) as per SPEC_01.
+and experiment configuration (Config).
 """
 
 from __future__ import annotations

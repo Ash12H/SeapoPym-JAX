@@ -1,5 +1,5 @@
 # Toy config for testing Blueprint system
-# As per SPEC_01 Section 5
+# Toy config for testing
 
 parameters:
   growth_rate:

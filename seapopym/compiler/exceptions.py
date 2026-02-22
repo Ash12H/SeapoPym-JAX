@@ -1,6 +1,6 @@
 """Compiler-specific exceptions.
 
-Error codes as per SPEC_02 §9:
+Error codes:
 - E201: ShapeInferenceError
 - E202: GridAlignmentError
 - E203: MissingDimensionError

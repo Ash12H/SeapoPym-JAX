@@ -135,6 +135,13 @@ def functional(
         )
 
         # Register in global registry
+        if name in REGISTRY[backend]:
+            import warnings
+
+            warnings.warn(
+                f"Function '{name}' is already registered for backend '{backend}'. Overwriting.",
+                stacklevel=2,
+            )
         REGISTRY[backend][name] = metadata
 
         # Preserve function metadata

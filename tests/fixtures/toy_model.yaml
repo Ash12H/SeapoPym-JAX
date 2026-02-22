@@ -1,5 +1,5 @@
 # Toy model for testing Blueprint system
-# As per SPEC_01 Section 5
+# Toy blueprint for testing
 
 id: "toy-growth"
 version: "0.1.0"
