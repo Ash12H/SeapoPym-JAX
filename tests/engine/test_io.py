@@ -123,6 +123,57 @@ class TestDiskWriter:
         store = zarr.open(str(output_path), mode="r")
         assert store["biomass"].shape[0] == 5  # type: ignore[union-attr]
 
+    def test_var_dims_shapes(self, tmp_path):
+        """Test that var_dims produces correct per-variable shapes."""
+        output_path = tmp_path / "output"
+        writer = DiskWriter(output_path)
+        writer.initialize(
+            {"C": 3, "Y": 4, "X": 5},
+            ["biomass", "cohort_var"],
+            var_dims={"biomass": ("Y", "X"), "cohort_var": ("C", "Y", "X")},
+        )
+
+        import zarr
+
+        # biomass: (T, Y, X) → initial shape (0, 4, 5)
+        assert writer.store["biomass"].shape == (0, 4, 5)
+        assert writer.store["biomass"].attrs["_ARRAY_DIMENSIONS"] == ["T", "Y", "X"]
+
+        # cohort_var: (T, C, Y, X) → initial shape (0, 3, 4, 5)
+        assert writer.store["cohort_var"].shape == (0, 3, 4, 5)
+        assert writer.store["cohort_var"].attrs["_ARRAY_DIMENSIONS"] == ["T", "C", "Y", "X"]
+
+        writer.close()
+
+    def test_coords_written_to_zarr(self, tmp_path):
+        """Test that coordinate arrays are written to the zarr store."""
+        output_path = tmp_path / "output"
+        writer = DiskWriter(output_path)
+
+        coords = {"Y": np.arange(5), "X": np.arange(3)}
+        writer.initialize({"Y": 5, "X": 3}, ["biomass"], coords=coords)
+
+        import zarr
+
+        store = zarr.open(str(output_path), mode="r")
+        np.testing.assert_array_equal(store["Y"][:], np.arange(5))
+        np.testing.assert_array_equal(store["X"][:], np.arange(3))
+
+        writer.close()
+
+    def test_array_dimensions_attr(self, tmp_path):
+        """Test that _ARRAY_DIMENSIONS attribute is set on variables."""
+        output_path = tmp_path / "output"
+        writer = DiskWriter(output_path)
+        writer.initialize({"Y": 5, "X": 5}, ["biomass"])
+
+        import zarr
+
+        store = zarr.open(str(output_path), mode="r")
+        assert store["biomass"].attrs["_ARRAY_DIMENSIONS"] == ["T", "Y", "X"]
+
+        writer.close()
+
 
 class TestDiskWriterConcurrency:
     """Tests for concurrent write behavior."""

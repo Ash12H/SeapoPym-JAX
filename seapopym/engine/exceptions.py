@@ -2,7 +2,6 @@
 
 Error codes as per architecture:
 - E300: EngineError (base)
-- E301: StepError
 - E303: ChunkingError
 - E304: IOError
 """
@@ -19,18 +18,6 @@ class EngineError(Exception):
         """Initialize with error message."""
         self.message = message
         super().__init__(f"[{self.code}] {message}")
-
-
-class StepError(EngineError):
-    """E301: Error during step function execution."""
-
-    code = "E301"
-
-    def __init__(self, timestep: int, reason: str) -> None:
-        """Initialize with timestep and failure reason."""
-        self.timestep = timestep
-        self.reason = reason
-        super().__init__(f"Step failed at timestep {timestep}: {reason}")
 
 
 class ChunkingError(EngineError):

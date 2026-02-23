@@ -1,7 +1,7 @@
 """Asynchronous I/O for streaming output.
 
 Provides DiskWriter for writing simulation outputs in parallel with computation.
-Uses ThreadPoolExecutor since GIL is released during JAX execution.
+Uses a single worker thread to overlap JAX compute (which releases the GIL) with I/O.
 """
 
 from __future__ import annotations
@@ -30,13 +30,20 @@ from seapopym.types import Array
 class OutputWriter(Protocol):
     """Interface for simulation output writers."""
 
-    def initialize(self, shapes: dict[str, int], variables: list[str], coords: dict[str, Array] | None = None) -> None:
+    def initialize(
+        self,
+        shapes: dict[str, int],
+        variables: list[str],
+        coords: dict[str, Array] | None = None,
+        var_dims: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
         """Initialize the writer.
 
         Args:
             shapes: Dimension sizes.
             variables: List of variable names to write/keep.
             coords: Coordinate arrays for dimensions (includes real accumulated timestamps).
+            var_dims: Mapping from variable name to its dimension names (e.g. {"biomass": ("Y", "X")}).
         """
         ...
 
@@ -61,11 +68,11 @@ class OutputWriter(Protocol):
 class DiskWriter:
     """Asynchronous writer for simulation outputs.
 
-    Uses a thread pool to write chunks in parallel with computation.
-    The GIL is released during JAX execution, allowing true parallelism.
+    Uses a single worker thread to overlap I/O with JAX computation.
+    The GIL is released during JAX execution, allowing true overlap.
 
     Example:
-        >>> writer = DiskWriter(output_path="/results/sim/", max_workers=2)
+        >>> writer = DiskWriter(output_path="/results/sim/")
         >>> writer.append({"biomass": arr}, chunk_index=0)
         >>> writer.append({"biomass": arr}, chunk_index=1)
         >>> writer.finalize()  # Wait for all writes to complete
@@ -74,70 +81,85 @@ class DiskWriter:
     def __init__(
         self,
         output_path: str | Path,
-        max_workers: int = 2,
-        format: str = "zarr",
+        max_workers: int = 1,
     ) -> None:
         """Initialize async writer.
 
         Args:
             output_path: Base path for output files.
-            max_workers: Number of writer threads.
-            format: Output format ("zarr" or "netcdf").
+            max_workers: Number of writer threads (kept for API compat, serialized by lock).
         """
         self.output_path = Path(output_path)
-        self.format = format
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.futures: list[Future[None]] = []
         self._initialized = False
         self.store: Any = None  # zarr.Group at runtime
         self._write_lock = threading.Lock()  # Thread safety for zarr writes
 
-    def initialize(self, shapes: dict[str, int], variables: list[str], coords: dict[str, Array] | None = None) -> None:
+    def initialize(
+        self,
+        shapes: dict[str, int],
+        variables: list[str],
+        coords: dict[str, Array] | None = None,
+        var_dims: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
         """Initialize output storage structure.
 
         Args:
             shapes: Dimension sizes.
             variables: List of variable names to write.
-            coords: Coordinate arrays (unused for now, for future metadata support).
+            coords: Coordinate arrays for dimensions.
+            var_dims: Mapping from variable name to its dimension names.
         """
-        del coords  # Unused for now
         self.output_path.mkdir(parents=True, exist_ok=True)
-
-        if self.format == "zarr":
-            self._init_zarr(shapes, variables)
-        elif self.format == "netcdf":
-            self._init_netcdf(shapes, variables)
-        else:
-            raise EngineIOError(str(self.output_path), f"Unknown format: {self.format}")
-
+        self._init_zarr(shapes, variables, coords=coords, var_dims=var_dims)
         self._initialized = True
 
-    def _init_zarr(self, shapes: dict[str, int], variables: list[str]) -> None:
-        """Initialize Zarr store."""
+    def _init_zarr(
+        self,
+        shapes: dict[str, int],
+        variables: list[str],
+        coords: dict[str, Array] | None = None,
+        var_dims: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        """Initialize Zarr store with coordinate metadata."""
         import zarr
 
         self.store = zarr.open(str(self.output_path), mode="w")
 
+        # Write coordinate arrays
+        if coords is not None:
+            for dim_name, coord_arr in coords.items():
+                coord_np = np.asarray(coord_arr)
+                ds = self.store.create_dataset(
+                    dim_name,
+                    shape=coord_np.shape,
+                    dtype=coord_np.dtype,
+                )
+                ds[:] = coord_np
+
         # Create arrays for each variable
         # Time dimension is unlimited (append along axis 0)
         for var_name in variables:
-            # Determine shape based on variable (simplified)
-            # In practice, would use blueprint declarations
-            var_shape = (0,) + tuple(shapes.get(d, 1) for d in ["Y", "X"] if d in shapes)
+            # Use per-variable dims if provided, otherwise fall back to spatial dims
+            if var_dims and var_name in var_dims:
+                dims = var_dims[var_name]
+                # Spatial dims only (exclude T — it's the append axis)
+                spatial_dims = tuple(d for d in dims if d != "T")
+            else:
+                spatial_dims = tuple(d for d in ["Y", "X"] if d in shapes)
+
+            var_shape = (0,) + tuple(shapes.get(d, 1) for d in spatial_dims)
             chunks = (1,) + var_shape[1:]
 
-            self.store.create_dataset(
+            ds = self.store.create_dataset(
                 var_name,
                 shape=var_shape,
                 chunks=chunks,
                 dtype=np.float32,
             )
-
-    def _init_netcdf(self, _shapes: dict[str, int], _variables: list[str]) -> None:
-        """Initialize NetCDF file with unlimited time dimension."""
-        # For simplicity, we'll use zarr format primarily
-        # NetCDF support can be added later
-        raise EngineIOError(str(self.output_path), "NetCDF format not yet implemented")
+            # xarray/zarr convention: store dimension names as attribute
+            ds.attrs["_ARRAY_DIMENSIONS"] = ["T", *spatial_dims]
 
     def append(
         self,
@@ -167,15 +189,12 @@ class DiskWriter:
             chunk_id: Chunk index.
         """
         try:
-            if self.format == "zarr":
-                self._write_zarr_chunk(data, chunk_id)
-            else:
-                raise EngineIOError(str(self.output_path), f"Unknown format: {self.format}")
+            self._write_zarr_chunk(data)
         except Exception as e:
             logger.error(f"Failed to write chunk {chunk_id}: {e}")
             raise EngineIOError(str(self.output_path), str(e)) from e
 
-    def _write_zarr_chunk(self, data: dict[str, np.ndarray], _chunk_id: int) -> None:
+    def _write_zarr_chunk(self, data: dict[str, np.ndarray]) -> None:
         """Write chunk to Zarr store."""
         import zarr
 
@@ -236,15 +255,22 @@ class MemoryWriter:
         self._accumulator: dict[str, list[np.ndarray]] = {}
         self._coords: dict[str, Array] = {}
 
-    def initialize(self, shapes: dict[str, int], variables: list[str], coords: dict[str, Array] | None = None) -> None:
+    def initialize(
+        self,
+        shapes: dict[str, int],
+        variables: list[str],
+        coords: dict[str, Array] | None = None,
+        var_dims: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
         """Initialize accumulator.
 
         Args:
             shapes: Dimension sizes (unused, kept for protocol compatibility).
             variables: List of variable names to accumulate.
             coords: Coordinate arrays for dimensions (includes accumulated timestamps).
+            var_dims: Mapping from variable name to its dims (unused, kept for protocol compatibility).
         """
-        del shapes  # Unused, kept for protocol compatibility
+        del shapes, var_dims  # Unused, kept for protocol compatibility
         self.variables = variables
         for var in variables:
             self._accumulator[var] = []
@@ -286,9 +312,6 @@ class MemoryWriter:
         # 3. Use stored coords (includes real accumulated timestamps)
         coords = self._coords
 
-        # Try to infer time dimension name from coords
-        time_dim = next((d for d in ["T", "time", "t"] if d in coords), "T")
-
         data_vars = {}
         for var_name, data in merged_data.items():
             dims = var_dims.get(var_name, None)
@@ -299,7 +322,7 @@ class MemoryWriter:
 
             # Add time dimension if needed (accumulated data has extra dimension)
             if len(dims) + 1 == data.ndim:
-                dims = (time_dim,) + dims
+                dims = ("T",) + dims
             elif len(dims) != data.ndim:
                 # Dimension mismatch - skip this variable
                 continue

@@ -209,7 +209,7 @@ def _resolve_inputs(
                 result[arg_name] = forcings_t[var_name]
             elif category == "parameters":
                 result[arg_name] = parameters[var_name]
-            elif category in ("intermediates", "derived"):
+            elif category == "derived":
                 result[arg_name] = intermediates[var_name]
             else:
                 raise KeyError(f"Unknown category '{category}' in path '{var_path}'")
@@ -272,6 +272,10 @@ def _integrate_euler(
                 src.sign * intermediates[src.source.removeprefix("derived.")]
                 for src in sources
             )
+            # Clamp to zero: biomass and other state variables are physically
+            # non-negative quantities.  Euler explicit can overshoot below zero
+            # when the loss tendency is large relative to dt, so we enforce the
+            # constraint here.
             new_state[var_name] = jnp.maximum(value + total * dt, 0.0)
         else:
             new_state[var_name] = value

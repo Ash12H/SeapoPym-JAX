@@ -105,6 +105,17 @@ class StreamingRunner:
             # (sliced to n_timesteps in case of any discrepancy)
             writer_coords["T"] = self.model.time_grid.coords[:n_timesteps]
 
+        # Resolve per-variable dims from data_nodes
+        var_dims: dict[str, tuple[str, ...]] = {}
+        for node in self.model.data_nodes.values():
+            if node.dims is None:
+                continue
+            short = node.name.split(".")[-1] if "." in node.name else node.name
+            if node.name in output_vars:
+                var_dims[node.name] = tuple(node.dims)
+            elif short in output_vars:
+                var_dims[short] = tuple(node.dims)
+
         # Initialize Writer Strategy
         writer: OutputWriter
         writer = (
@@ -114,7 +125,7 @@ class StreamingRunner:
         )
 
         try:
-            writer.initialize(self.model.shapes, output_vars, coords=writer_coords)
+            writer.initialize(self.model.shapes, output_vars, coords=writer_coords, var_dims=var_dims)
 
             # Process chunks
             for chunk_idx in range(n_chunks):

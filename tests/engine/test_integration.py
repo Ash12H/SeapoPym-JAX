@@ -8,18 +8,10 @@ import pytest
 
 import jax.numpy as jnp
 
-from seapopym.blueprint import Blueprint, Config, clear_registry, functional
+from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
 from seapopym.engine import StreamingRunner
 from seapopym.optimization.gradient import GradientRunner
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Clear registry before each test."""
-    clear_registry()
-    yield
-    clear_registry()
 
 
 class TestE2EBasicSimulation:

@@ -17,7 +17,6 @@ from .exceptions import (
     ChunkingError,
     EngineError,
     EngineIOError,
-    StepError,
 )
 from .io import DiskWriter
 from .runners import StreamingRunner
@@ -32,7 +31,6 @@ __all__ = [
     "DiskWriter",
     # Exceptions
     "EngineError",
-    "StepError",
     "ChunkingError",
     "EngineIOError",
 ]
