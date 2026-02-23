@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from seapopym.compiler.time_grid import TimeGrid
     from seapopym.compiler.forcing import ForcingStore
 
-from seapopym.dims import CANONICAL_DIMS
 from seapopym.blueprint.nodes import ComputeNode, DataNode
 from seapopym.types import Array
 
@@ -69,7 +68,7 @@ class CompiledModel:
     # Configuration
     trainable_params: list[str] = field(default_factory=list)
 
-    # Temporal configuration (Phase 4)
+    # Temporal configuration
     time_grid: TimeGrid | None = None
     chunk_size: int | None = None
 

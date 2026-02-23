@@ -7,12 +7,15 @@ the actual data into memory (lazy loading via chunks={}).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import xarray as xr
 
 from seapopym.blueprint import Config
+
+if TYPE_CHECKING:
+    from seapopym.compiler.time_grid import TimeGrid
 
 from .exceptions import GridAlignmentError, ShapeInferenceError
 
@@ -66,7 +69,7 @@ def infer_shapes_from_array(arr: np.ndarray | Any, dims: list[str] | None) -> di
 def infer_shapes(
     config: Config,
     blueprint_dims: dict[str, list[str] | None] | None = None,
-    time_grid: Any | None = None,  # TimeGrid from compiler.py (avoid circular import)
+    time_grid: TimeGrid | None = None,
 ) -> dict[str, int]:
     """Infer all dimension sizes from config data sources.
 

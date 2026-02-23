@@ -3,11 +3,13 @@
 The compilation pipeline:
 1. Validate blueprint and config
 2. Compute temporal grid
-3. Infer shapes from data metadata
-4. Rename dimensions to canonical names
-5. Transpose to canonical order
-6. Strip xarray and preprocess NaN
-7. Package into CompiledModel
+3. Build dims mapping from blueprint
+4. Infer shapes from data (with time_grid priority for T dimension)
+5. Get dimension mapping from config and apply to shapes
+6. Prepare forcings (with temporal validation)
+7. Prepare initial state
+8. Prepare parameters
+9. Build CompiledModel
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from .forcing import ForcingStore
 from .inference import infer_shapes
 from .model import Array, CompiledModel
 from .preprocessing import extract_coords, prepare_array
-from .time_grid import TimeGrid, _parse_dt
+from .time_grid import TimeGrid
 
 logger = logging.getLogger(__name__)
 
@@ -110,18 +112,8 @@ def _prepare_forcings(
                 # Slice at xarray level (still lazy)
                 da = da.sel(T=slice(time_grid.start, time_grid.end))
 
-            if is_dynamic:
-                # Keep lazy — ForcingStore will materialize at runtime
-                raw_forcings[name] = da
-            else:
-                # Static: small, materialize now
-                arr = da.values
-                arr = np.asarray(arr)
-                nan_mask = np.isnan(arr) if np.issubdtype(arr.dtype, np.floating) else None
-                if nan_mask is not None and nan_mask.any():
-                    arr = np.where(nan_mask, fill_nan, arr)
-                arr = jnp.asarray(arr)
-                raw_forcings[name] = arr
+            # Keep as lazy DataArray — ForcingStore will materialize & NaN-fill at runtime
+            raw_forcings[name] = da
 
             # Extract coords from first xr.DataArray source
             if not coords_extracted:
@@ -269,10 +261,7 @@ def compile_model(
     # Step 8: Prepare parameters
     parameters, trainable = _prepare_parameters(config)
 
-    # Step 9: Parse dt
-    dt = _parse_dt(config.execution.dt)
-
-    # Step 10: Build CompiledModel
+    # Step 9: Build CompiledModel
     return CompiledModel(
         blueprint=blueprint,
         compute_nodes=compute_nodes,
@@ -283,7 +272,7 @@ def compile_model(
         parameters=parameters,
         shapes=shapes,
         coords=coords,
-        dt=dt,
+        dt=time_grid.dt_seconds,
         trainable_params=trainable,
         time_grid=time_grid,
         chunk_size=config.execution.chunk_size,

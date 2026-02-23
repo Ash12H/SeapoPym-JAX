@@ -39,16 +39,22 @@ def load_data(
 
         if variable_name and variable_name in ds:
             return ds[variable_name]
-        # If single variable, return it
         if len(ds.data_vars) == 1:
             return ds[list(ds.data_vars)[0]]
-        # Return first variable as DataArray
-        return ds[list(ds.data_vars)[0]]
+        raise ValueError(
+            f"Dataset from '{path}' contains {len(ds.data_vars)} variables "
+            f"({list(ds.data_vars)}). Specify variable_name to select one."
+        )
 
     if isinstance(source, xr.Dataset):
         if variable_name and variable_name in source:
             return source[variable_name]
-        return source[list(source.data_vars)[0]]
+        if len(source.data_vars) == 1:
+            return source[list(source.data_vars)[0]]
+        raise ValueError(
+            f"Dataset contains {len(source.data_vars)} variables "
+            f"({list(source.data_vars)}). Specify variable_name to select one."
+        )
 
     if isinstance(source, xr.DataArray):
         return source
@@ -155,24 +161,28 @@ def extract_coords(
         Dict mapping dimension names to coordinate arrays.
     """
     # Load as xarray
+    opened: xr.Dataset | None = None
     if isinstance(source, str | Path):
         path = Path(source)
-        ds = xr.open_zarr(path) if path.suffix == ".zarr" or path.is_dir() else xr.open_dataset(path)
+        opened = xr.open_zarr(path) if path.suffix == ".zarr" or path.is_dir() else xr.open_dataset(path)
+        ds = opened
     elif isinstance(source, xr.DataArray):
         ds = source.to_dataset(name="data")
     else:
         ds = source
 
-    # Apply mapping
-    if dimension_mapping:
-        rename_dict = {old: new for old, new in dimension_mapping.items() if old in ds.dims}
-        if rename_dict:
-            ds = ds.rename(rename_dict)
+    try:
+        # Apply mapping
+        if dimension_mapping:
+            rename_dict = {old: new for old, new in dimension_mapping.items() if old in ds.dims}
+            if rename_dict:
+                ds = ds.rename(rename_dict)
 
-    coords: dict[str, Array] = {}
-    for name, coord in ds.coords.items():
-        values = coord.values
-        values = jnp.asarray(values)
-        coords[str(name)] = values
+        coords: dict[str, Array] = {}
+        for name, coord in ds.coords.items():
+            coords[str(name)] = np.asarray(coord.values)
 
-    return coords
+        return coords
+    finally:
+        if opened is not None:
+            opened.close()

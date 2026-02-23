@@ -7,16 +7,11 @@ This module handles:
 
 from __future__ import annotations
 
-from typing import Any
-
-import numpy as np
 import xarray as xr
 
-from seapopym.dims import CANONICAL_DIMS, get_canonical_order
+from seapopym.dims import get_canonical_order
 
 from .exceptions import TransposeError
-
-from seapopym.types import Array
 
 
 def apply_dimension_mapping(
@@ -82,38 +77,5 @@ def transpose_canonical(
         raise TransposeError(name, str(e)) from e
 
 
-def transpose_array(
-    arr: Array,
-    current_dims: tuple[str, ...] | list[str],
-    target_order: tuple[str, ...] | None = None,
-) -> tuple[Array, tuple[str, ...]]:
-    """Transpose a NumPy/JAX array to canonical dimension order.
-
-    Args:
-        arr: Array to transpose.
-        current_dims: Current dimension names.
-        target_order: Target dimension order. If None, uses canonical.
-
-    Returns:
-        Tuple of (transposed array, new dimension order).
-    """
-    current_dims = tuple(current_dims)
-
-    if target_order is None:
-        target_order = get_canonical_order(current_dims)
-
-    # Build axis permutation
-    # Include dims in target_order first, then extras
-    present_in_target = [d for d in target_order if d in current_dims]
-    extras = [d for d in current_dims if d not in target_order]
-    new_order = present_in_target + extras
-
-    # Get axis indices
-    axes = tuple(current_dims.index(d) for d in new_order)
-
-    # Transpose
-    transposed = np.transpose(arr, axes)
-
-    return transposed, tuple(new_order)
 
 

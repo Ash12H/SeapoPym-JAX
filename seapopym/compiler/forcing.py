@@ -6,7 +6,7 @@ temporal interpolation using xr.DataArray.interp() / .reindex().
 Key features:
 - Lazy loading: xr.DataArray forcings are NOT materialized at compile time
 - xarray interpolation: uses scipy (linear) or pandas (nearest/ffill) under the hood
-- Unified chunking API: get_chunk() replaces _slice_forcings() in all runners
+- Unified chunking API: get_chunk() provides chunked access for all runners
 """
 
 from __future__ import annotations
@@ -29,8 +29,7 @@ class ForcingStore:
     - xr.DataArray (lazy): loaded from file, materialized only when accessed
     - Array (in-memory): already materialized JAX arrays
 
-    The store exposes a unified API for chunking and interpolation,
-    replacing the duplicated _slice_forcings() logic in all runners.
+    The store exposes a unified API for chunking and interpolation.
 
     Attributes:
         _forcings: Raw forcing data (lazy xarray or in-memory arrays).
@@ -80,9 +79,6 @@ class ForcingStore:
 
     def get_all(self) -> dict[str, Array]:
         """Materialize all forcings for the full simulation.
-
-        Used by GradientRunner where the full time series must be
-        in memory for autodiff.
 
         Returns:
             Dict of forcing arrays with full time dimension.
@@ -150,6 +146,11 @@ class ForcingStore:
             return self._materialize_with_nan(chunk)
 
         # Interpolation needed
+        if self._time_coords is None:
+            raise ValueError(
+                f"Forcing '{name}' requires interpolation but _time_coords is None. "
+                f"Provide _time_coords when constructing ForcingStore."
+            )
         target_times = self._time_coords[start:end]
         chunk = self._xarray_interpolate(data, target_times)
         return self._materialize_with_nan(chunk)

@@ -6,7 +6,6 @@ import xarray as xr
 from seapopym.compiler.transpose import (
     apply_dimension_mapping,
     get_canonical_order,
-    transpose_array,
     transpose_canonical,
 )
 
@@ -141,32 +140,3 @@ class TestTransposeCanonical:
         assert list(result.dims) == ["X", "Y", "T"]
 
 
-class TestTransposeArray:
-    """Tests for transpose_array function."""
-
-    def test_basic_transpose(self):
-        """Test transposing numpy array."""
-        arr = np.random.rand(5, 4, 3)
-        current_dims = ("X", "Y", "T")
-        result, new_dims = transpose_array(arr, current_dims)
-        assert new_dims == ("T", "Y", "X")
-        assert result.shape == (3, 4, 5)
-
-    def test_preserves_data(self):
-        """Test that data values are preserved."""
-        arr = np.arange(24).reshape(4, 3, 2)
-        current_dims = ("X", "Y", "T")
-        result, new_dims = transpose_array(arr, current_dims)
-        # Check a specific value
-        # Original: arr[x=2, y=1, t=0] = arr[2,1,0] = 2*6 + 1*2 + 0 = 14
-        # After: result[t=0, y=1, x=2] should be same
-        assert result[0, 1, 2] == arr[2, 1, 0]
-
-    def test_extra_dims(self):
-        """Test with extra non-canonical dimensions."""
-        arr = np.random.rand(5, 4, 3, 2)
-        current_dims = ("X", "Y", "T", "custom")
-        result, new_dims = transpose_array(arr, current_dims)
-        # custom goes at the end
-        assert new_dims == ("T", "Y", "X", "custom")
-        assert result.shape == (3, 4, 5, 2)
