@@ -50,13 +50,13 @@ class StreamingRunner:
 
         Args:
             model: Compiled model to execute.
-            chunk_size: Number of timesteps per chunk. If None, uses model.batch_size.
-                If both None, processes entire simulation in one batch.
+            chunk_size: Number of timesteps per chunk. If None, uses model.chunk_size.
+                If both None, processes entire simulation in one chunk.
             io_workers: Number of async I/O workers.
         """
         self.model = model
-        # Priority: chunk_size (parameter) > model.batch_size (config) > model.n_timesteps (all)
-        self.chunk_size = chunk_size or getattr(model, "batch_size", None) or model.n_timesteps
+        # Priority: chunk_size (parameter) > model.chunk_size (config) > model.n_timesteps (all)
+        self.chunk_size = chunk_size or getattr(model, "chunk_size", None) or model.n_timesteps
         self.io_workers = io_workers
 
     def run(

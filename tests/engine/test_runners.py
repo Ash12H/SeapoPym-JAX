@@ -106,10 +106,10 @@ class TestStreamingRunner:
         assert runner.chunk_size == 10
         assert runner.model is model
 
-    def test_batch_size_from_config(self, simple_blueprint, simple_config):
-        """Test that runner uses batch_size from model config if chunk_size not provided."""
-        # Manually set batch_size in config before compiling
-        simple_config.execution.batch_size = 15
+    def test_chunk_size_from_config(self, simple_blueprint, simple_config):
+        """Test that runner uses chunk_size from model config if chunk_size not provided."""
+        # Manually set chunk_size in config before compiling
+        simple_config.execution.chunk_size = 15
 
         @functional(name="test:growth")
         def test_growth(biomass, rate, temp):

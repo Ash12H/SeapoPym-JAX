@@ -160,7 +160,7 @@ config = Config.from_dict(
             "time_end": end_date,
             "dt": DT,
             "forcing_interpolation": "linear",
-            "batch_size": 1000,
+            "chunk_size": 1000,
         },
     }
 )
