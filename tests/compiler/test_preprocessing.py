@@ -5,7 +5,9 @@ import pytest
 import xarray as xr
 
 from seapopym.compiler.preprocessing import (
+    extract_coords,
     load_data,
+    prepare_array,
     preprocess_nan,
     strip_xarray,
 )
@@ -117,3 +119,124 @@ class TestLoadData:
         result = load_data(ds, variable_name="salt")
         assert isinstance(result, xr.DataArray)
         np.testing.assert_array_equal(result.values, [4, 5, 6])
+
+    def test_load_dataset_multi_var_no_name_error(self):
+        """Test error when Dataset has multiple variables and no variable_name."""
+        ds = xr.Dataset(
+            {
+                "temp": (["X"], np.array([1, 2, 3])),
+                "salt": (["X"], np.array([4, 5, 6])),
+            }
+        )
+        with pytest.raises(ValueError, match="contains 2 variables"):
+            load_data(ds)
+
+
+class TestExtractCoords:
+    """Tests for extract_coords function."""
+
+    def test_from_dataarray(self):
+        """Test extracting coords from a DataArray."""
+        da = xr.DataArray(
+            np.zeros((3, 4)),
+            dims=["Y", "X"],
+            coords={"Y": [10.0, 20.0, 30.0], "X": [100.0, 101.0, 102.0, 103.0]},
+        )
+        coords = extract_coords(da)
+        assert "Y" in coords
+        assert "X" in coords
+        np.testing.assert_array_equal(coords["Y"], [10.0, 20.0, 30.0])
+        np.testing.assert_array_equal(coords["X"], [100.0, 101.0, 102.0, 103.0])
+
+    def test_with_dimension_mapping(self):
+        """Test extracting coords with dimension renaming."""
+        da = xr.DataArray(
+            np.zeros((3, 4)),
+            dims=["lat", "lon"],
+            coords={"lat": [10.0, 20.0, 30.0], "lon": [100.0, 101.0, 102.0, 103.0]},
+        )
+        coords = extract_coords(da, dimension_mapping={"lat": "Y", "lon": "X"})
+        assert "Y" in coords
+        assert "X" in coords
+
+    def test_from_dataset(self):
+        """Test extracting coords from a Dataset."""
+        ds = xr.Dataset(
+            {"temp": (["Y", "X"], np.zeros((3, 4)))},
+            coords={"Y": [10.0, 20.0, 30.0], "X": [100.0, 101.0, 102.0, 103.0]},
+        )
+        coords = extract_coords(ds)
+        assert "Y" in coords
+        assert "X" in coords
+
+    def test_returns_numpy_arrays(self):
+        """Test that coords are numpy arrays, not JAX arrays."""
+        da = xr.DataArray(
+            np.zeros((3,)),
+            dims=["Y"],
+            coords={"Y": [1.0, 2.0, 3.0]},
+        )
+        coords = extract_coords(da)
+        assert type(coords["Y"]) is np.ndarray
+
+
+class TestPrepareArray:
+    """Tests for prepare_array function."""
+
+    def test_from_dataarray(self):
+        """Test full pipeline from DataArray."""
+        da = xr.DataArray(
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            dims=["Y", "X"],
+        )
+        arr, dims, mask = prepare_array(da)
+        assert dims == ("Y", "X")
+        assert hasattr(arr, "device")  # JAX array
+        np.testing.assert_array_equal(np.asarray(arr), [[1.0, 2.0], [3.0, 4.0]])
+
+    def test_nan_handling(self):
+        """Test NaN replacement and mask generation."""
+        da = xr.DataArray(
+            np.array([[1.0, np.nan], [np.nan, 4.0]]),
+            dims=["Y", "X"],
+        )
+        arr, dims, mask = prepare_array(da, fill_nan=0.0)
+        np.testing.assert_array_equal(np.asarray(arr), [[1.0, 0.0], [0.0, 4.0]])
+        assert mask is not None
+        np.testing.assert_array_equal(np.asarray(mask), [[True, False], [False, True]])
+
+    def test_no_nan_handling(self):
+        """Test with fill_nan=None preserves NaN."""
+        da = xr.DataArray(
+            np.array([1.0, np.nan, 3.0]),
+            dims=["X"],
+        )
+        arr, dims, mask = prepare_array(da, fill_nan=None)
+        assert mask is None
+        assert np.isnan(np.asarray(arr)[1])
+
+    def test_from_numpy(self):
+        """Test pipeline from raw numpy array."""
+        data = np.array([1.0, 2.0, 3.0])
+        arr, dims, mask = prepare_array(data)
+        assert dims == ()  # no dim info from raw array
+        assert hasattr(arr, "device")
+
+    def test_dimension_mapping(self):
+        """Test dimension mapping is applied."""
+        da = xr.DataArray(
+            np.zeros((3, 4)),
+            dims=["lat", "lon"],
+        )
+        arr, dims, mask = prepare_array(da, dimension_mapping={"lat": "Y", "lon": "X"})
+        assert dims == ("Y", "X")
+
+    def test_canonical_transpose(self):
+        """Test that dims are transposed to canonical order."""
+        da = xr.DataArray(
+            np.zeros((4, 3)),
+            dims=["X", "Y"],
+        )
+        arr, dims, mask = prepare_array(da)
+        assert dims == ("Y", "X")
+        assert np.asarray(arr).shape == (3, 4)

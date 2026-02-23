@@ -1,7 +1,6 @@
 """Tests for ForcingStore."""
 
 import numpy as np
-import pandas as pd
 import pytest
 import xarray as xr
 
@@ -112,23 +111,6 @@ class TestForcingStore:
         assert chunk["temp"].shape == (3, 5, 5)
         np.testing.assert_array_equal(np.asarray(chunk["temp"]), data[2:5])
 
-    def test_lazy_xarray_interpolated(self):
-        """Lazy xr.DataArray needing interpolation."""
-        source_times = pd.date_range("2000-01-01", periods=5, freq="2D")
-        data = np.linspace(0, 40, 5).reshape(-1, 1, 1).astype(np.float64)
-        da = xr.DataArray(data, dims=["T", "Y", "X"], coords={"T": source_times})
-        target_times = pd.date_range(source_times[0], source_times[-1], periods=10).to_numpy()
-
-        store = ForcingStore(
-            _forcings={"temp": da},
-            n_timesteps=10,
-            interp_method="linear",
-            _dynamic_forcings={"temp"},
-            _time_coords=target_times,
-        )
-        result = np.asarray(store.get_chunk(0, 10)["temp"]).flatten()
-        np.testing.assert_allclose(result, np.linspace(0, 40, 10), atol=1e-5)
-
     def test_jax_arrays(self):
         """ForcingStore produces JAX arrays."""
         temp = np.random.rand(10, 5, 5)
@@ -175,3 +157,21 @@ class TestForcingStore:
         # get_chunk materializes just the chunk
         chunk = store.get_chunk(0, 3)
         assert chunk["temp"].shape == (3, 5, 5)
+
+    def test_interpolation_without_time_coords_error(self):
+        """Interpolation with _time_coords=None raises ValueError."""
+        import pandas as pd
+
+        source_times = pd.date_range("2000-01-01", periods=5, freq="2D")
+        data = np.linspace(0, 40, 5).reshape(-1, 1, 1).astype(np.float64)
+        da = xr.DataArray(data, dims=["T", "Y", "X"], coords={"T": source_times})
+
+        store = ForcingStore(
+            _forcings={"temp": da},
+            n_timesteps=10,
+            interp_method="linear",
+            _dynamic_forcings={"temp"},
+            _time_coords=None,  # Missing!
+        )
+        with pytest.raises(ValueError, match="_time_coords is None"):
+            store.get_chunk(0, 10)

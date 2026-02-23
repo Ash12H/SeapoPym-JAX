@@ -61,28 +61,20 @@ class TestTimeGrid:
         grid = TimeGrid.from_config("2000-01-01", "2000-01-10", "3d")
         assert grid.n_timesteps == 3
 
-    def test_leap_year_handling(self):
-        """Test handling of leap years."""
-        # 2000 is a leap year, Feb has 29 days
-        grid = TimeGrid.from_config("2000-02-01", "2000-03-01", "1d")
-        # Feb 2000: 29 days -> [02-01, 03-01) = 29 steps
-        assert grid.n_timesteps == 29
-
-    def test_non_leap_year_handling(self):
-        """Test handling of non-leap years."""
-        # 2001 is not a leap year, Feb has 28 days
-        grid = TimeGrid.from_config("2001-02-01", "2001-03-01", "1d")
-        assert grid.n_timesteps == 28
-
-    def test_month_boundaries(self):
-        """Test handling of variable month lengths."""
-        # January has 31 days
-        grid_jan = TimeGrid.from_config("2000-01-01", "2000-02-01", "1d")
-        assert grid_jan.n_timesteps == 31
-
-        # April has 30 days
-        grid_apr = TimeGrid.from_config("2000-04-01", "2000-05-01", "1d")
-        assert grid_apr.n_timesteps == 30
+    @pytest.mark.parametrize(
+        "start, end, expected",
+        [
+            ("2000-02-01", "2000-03-01", 29),  # leap year
+            ("2001-02-01", "2001-03-01", 28),  # non-leap year
+            ("2000-01-01", "2000-02-01", 31),  # January
+            ("2000-04-01", "2000-05-01", 30),  # April
+        ],
+        ids=["leap_feb", "non_leap_feb", "january", "april"],
+    )
+    def test_calendar_month_lengths(self, start, end, expected):
+        """Test handling of variable month lengths and leap years."""
+        grid = TimeGrid.from_config(start, end, "1d")
+        assert grid.n_timesteps == expected
 
     def test_long_simulation(self):
         """Test long simulation (20 years)."""
