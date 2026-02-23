@@ -251,7 +251,7 @@ class ExecutionParams(BaseModel):
     Attributes:
         time_start: Simulation start time (ISO format, e.g., "2000-01-01").
         time_end: Simulation end time (ISO format, e.g., "2020-12-31").
-        dt: Timestep duration (e.g., "1d", "0.05d", "6h", "30m").
+        dt: Timestep duration (e.g., "1d", "0.05d", "6h", "30min").
         batch_size: Number of timesteps per execution batch.
             - None (default): Process entire time range in one batch.
             - int > 0: Split execution into batches of this size.
@@ -288,15 +288,19 @@ class ExecutionParams(BaseModel):
     @field_validator("dt")
     @classmethod
     def validate_dt(cls, v: str) -> str:
-        """Validate timestep format (e.g. '1d', '6h', '30m', '0.05d')."""
-        import re
+        """Validate timestep format using pint (e.g. '1d', '6h', '30min', '0.05d')."""
+        import pint
 
-        if re.fullmatch(r"\d+(\.\d+)?[smhd]", v) or re.fullmatch(r"\d+(\.\d+)?", v):
-            return v
-        raise ValueError(
-            f"Invalid dt format: '{v}'. Expected '<number><unit>' "
-            f"where unit is s, m, h, or d (e.g. '1d', '6h', '30m', '0.05d')."
-        )
+        _ureg = pint.UnitRegistry()
+        try:
+            quantity = _ureg(v)
+            quantity.to("seconds")
+        except (pint.UndefinedUnitError, pint.DimensionalityError, Exception):
+            raise ValueError(
+                f"Invalid dt format: '{v}'. Expected a time duration "
+                f"(e.g. '1d', '6h', '30min', '1.5h')."
+            )
+        return v
 
     @field_validator("time_start", "time_end")
     @classmethod

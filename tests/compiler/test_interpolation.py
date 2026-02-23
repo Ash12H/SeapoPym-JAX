@@ -5,7 +5,8 @@ import pytest
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config
-from seapopym.compiler.compiler import Compiler, TimeGrid
+from seapopym.compiler.compiler import _extract_blueprint_dims, _prepare_forcings
+from seapopym.compiler.time_grid import TimeGrid
 
 
 class TestForcingInterpolation:
@@ -51,14 +52,11 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler()
-        # We access internal method _prepare_forcings to test isolation
-        # Need to mimic what compile() does before calling it
         shapes = {"T": nt, "Y": ny, "X": nx}
         dim_mapping = {}
-        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
+        blueprint_dims = _extract_blueprint_dims(blueprint)
 
-        forcings, _ = compiler._prepare_forcings(
+        forcings, _ = _prepare_forcings(
             config,
             dim_mapping,
             shapes,
@@ -70,6 +68,7 @@ class TestForcingInterpolation:
                 coords=np.array([]),
             ),
             blueprint_dims=blueprint_dims,
+            fill_nan=0.0,
         )
 
         # Bathy should match input shape (ny, nx), NOT (nt, nx)
@@ -102,10 +101,9 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler()
         shapes = {"T": target_t, "Y": 1, "X": 1}
-        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
-        forcings, _ = compiler._prepare_forcings(
+        blueprint_dims = _extract_blueprint_dims(blueprint)
+        forcings, _ = _prepare_forcings(
             config,
             {},
             shapes,
@@ -117,6 +115,7 @@ class TestForcingInterpolation:
                 coords=np.array([]),
             ),
             blueprint_dims=blueprint_dims,
+            fill_nan=0.0,
         )
 
         # Interpolation is deferred — use get_all() to materialize
@@ -151,10 +150,9 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler()
         shapes = {"T": target_t, "Y": 1, "X": 1}
-        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
-        forcings, _ = compiler._prepare_forcings(
+        blueprint_dims = _extract_blueprint_dims(blueprint)
+        forcings, _ = _prepare_forcings(
             config,
             {},
             shapes,
@@ -166,6 +164,7 @@ class TestForcingInterpolation:
                 coords=np.array([]),
             ),
             blueprint_dims=blueprint_dims,
+            fill_nan=0.0,
         )
 
         # Interpolation is deferred — use get_all() to materialize
@@ -201,10 +200,9 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler()
         shapes = {"T": target_t, "Y": 1, "X": 1}
-        blueprint_dims = compiler._extract_blueprint_dims(blueprint)
-        forcings, _ = compiler._prepare_forcings(
+        blueprint_dims = _extract_blueprint_dims(blueprint)
+        forcings, _ = _prepare_forcings(
             config,
             {},
             shapes,
@@ -216,6 +214,7 @@ class TestForcingInterpolation:
                 coords=np.array([]),
             ),
             blueprint_dims=blueprint_dims,
+            fill_nan=0.0,
         )
 
         # Interpolation is deferred — use get_all() to materialize

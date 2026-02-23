@@ -5,7 +5,6 @@ import pytest
 import xarray as xr
 
 from seapopym.compiler.preprocessing import (
-    generate_mask_from_data,
     load_data,
     preprocess_nan,
     strip_xarray,
@@ -55,23 +54,6 @@ class TestPreprocessNan:
         expected_mask = np.array([[True, False], [False, True]])
         np.testing.assert_array_equal(np.asarray(cleaned), expected_clean)
         np.testing.assert_array_equal(np.asarray(mask), expected_mask)
-
-
-class TestGenerateMaskFromData:
-    """Tests for generate_mask_from_data function."""
-
-    def test_basic_mask(self):
-        """Test basic mask generation."""
-        data = np.array([1.0, np.nan, 3.0])
-        mask = generate_mask_from_data(data)
-        np.testing.assert_array_equal(np.asarray(mask), [True, False, True])
-
-    def test_2d_mask(self):
-        """Test 2D mask generation."""
-        data = np.array([[1.0, np.nan], [3.0, 4.0]])
-        mask = generate_mask_from_data(data)
-        expected = np.array([[True, False], [True, True]])
-        np.testing.assert_array_equal(np.asarray(mask), expected)
 
 
 class TestStripXarray:

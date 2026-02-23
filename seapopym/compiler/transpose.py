@@ -117,16 +117,3 @@ def transpose_array(
     return transposed, tuple(new_order)
 
 
-def ensure_contiguous(arr: Array) -> Array:
-    """Ensure array is C-contiguous in memory.
-
-    Args:
-        arr: Input array.
-
-    Returns:
-        C-contiguous array (may be a copy).
-    """
-    arr = np.asarray(arr)
-    if arr.flags["C_CONTIGUOUS"]:
-        return arr
-    return np.ascontiguousarray(arr)

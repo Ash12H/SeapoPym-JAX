@@ -7,7 +7,7 @@ import pytest
 from seapopym.blueprint import Blueprint, clear_registry
 from seapopym.blueprint.registry import functional
 from seapopym.blueprint.exceptions import UnitError
-from seapopym.compiler.units import UnitValidator
+from seapopym.blueprint.units import UnitValidator
 
 
 @pytest.fixture(autouse=True)
@@ -223,7 +223,7 @@ class TestUnitValidator:
 
     def test_validate_units_convenience_function(self):
         """Test the convenience function validate_units()."""
-        from seapopym.compiler.units import validate_units
+        from seapopym.blueprint.units import validate_units
 
         functional(
             name="test:conv_growth",

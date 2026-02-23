@@ -15,7 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 
-from .transpose import apply_dimension_mapping, ensure_contiguous, transpose_canonical
+from .transpose import apply_dimension_mapping, transpose_canonical
 
 from seapopym.types import Array
 
@@ -69,12 +69,7 @@ def strip_xarray(
         JAX array.
     """
     # Get values (triggers compute if dask-backed)
-    values = da.values
-
-    # Ensure C-contiguous
-    values = ensure_contiguous(values)
-
-    return jnp.asarray(values)
+    return jnp.asarray(da.values)
 
 
 def preprocess_nan(
@@ -94,20 +89,6 @@ def preprocess_nan(
     data_clean = jnp.where(mask, data, fill_value)
 
     return data_clean, mask
-
-
-def generate_mask_from_data(
-    data: Array,
-) -> Array:
-    """Generate a binary mask from data (True where valid, False where NaN).
-
-    Args:
-        data: Input array.
-
-    Returns:
-        Boolean mask array.
-    """
-    return ~jnp.isnan(data)
 
 
 def prepare_array(
@@ -151,9 +132,7 @@ def prepare_array(
 
     else:
         # Raw array - no dims info
-        arr = np.asarray(data)
-        arr = ensure_contiguous(arr)
-        arr = jnp.asarray(arr)
+        arr = jnp.asarray(np.asarray(data))
 
     # Handle NaN
     if fill_nan is not None:

@@ -17,7 +17,7 @@ import numpy as np
 if TYPE_CHECKING:
     from seapopym.blueprint import Blueprint
     from seapopym.blueprint.schema import TendencySource
-    from seapopym.compiler.compiler import TimeGrid
+    from seapopym.compiler.time_grid import TimeGrid
     from seapopym.compiler.forcing import ForcingStore
 
 from seapopym.dims import CANONICAL_DIMS

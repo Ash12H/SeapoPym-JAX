@@ -6,7 +6,8 @@ import pytest
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config, ExecutionParams
-from seapopym.compiler.compiler import Compiler, TimeGrid
+from seapopym.compiler import compile_model
+from seapopym.compiler.time_grid import TimeGrid
 
 
 class TestTimeGrid:
@@ -226,8 +227,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler()
-        model = compiler.compile(blueprint, config)
+        model = compile_model(blueprint, config)
 
         assert model.time_grid is not None
         assert model.time_grid.n_timesteps == 10
@@ -254,8 +254,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler()
-        model = compiler.compile(blueprint, config)
+        model = compile_model(blueprint, config)
 
         assert "T" in model.coords
         assert len(model.coords["T"]) == 4
@@ -282,10 +281,8 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler()
-
         with pytest.raises(ValueError, match="does not cover simulation range"):
-            compiler.compile(blueprint, config)
+            compile_model(blueprint, config)
 
     def test_interpolation_triggered(self, blueprint):
         """Test that interpolation logic is triggered for mismatching shapes."""
@@ -313,8 +310,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler()
-        model = compiler.compile(blueprint, config)
+        model = compile_model(blueprint, config)
 
         # Interpolation is deferred to runtime — use get_all() to verify
         all_forcings = model.forcings.get_all()
@@ -352,8 +348,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler()
-        model = compiler.compile(blueprint, config)
+        model = compile_model(blueprint, config)
 
         # Should have 365 timesteps (1 non-leap year)
         assert model.n_timesteps == 365

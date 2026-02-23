@@ -5,7 +5,8 @@ import pytest
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
-from seapopym.compiler import CANONICAL_DIMS, CompiledModel, Compiler, compile_model
+from seapopym.compiler import CompiledModel, compile_model
+from seapopym.dims import CANONICAL_DIMS
 
 
 @pytest.fixture(autouse=True)
@@ -95,15 +96,13 @@ class TestCompiler:
 
     def test_compile_basic(self, toy_blueprint, toy_config):
         """Test basic compilation."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert isinstance(compiled, CompiledModel)
 
     def test_compile_shapes(self, toy_blueprint, toy_config):
         """Test that shapes are correctly inferred."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert compiled.shapes["T"] == 30
         assert compiled.shapes["Y"] == 10
@@ -111,8 +110,7 @@ class TestCompiler:
 
     def test_compile_state(self, toy_blueprint, toy_config):
         """Test that state is correctly prepared."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert "biomass" in compiled.state
         assert compiled.state["biomass"].shape == (10, 10)
@@ -120,8 +118,7 @@ class TestCompiler:
 
     def test_compile_forcings(self, toy_blueprint, toy_config):
         """Test that forcings are correctly prepared."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert "temperature" in compiled.forcings
         assert "mask" in compiled.forcings
@@ -129,39 +126,34 @@ class TestCompiler:
 
     def test_compile_parameters(self, toy_blueprint, toy_config):
         """Test that parameters are correctly prepared."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert "growth_rate" in compiled.parameters
         np.testing.assert_allclose(np.asarray(compiled.parameters["growth_rate"]), 0.1, rtol=1e-6)
 
     def test_compile_dt(self, toy_blueprint, toy_config):
         """Test that dt is correctly parsed."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert compiled.dt == 86400.0  # 1 day in seconds
 
     def test_compile_mask_property(self, toy_blueprint, toy_config):
         """Test that mask property works."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert compiled.mask is not None
         assert compiled.mask.shape == (10, 10)
 
     def test_compile_nodes_exist(self, toy_blueprint, toy_config):
         """Test that compute_nodes and data_nodes are included."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert len(compiled.compute_nodes) > 0
         assert len(compiled.data_nodes) > 0
 
     def test_compile_tendency_map(self, toy_blueprint, toy_config):
         """Test that tendency_map is populated."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         assert "biomass" in compiled.tendency_map
         assert len(compiled.tendency_map["biomass"]) == 1
@@ -169,8 +161,7 @@ class TestCompiler:
 
     def test_compile_jax_arrays(self, toy_blueprint, toy_config):
         """Test compilation produces JAX arrays."""
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, toy_config)
+        compiled = compile_model(toy_blueprint, toy_config)
 
         # Check arrays are JAX arrays
         assert hasattr(compiled.state["biomass"], "device")
@@ -195,8 +186,7 @@ class TestCompiler:
             }
         )
 
-        compiler = Compiler()
-        compiled = compiler.compile(toy_blueprint, config)
+        compiled = compile_model(toy_blueprint, config)
 
         assert "growth_rate" in compiled.trainable_params
 

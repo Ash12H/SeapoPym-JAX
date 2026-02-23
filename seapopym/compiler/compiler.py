@@ -1,461 +1,299 @@
-"""Main Compiler class for transforming Blueprint + Config into CompiledModel.
+"""Compiler module for transforming Blueprint + Config into CompiledModel.
 
-The Compiler orchestrates the full compilation pipeline:
-1. Infer shapes from data metadata
-2. Rename dimensions to canonical names
-3. Transpose to canonical order
-4. Strip xarray and preprocess NaN
-5. Package into CompiledModel
+The compilation pipeline:
+1. Validate blueprint and config
+2. Compute temporal grid
+3. Infer shapes from data metadata
+4. Rename dimensions to canonical names
+5. Transpose to canonical order
+6. Strip xarray and preprocess NaN
+7. Package into CompiledModel
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, ParameterValue, validate_blueprint, validate_config
-
-logger = logging.getLogger(__name__)
+from seapopym.blueprint import Blueprint, Config, validate_blueprint, validate_config
 
 from .forcing import ForcingStore
 from .inference import infer_shapes
-from .model import CANONICAL_DIMS, Array, CompiledModel
+from .model import Array, CompiledModel
 from .preprocessing import extract_coords, prepare_array
+from .time_grid import TimeGrid, _parse_dt
+
+logger = logging.getLogger(__name__)
 
 
-def _parse_dt(dt_str: str) -> float:
-    """Parse timestep string to seconds.
+def _extract_blueprint_dims(blueprint: Blueprint) -> dict[str, list[str] | None]:
+    """Extract dimension declarations from blueprint."""
+    dims_map: dict[str, list[str] | None] = {}
+    all_vars = blueprint.declarations.get_all_variables()
+
+    for var_path, var_decl in all_vars.items():
+        dims_map[var_path] = var_decl.dims
+
+    return dims_map
+
+
+def _prepare_forcings(
+    config: Config,
+    dim_mapping: dict[str, str] | None,
+    shapes: dict[str, int],
+    time_grid: TimeGrid,
+    blueprint_dims: dict[str, list[str] | None],
+    fill_nan: float,
+) -> tuple[ForcingStore, dict[str, Array]]:
+    """Prepare forcings into a ForcingStore with deferred materialization.
+
+    xr.DataArray forcings are kept lazy — only metadata is validated at
+    compile time. Materialization happens at runtime in ForcingStore.get_chunk().
+
+    Raw arrays (numpy/scalar) are materialized eagerly since they are
+    already in memory.
 
     Args:
-        dt_str: Timestep string like "1d", "6h", "30m".
+        config: Configuration with forcings data.
+        dim_mapping: Optional dimension renaming map.
+        shapes: Inferred dimension sizes (including T from time_grid).
+        time_grid: Temporal grid for validation and coord generation.
+        blueprint_dims: Dimension declarations from blueprint.
+        fill_nan: Value to replace NaN with.
 
     Returns:
-        Timestep in seconds.
+        Tuple of (ForcingStore, coords dict) with temporal coords added.
+
+    Raises:
+        ValueError: If a forcing's temporal range does not cover the
+            simulation range defined by time_grid.
     """
-    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    from .transpose import apply_dimension_mapping, transpose_canonical
 
-    # Try to parse as number + unit
-    for unit, multiplier in units.items():
-        if dt_str.endswith(unit):
-            try:
-                value = float(dt_str[:-1])
-                return value * multiplier
-            except ValueError:
-                pass
+    raw_forcings: dict[str, Any] = {}
+    dynamic_forcings: set[str] = set()
+    coords: dict[str, Array] = {}
+    coords_extracted = False
+    n_timesteps = shapes.get("T", 1)
+    interp_method = config.execution.forcing_interpolation
 
-    # Try as plain number (assume seconds)
-    try:
-        return float(dt_str)
-    except ValueError:
-        raise ValueError(
-            f"Invalid dt format: '{dt_str}'. Expected '<number><unit>' "
-            f"where unit is s, m, h, or d (e.g. '1d', '6h', '30m')."
-        )
+    for name, source in config.forcings.items():
+        # Determine dynamic/static from blueprint declarations
+        bp_dims = blueprint_dims.get(f"forcings.{name}")
+        is_dynamic = bp_dims is not None and "T" in bp_dims
 
+        if is_dynamic:
+            dynamic_forcings.add(name)
 
-@dataclass
-class TimeGrid:
-    """Temporal grid configuration computed from user parameters.
+        if isinstance(source, xr.DataArray):
+            # --- Lazy xr.DataArray path ---
+            da = apply_dimension_mapping(source, dim_mapping)
+            da = transpose_canonical(da)
 
-    This class represents the temporal discretization of a simulation,
-    computed from explicit start/end times and timestep duration.
+            # Validate temporal coverage on metadata (no materialization)
+            if is_dynamic and "T" in da.coords:
+                forcing_coords = da.coords["T"]
+                forcing_start = forcing_coords.values[0]
+                forcing_end = forcing_coords.values[-1]
 
-    Attributes:
-        start: Simulation start time (datetime64).
-        end: Simulation end time (datetime64).
-        dt_seconds: Timestep duration in seconds.
-        n_timesteps: Number of timesteps in the simulation.
-        coords: Temporal coordinates array (datetime64, shape: (n_timesteps,)).
+                if time_grid.start < forcing_start or time_grid.end > forcing_end:
+                    raise ValueError(
+                        f"Forcing '{name}' temporal range [{forcing_start}, {forcing_end}] "
+                        f"does not cover simulation range [{time_grid.start}, {time_grid.end}]. "
+                        f"Ensure forcing data spans the entire simulation period."
+                    )
 
-    Example:
-        >>> grid = TimeGrid.from_config("2000-01-01", "2000-01-10", "1d")
-        >>> grid.n_timesteps
-        9
-        >>> grid.coords[0]
-        numpy.datetime64('2000-01-01')
-    """
+                # Slice at xarray level (still lazy)
+                forcing_times = forcing_coords.values
+                start_idx = int(np.searchsorted(forcing_times, time_grid.start, side="left"))
+                end_idx = int(np.searchsorted(forcing_times, time_grid.end, side="left"))
 
-    start: np.datetime64
-    end: np.datetime64
-    dt_seconds: float
-    n_timesteps: int
-    coords: np.ndarray  # dtype=datetime64[ns]
+                if end_idx - start_idx < 2:
+                    if start_idx > 0:
+                        start_idx -= 1
+                    if end_idx < len(forcing_times):
+                        end_idx += 1
 
-    @classmethod
-    def from_config(cls, time_start: str, time_end: str, dt_str: str) -> TimeGrid:
-        """Compute temporal grid from configuration strings.
-
-        Args:
-            time_start: Start time (ISO format, e.g., "2000-01-01").
-            time_end: End time (ISO format, e.g., "2020-12-31").
-            dt_str: Timestep duration (e.g., "1d", "0.05d", "6h").
-
-        Returns:
-            TimeGrid instance with computed n_timesteps and coordinates.
-
-        Raises:
-            ValueError: If time_end <= time_start, or if time range is not
-                evenly divisible by dt (remainder > 1 second).
-
-        Example:
-            >>> grid = TimeGrid.from_config("2000-01-01", "2000-01-10", "1d")
-            >>> grid.n_timesteps
-            9
-        """
-        # 1. Parse dates
-        start_pd = pd.to_datetime(time_start)
-        end_pd = pd.to_datetime(time_end)
-
-        if end_pd <= start_pd:
-            raise ValueError(f"time_end ({time_end}) must be after time_start ({time_start})")
-
-        start_dt64 = start_pd.to_datetime64()
-        end_dt64 = end_pd.to_datetime64()
-
-        # 2. Parse timestep
-        dt_seconds = _parse_dt(dt_str)
-        dt_td = pd.Timedelta(seconds=dt_seconds)
-
-        # 3. Compute number of timesteps
-        duration = end_pd - start_pd
-        n_timesteps_float = duration / dt_td
-
-        # Round to nearest integer
-        n_timesteps = int(np.round(n_timesteps_float))
-
-        # 4. Validate: remainder should be negligible (< 1 second)
-        expected_duration = n_timesteps * dt_td
-        remainder = abs(duration - expected_duration)
-
-        if remainder > pd.Timedelta(seconds=1):
-            raise ValueError(
-                f"Time range [{time_start}, {time_end}] is not evenly divisible by dt={dt_str}. "
-                f"Duration: {duration}, n_timesteps*dt: {expected_duration}, remainder: {remainder}. "
-                f"Adjust time_end or dt to ensure exact alignment."
-            )
-
-        # 5. Generate temporal coordinates
-        # Use freq instead of periods to avoid inclusive end (want [start, end))
-        # Generate exactly n_timesteps starting from start with spacing dt
-        coords = pd.date_range(start=start_pd, periods=n_timesteps, freq=dt_td).to_numpy()
-
-        return cls(
-            start=start_dt64,
-            end=end_dt64,
-            dt_seconds=dt_seconds,
-            n_timesteps=n_timesteps,
-            coords=coords,
-        )
-
-
-class Compiler:
-    """Compiler for transforming Blueprint + Config into executable structures.
-
-    The Compiler reads data from files or in-memory arrays, applies dimension
-    mappings, transposes to canonical order, and packages everything into
-    a CompiledModel ready for JAX execution.
-
-    Attributes:
-        canonical_order: Dimension order for transposition.
-        fill_nan: Value to replace NaN with.
-    """
-
-    def __init__(
-        self,
-        canonical_order: tuple[str, ...] = CANONICAL_DIMS,
-        fill_nan: float = 0.0,
-    ) -> None:
-        """Initialize the Compiler.
-
-        Args:
-            canonical_order: Canonical dimension order.
-            fill_nan: Value to replace NaN values.
-        """
-        self.canonical_order = canonical_order
-        self.fill_nan = fill_nan
-
-    def compile(
-        self,
-        blueprint: Blueprint,
-        config: Config,
-    ) -> CompiledModel:
-        """Compile a Blueprint + Config into a CompiledModel.
-
-        Args:
-            blueprint: Model definition.
-            config: Experiment configuration with data.
-
-        Returns:
-            CompiledModel ready for execution.
-
-        Raises:
-            BlueprintValidationError: If blueprint validation fails.
-            ConfigValidationError: If config validation fails.
-            ShapeInferenceError: If shapes cannot be inferred.
-            GridAlignmentError: If dimensions are inconsistent.
-        """
-        # Step 1: Validate (raises aggregated errors if invalid)
-        bp_result = validate_blueprint(blueprint)
-        validate_config(config, blueprint)
-
-        compute_nodes = bp_result.compute_nodes
-        data_nodes = bp_result.data_nodes
-        tendency_map = dict(blueprint.tendencies)
-
-        # Step 2: Compute temporal grid from execution params
-        time_grid = TimeGrid.from_config(
-            config.execution.time_start,
-            config.execution.time_end,
-            config.execution.dt,
-        )
-
-        # Step 3: Build dims mapping from blueprint
-        blueprint_dims = self._extract_blueprint_dims(blueprint)
-
-        # Step 4: Infer shapes from data (with time_grid priority for T dimension)
-        shapes = infer_shapes(config, blueprint_dims, time_grid=time_grid)
-
-        # Step 5: Get dimension mapping from config and apply to shapes
-        dim_mapping = config.dimension_mapping
-        if dim_mapping:
-            shapes = {dim_mapping.get(k, k): v for k, v in shapes.items()}
-
-        # Step 6: Prepare forcings (with temporal validation)
-        forcings, coords = self._prepare_forcings(config, dim_mapping, shapes, time_grid, blueprint_dims)
-
-        # Step 6: Prepare initial state
-        state = self._prepare_state(config, blueprint, dim_mapping)
-
-        # Step 7: Prepare parameters
-        parameters, trainable = self._prepare_parameters(config, blueprint)
-
-        # Step 8: Parse dt
-        dt = _parse_dt(config.execution.dt)
-
-        # Step 9: Build CompiledModel
-        return CompiledModel(
-            blueprint=blueprint,
-            compute_nodes=compute_nodes,
-            data_nodes=data_nodes,
-            tendency_map=tendency_map,
-            state=state,
-            forcings=forcings,
-            parameters=parameters,
-            shapes=shapes,
-            coords=coords,
-            dt=dt,
-            trainable_params=trainable,
-            time_grid=time_grid,
-            batch_size=config.execution.batch_size,
-        )
-
-    def _extract_blueprint_dims(self, blueprint: Blueprint) -> dict[str, list[str] | None]:
-        """Extract dimension declarations from blueprint."""
-        dims_map: dict[str, list[str] | None] = {}
-        all_vars = blueprint.declarations.get_all_variables()
-
-        for var_path, var_decl in all_vars.items():
-            dims_map[var_path] = var_decl.dims
-
-        return dims_map
-
-    def _prepare_forcings(
-        self,
-        config: Config,
-        dim_mapping: dict[str, str] | None,
-        shapes: dict[str, int],
-        time_grid: TimeGrid,
-        blueprint_dims: dict[str, list[str] | None],
-    ) -> tuple[ForcingStore, dict[str, Array]]:
-        """Prepare forcings into a ForcingStore with deferred materialization.
-
-        xr.DataArray forcings are kept lazy — only metadata is validated at
-        compile time. Materialization happens at runtime in ForcingStore.get_chunk().
-
-        Raw arrays (numpy/scalar) are materialized eagerly since they are
-        already in memory.
-
-        Args:
-            config: Configuration with forcings data.
-            dim_mapping: Optional dimension renaming map.
-            shapes: Inferred dimension sizes (including T from time_grid).
-            time_grid: Temporal grid for validation and coord generation.
-            blueprint_dims: Dimension declarations from blueprint (e.g. {"forcings.temp": ["T","Y","X"]}).
-
-        Returns:
-            Tuple of (ForcingStore, coords dict) with temporal coords added.
-
-        Raises:
-            ValueError: If a forcing's temporal range does not cover the
-                simulation range defined by time_grid.
-        """
-        from .transpose import apply_dimension_mapping, transpose_canonical
-
-        raw_forcings: dict[str, Any] = {}
-        dynamic_forcings: set[str] = set()
-        coords: dict[str, Array] = {}
-        coords_extracted = False
-        n_timesteps = shapes.get("T", 1)
-        interp_method = config.execution.forcing_interpolation
-
-        for name, source in config.forcings.items():
-            # Determine dynamic/static from blueprint declarations
-            bp_dims = blueprint_dims.get(f"forcings.{name}")
-            is_dynamic = bp_dims is not None and "T" in bp_dims
+                da = da.isel(T=slice(start_idx, end_idx))
 
             if is_dynamic:
-                dynamic_forcings.add(name)
-
-            if isinstance(source, xr.DataArray):
-                # --- Lazy xr.DataArray path ---
-                da = apply_dimension_mapping(source, dim_mapping)
-                da = transpose_canonical(da)
-
-                # Validate temporal coverage on metadata (no materialization)
-                if is_dynamic and "T" in da.coords:
-                    forcing_coords = da.coords["T"]
-                    forcing_start = forcing_coords.values[0]
-                    forcing_end = forcing_coords.values[-1]
-
-                    if time_grid.start < forcing_start or time_grid.end > forcing_end:
-                        raise ValueError(
-                            f"Forcing '{name}' temporal range [{forcing_start}, {forcing_end}] "
-                            f"does not cover simulation range [{time_grid.start}, {time_grid.end}]. "
-                            f"Ensure forcing data spans the entire simulation period."
-                        )
-
-                    # Slice at xarray level (still lazy)
-                    forcing_times = forcing_coords.values
-                    start_idx = int(np.searchsorted(forcing_times, time_grid.start, side="left"))
-                    end_idx = int(np.searchsorted(forcing_times, time_grid.end, side="left"))
-
-                    if end_idx - start_idx < 2:
-                        if start_idx > 0:
-                            start_idx -= 1
-                        if end_idx < len(forcing_times):
-                            end_idx += 1
-
-                    da = da.isel(T=slice(start_idx, end_idx))
-
-                if is_dynamic:
-                    # Keep lazy — ForcingStore will materialize at runtime
-                    raw_forcings[name] = da
-                else:
-                    # Static: small, materialize now
-                    arr = da.values
-                    arr = np.asarray(arr)
-                    nan_mask = np.isnan(arr) if np.issubdtype(arr.dtype, np.floating) else None
-                    if nan_mask is not None and nan_mask.any():
-                        arr = np.where(nan_mask, self.fill_nan, arr)
-                    arr = jnp.asarray(arr)
-                    raw_forcings[name] = arr
-
-                # Extract coords from first xr.DataArray source
-                if not coords_extracted:
-                    try:
-                        coords = extract_coords(da, dim_mapping)
-                        coords_extracted = True
-                    except (KeyError, ValueError, TypeError) as e:
-                        logger.debug("Failed to extract coords from DataArray '%s': %s", name, e)
-
+                # Keep lazy — ForcingStore will materialize at runtime
+                raw_forcings[name] = da
             else:
-                # --- Raw array / scalar / file path: eager materialization ---
-                arr, _dims, _mask = prepare_array(
-                    source,
-                    dimension_mapping=dim_mapping,
-                    fill_nan=self.fill_nan,
-                )
+                # Static: small, materialize now
+                arr = da.values
+                arr = np.asarray(arr)
+                nan_mask = np.isnan(arr) if np.issubdtype(arr.dtype, np.floating) else None
+                if nan_mask is not None and nan_mask.any():
+                    arr = np.where(nan_mask, fill_nan, arr)
+                arr = jnp.asarray(arr)
                 raw_forcings[name] = arr
 
-                # Extract coords from first file source
-                if not coords_extracted and isinstance(source, str):
-                    try:
-                        coords = extract_coords(source, dim_mapping)
-                        coords_extracted = True
-                    except (KeyError, ValueError, TypeError) as e:
-                        logger.debug("Failed to extract coords from file '%s': %s", source, e)
+            # Extract coords from first xr.DataArray source
+            if not coords_extracted:
+                try:
+                    coords = extract_coords(da, dim_mapping)
+                    coords_extracted = True
+                except (KeyError, ValueError, TypeError) as e:
+                    logger.debug("Failed to extract coords from DataArray '%s': %s", name, e)
 
-        # Generate mask if not provided
-        if "mask" not in raw_forcings:
-            mask_shape = tuple(shapes.get(d, 1) for d in ["Y", "X"] if d in shapes)
-            if mask_shape:
-                raw_forcings["mask"] = jnp.ones(mask_shape, dtype=jnp.bool_)
+        else:
+            # --- Raw array / scalar / file path: eager materialization ---
+            arr, _dims, _mask = prepare_array(
+                source,
+                dimension_mapping=dim_mapping,
+                fill_nan=fill_nan,
+            )
+            raw_forcings[name] = arr
 
-        # Add temporal coordinates from time_grid
-        coords["T"] = time_grid.coords
+            # Extract coords from first file source
+            if not coords_extracted and isinstance(source, str):
+                try:
+                    coords = extract_coords(source, dim_mapping)
+                    coords_extracted = True
+                except (KeyError, ValueError, TypeError) as e:
+                    logger.debug("Failed to extract coords from file '%s': %s", source, e)
 
-        forcing_store = ForcingStore(
-            _forcings=raw_forcings,
-            n_timesteps=n_timesteps,
-            interp_method=interp_method,
-            fill_nan=self.fill_nan,
-            _dynamic_forcings=dynamic_forcings,
-        )
+    # Generate mask if not provided
+    if "mask" not in raw_forcings:
+        mask_shape = tuple(shapes.get(d, 1) for d in ["Y", "X"] if d in shapes)
+        if mask_shape:
+            raw_forcings["mask"] = jnp.ones(mask_shape, dtype=jnp.bool_)
 
-        return forcing_store, coords
+    # Add temporal coordinates from time_grid
+    coords["T"] = time_grid.coords
 
-    def _prepare_state(
-        self,
-        config: Config,
-        _blueprint: Blueprint,
-        dim_mapping: dict[str, str] | None,
-    ) -> dict[str, Array]:
-        """Prepare initial state arrays."""
-        state: dict[str, Array] = {}
+    forcing_store = ForcingStore(
+        _forcings=raw_forcings,
+        n_timesteps=n_timesteps,
+        interp_method=interp_method,
+        fill_nan=fill_nan,
+        _dynamic_forcings=dynamic_forcings,
+    )
 
-        def process_state(data: dict[str, Any], prefix: str = "") -> None:
-            for name, value in data.items():
-                full_name = f"{prefix}{name}" if prefix else name
+    return forcing_store, coords
 
-                if isinstance(value, dict) and not hasattr(value, "shape"):
-                    # Nested group
-                    process_state(value, f"{full_name}.")
-                else:
-                    arr, _dims, _mask = prepare_array(
-                        value,
-                        dimension_mapping=dim_mapping,
-                        fill_nan=self.fill_nan,
-                    )
-                    state[full_name] = arr
 
-        process_state(config.initial_state)
-        return state
+def _prepare_state(
+    config: Config,
+    dim_mapping: dict[str, str] | None,
+    fill_nan: float,
+) -> dict[str, Array]:
+    """Prepare initial state arrays."""
+    state: dict[str, Array] = {}
 
-    def _prepare_parameters(
-        self,
-        config: Config,
-        _blueprint: Blueprint,
-    ) -> tuple[dict[str, Array], list[str]]:
-        """Prepare parameter arrays and identify trainable params."""
-        parameters: dict[str, Array] = {}
-        trainable: list[str] = []
+    def process_state(data: dict[str, Any], prefix: str = "") -> None:
+        for name, value in data.items():
+            full_name = f"{prefix}{name}" if prefix else name
 
-        for name, pv in config.parameters.items():
-            if pv.trainable:
-                trainable.append(name)
+            if isinstance(value, dict) and not hasattr(value, "shape"):
+                # Nested group
+                process_state(value, f"{full_name}.")
+            else:
+                arr, _dims, _mask = prepare_array(
+                    value,
+                    dimension_mapping=dim_mapping,
+                    fill_nan=fill_nan,
+                )
+                state[full_name] = arr
 
-            parameters[name] = jnp.asarray(pv.value)
-        return parameters, trainable
+    process_state(config.initial_state)
+    return state
+
+
+def _prepare_parameters(
+    config: Config,
+) -> tuple[dict[str, Array], list[str]]:
+    """Prepare parameter arrays and identify trainable params."""
+    parameters: dict[str, Array] = {}
+    trainable: list[str] = []
+
+    for name, pv in config.parameters.items():
+        if pv.trainable:
+            trainable.append(name)
+
+        parameters[name] = jnp.asarray(pv.value)
+    return parameters, trainable
 
 
 def compile_model(
     blueprint: Blueprint,
     config: Config,
+    fill_nan: float = 0.0,
 ) -> CompiledModel:
-    """Convenience function to compile a model.
+    """Compile a Blueprint + Config into a CompiledModel.
+
+    This is the main entry point for the compiler module.
 
     Args:
         blueprint: Model definition.
         config: Experiment configuration.
+        fill_nan: Value to replace NaN values with.
 
     Returns:
         CompiledModel ready for execution.
+
+    Raises:
+        BlueprintValidationError: If blueprint validation fails.
+        ConfigValidationError: If config validation fails.
+        ShapeInferenceError: If shapes cannot be inferred.
+        GridAlignmentError: If dimensions are inconsistent.
     """
-    compiler = Compiler()
-    return compiler.compile(blueprint, config)
+    # Step 1: Validate (raises aggregated errors if invalid)
+    bp_result = validate_blueprint(blueprint)
+    validate_config(config, blueprint)
+
+    compute_nodes = bp_result.compute_nodes
+    data_nodes = bp_result.data_nodes
+    tendency_map = dict(blueprint.tendencies)
+
+    # Step 2: Compute temporal grid from execution params
+    time_grid = TimeGrid.from_config(
+        config.execution.time_start,
+        config.execution.time_end,
+        config.execution.dt,
+    )
+
+    # Step 3: Build dims mapping from blueprint
+    blueprint_dims = _extract_blueprint_dims(blueprint)
+
+    # Step 4: Infer shapes from data (with time_grid priority for T dimension)
+    shapes = infer_shapes(config, blueprint_dims, time_grid=time_grid)
+
+    # Step 5: Get dimension mapping from config and apply to shapes
+    dim_mapping = config.dimension_mapping
+    if dim_mapping:
+        shapes = {dim_mapping.get(k, k): v for k, v in shapes.items()}
+
+    # Step 6: Prepare forcings (with temporal validation)
+    forcings, coords = _prepare_forcings(config, dim_mapping, shapes, time_grid, blueprint_dims, fill_nan)
+
+    # Step 7: Prepare initial state
+    state = _prepare_state(config, dim_mapping, fill_nan)
+
+    # Step 8: Prepare parameters
+    parameters, trainable = _prepare_parameters(config)
+
+    # Step 9: Parse dt
+    dt = _parse_dt(config.execution.dt)
+
+    # Step 10: Build CompiledModel
+    return CompiledModel(
+        blueprint=blueprint,
+        compute_nodes=compute_nodes,
+        data_nodes=data_nodes,
+        tendency_map=tendency_map,
+        state=state,
+        forcings=forcings,
+        parameters=parameters,
+        shapes=shapes,
+        coords=coords,
+        dt=dt,
+        trainable_params=trainable,
+        time_grid=time_grid,
+        batch_size=config.execution.batch_size,
+    )
