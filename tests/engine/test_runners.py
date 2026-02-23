@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+pytest.importorskip("jax")
+
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import compile_model
 from seapopym.engine.exceptions import ChunkingError
@@ -96,11 +98,11 @@ class TestStreamingRunner:
     def test_init(self, simple_blueprint, simple_config):
         """Test runner initialization."""
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        model = compile_model(simple_blueprint, simple_config)
         runner = StreamingRunner(model, chunk_size=10)
 
         assert runner.chunk_size == 10
@@ -111,23 +113,23 @@ class TestStreamingRunner:
         # Manually set batch_size in config before compiling
         simple_config.execution.batch_size = 15
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        model = compile_model(simple_blueprint, simple_config)
         runner = StreamingRunner(model)
 
         assert runner.chunk_size == 15
 
-    def test_run_numpy(self, simple_blueprint, simple_config, tmp_path):
-        """Test running simulation with numpy backend."""
+    def test_run(self, simple_blueprint, simple_config, tmp_path):
+        """Test running simulation."""
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        model = compile_model(simple_blueprint, simple_config)
         runner = StreamingRunner(model, chunk_size=10)
 
         output_path = tmp_path / "output"
@@ -137,32 +139,16 @@ class TestStreamingRunner:
         assert "biomass" in final_state
         assert final_state["biomass"].shape == (5, 5)
         # Biomass should have grown
-        assert np.all(final_state["biomass"] >= 100.0)
-
-    def test_run_jax(self, simple_blueprint, simple_config, tmp_path):
-        """Test running simulation with JAX backend."""
-        pytest.importorskip("jax")
-
-        @functional(name="test:growth", backend="jax")
-        def test_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        model = compile_model(simple_blueprint, simple_config, backend="jax")
-        runner = StreamingRunner(model, chunk_size=10)
-
-        output_path = tmp_path / "output"
-        final_state, _ = runner.run(str(output_path))
-
-        assert "biomass" in final_state
+        assert np.all(np.asarray(final_state["biomass"]) >= 100.0)
 
     def test_chunking_exact_division(self, simple_blueprint, simple_config, tmp_path):
         """Test chunking when timesteps divide evenly."""
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        model = compile_model(simple_blueprint, simple_config)
         runner = StreamingRunner(model, chunk_size=10)  # 30 / 10 = 3 chunks
 
         output_path = tmp_path / "output"
@@ -192,11 +178,11 @@ class TestStreamingRunner:
             }
         )
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, config, backend="numpy")
+        model = compile_model(simple_blueprint, config)
         runner = StreamingRunner(model, chunk_size=10)  # 25 / 10 = 2 full + 5 remainder
 
         output_path = tmp_path / "output"
@@ -210,11 +196,11 @@ class TestStreamingRunner:
     def test_invalid_chunk_size(self, simple_blueprint, simple_config, tmp_path):
         """Test error for invalid chunk size."""
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        model = compile_model(simple_blueprint, simple_config)
         runner = StreamingRunner(model, chunk_size=-1)
 
         with pytest.raises(ChunkingError):
@@ -223,11 +209,11 @@ class TestStreamingRunner:
     def test_run_in_memory(self, simple_blueprint, simple_config):
         """Test running simulation with in-memory output (no path)."""
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        model = compile_model(simple_blueprint, simple_config)
         runner = StreamingRunner(model, chunk_size=10)
 
         final_state, outputs = runner.run(output_path=None)
@@ -243,6 +229,4 @@ class TestStreamingRunner:
 
         # Check integrity
         # Last output step should match final state (since output is state var 'biomass')
-        np.testing.assert_array_equal(outputs["biomass"][-1], final_state["biomass"])
-
-
+        np.testing.assert_array_equal(np.asarray(outputs["biomass"][-1]), np.asarray(final_state["biomass"]))

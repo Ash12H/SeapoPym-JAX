@@ -342,7 +342,7 @@ for i, T in enumerate(TEMPERATURES):
     )
 
     # Compile and run
-    model = compile_model(blueprint, config, backend="jax")
+    model = compile_model(blueprint, config)
     runner = StreamingRunner(model)
 
     if i % 10 == 0:

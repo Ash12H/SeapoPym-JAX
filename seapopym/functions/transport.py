@@ -313,7 +313,6 @@ def _compute_diffusion_fluxes(
 
 @functional(
     name="phys:transport_tendency",
-    backend="jax",
     core_dims={
         "state": ["Y", "X"],
         "u": ["Y", "X"],

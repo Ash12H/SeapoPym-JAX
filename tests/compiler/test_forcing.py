@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
+pytest.importorskip("jax")
+
 from seapopym.compiler.forcing import (
     ForcingStore,
     _interpolate_full,
@@ -81,9 +83,9 @@ class TestInterpolateChunk:
         source_idx = np.arange(5, dtype=np.float64)
         target_idx = np.linspace(0, 4, 9)
 
-        result = interpolate_chunk(source, source_idx, target_idx, "linear", backend="numpy")
+        result = interpolate_chunk(source, source_idx, target_idx, "linear")
         expected = np.linspace(0, 40, 9).reshape(-1, 1)
-        np.testing.assert_allclose(result, expected, atol=1e-10)
+        np.testing.assert_allclose(np.asarray(result), expected, atol=1e-5)
 
     def test_linear_2d(self):
         """Linear interpolation preserves spatial dims."""
@@ -91,11 +93,11 @@ class TestInterpolateChunk:
         source_idx = np.array([0.0, 1.0])
         target_idx = np.array([0.0, 0.5, 1.0])
 
-        result = interpolate_chunk(source, source_idx, target_idx, "linear", backend="numpy")
+        result = interpolate_chunk(source, source_idx, target_idx, "linear")
         assert result.shape == (3, 3)
-        np.testing.assert_allclose(result[0], source[0])  # t=0
-        np.testing.assert_allclose(result[2], source[1])  # t=1
-        np.testing.assert_allclose(result[1], (source[0] + source[1]) / 2)  # t=0.5
+        np.testing.assert_allclose(np.asarray(result[0]), source[0], atol=1e-5)
+        np.testing.assert_allclose(np.asarray(result[2]), source[1], atol=1e-5)
+        np.testing.assert_allclose(np.asarray(result[1]), (source[0] + source[1]) / 2, atol=1e-5)
 
     def test_nearest(self):
         """Nearest neighbor interpolation."""
@@ -103,9 +105,9 @@ class TestInterpolateChunk:
         source_idx = np.array([0.0, 1.0])
         target_idx = np.linspace(0, 1, 4)  # [0, 0.33, 0.66, 1]
 
-        result = interpolate_chunk(source, source_idx, target_idx, "nearest", backend="numpy")
+        result = interpolate_chunk(source, source_idx, target_idx, "nearest")
         expected = np.array([10.0, 10.0, 20.0, 20.0]).reshape(-1, 1)
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_array_equal(np.asarray(result), expected)
 
     def test_ffill(self):
         """Forward fill interpolation."""
@@ -113,39 +115,30 @@ class TestInterpolateChunk:
         source_idx = np.array([0.0, 1.0])
         target_idx = np.linspace(0, 1, 4)  # [0, 0.33, 0.66, 1]
 
-        result = interpolate_chunk(source, source_idx, target_idx, "ffill", backend="numpy")
+        result = interpolate_chunk(source, source_idx, target_idx, "ffill")
         expected = np.array([10.0, 10.0, 10.0, 20.0]).reshape(-1, 1)
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_array_equal(np.asarray(result), expected)
 
     def test_interpolate_full_linear(self):
         """Full interpolation from source_len to target_len."""
         source = np.linspace(0, 40, 5).reshape(-1, 1, 1)
-        result = _interpolate_full(source, 5, 9, "linear", backend="numpy")
+        result = _interpolate_full(source, 5, 9, "linear")
         expected = np.linspace(0, 40, 9).reshape(-1, 1, 1)
-        np.testing.assert_allclose(result, expected, atol=1e-10)
+        np.testing.assert_allclose(np.asarray(result), expected, atol=1e-5)
 
     def test_interpolate_full_nearest(self):
         """Full interpolation with nearest method."""
         source = np.array([10.0, 20.0]).reshape(-1, 1, 1)
-        result = _interpolate_full(source, 2, 4, "nearest", backend="numpy")
+        result = _interpolate_full(source, 2, 4, "nearest")
         expected = np.array([10.0, 10.0, 20.0, 20.0]).reshape(-1, 1, 1)
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_array_equal(np.asarray(result), expected)
 
     def test_interpolate_full_ffill(self):
         """Full interpolation with ffill method."""
         source = np.array([10.0, 20.0]).reshape(-1, 1, 1)
-        result = _interpolate_full(source, 2, 4, "ffill", backend="numpy")
+        result = _interpolate_full(source, 2, 4, "ffill")
         expected = np.array([10.0, 10.0, 10.0, 20.0]).reshape(-1, 1, 1)
-        np.testing.assert_array_equal(result, expected)
-
-    def test_linear_jax_backend(self):
-        """Linear interpolation with JAX backend."""
-        jnp = pytest.importorskip("jax.numpy")
-
-        source = np.linspace(0, 40, 5).reshape(-1, 1, 1)
-        result = _interpolate_full(source, 5, 9, "linear", backend="jax")
-        expected = np.linspace(0, 40, 9).reshape(-1, 1, 1)
-        np.testing.assert_allclose(np.asarray(result), expected, atol=1e-5)
+        np.testing.assert_array_equal(np.asarray(result), expected)
 
 
 class TestForcingStore:
@@ -157,12 +150,11 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"mask": mask},
             n_timesteps=10,
-            backend="numpy",
         )
 
         chunk = store.get_chunk(0, 3)
         assert chunk["mask"].shape == (3, 5, 5)
-        np.testing.assert_array_equal(chunk["mask"][0], mask)
+        np.testing.assert_array_equal(np.asarray(chunk["mask"][0]), mask)
 
     def test_get_chunk_dynamic(self):
         """Dynamic forcing is sliced to chunk range."""
@@ -170,13 +162,12 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"temperature": temp},
             n_timesteps=10,
-            backend="numpy",
             _dynamic_forcings={"temperature"},
         )
 
         chunk = store.get_chunk(2, 5)
         assert chunk["temperature"].shape == (3, 5, 5)
-        np.testing.assert_array_equal(chunk["temperature"], temp[2:5])
+        np.testing.assert_allclose(np.asarray(chunk["temperature"]), temp[2:5], rtol=1e-6)
 
     def test_get_all(self):
         """get_all materializes full time range."""
@@ -185,7 +176,6 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"temperature": temp, "mask": mask},
             n_timesteps=10,
-            backend="numpy",
             _dynamic_forcings={"temperature"},
         )
 
@@ -199,18 +189,16 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"mask": mask},
             n_timesteps=10,
-            backend="numpy",
         )
 
         result = store.get("mask")
-        np.testing.assert_array_equal(result, mask)
+        np.testing.assert_array_equal(np.asarray(result), mask)
 
     def test_get_default(self):
         """get() returns default when key not found."""
         store = ForcingStore(
             _forcings={},
             n_timesteps=10,
-            backend="numpy",
         )
         assert store.get("missing", 1.0) == 1.0
 
@@ -219,7 +207,6 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"mask": np.ones((5, 5))},
             n_timesteps=10,
-            backend="numpy",
         )
         assert "mask" in store
         assert "temperature" not in store
@@ -230,9 +217,8 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"mask": mask},
             n_timesteps=10,
-            backend="numpy",
         )
-        np.testing.assert_array_equal(store["mask"], mask)
+        np.testing.assert_array_equal(np.asarray(store["mask"]), mask)
 
     def test_lazy_xarray_static(self):
         """Lazy xr.DataArray without T dim returns values directly."""
@@ -240,7 +226,6 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"mask": da},
             n_timesteps=10,
-            backend="numpy",
         )
 
         chunk = store.get_chunk(0, 3)
@@ -253,13 +238,12 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"temp": da},
             n_timesteps=10,
-            backend="numpy",
             _dynamic_forcings={"temp"},
         )
 
         chunk = store.get_chunk(2, 5)
         assert chunk["temp"].shape == (3, 5, 5)
-        np.testing.assert_array_equal(chunk["temp"], data[2:5])
+        np.testing.assert_array_equal(np.asarray(chunk["temp"]), data[2:5])
 
     def test_lazy_xarray_interpolated(self):
         """Lazy xr.DataArray needing interpolation."""
@@ -270,24 +254,20 @@ class TestForcingStore:
             _forcings={"temp": da},
             n_timesteps=10,
             interp_method="linear",
-            backend="numpy",
             _dynamic_forcings={"temp"},
         )
 
         all_data = store.get_chunk(0, 10)
-        result = all_data["temp"].flatten()
+        result = np.asarray(all_data["temp"]).flatten()
         expected = np.linspace(0, 40, 10)
-        np.testing.assert_allclose(result, expected, atol=1e-10)
+        np.testing.assert_allclose(result, expected, atol=1e-5)
 
-    def test_jax_backend(self):
-        """ForcingStore works with JAX backend."""
-        jnp = pytest.importorskip("jax.numpy")
-
+    def test_jax_arrays(self):
+        """ForcingStore produces JAX arrays."""
         temp = np.random.rand(10, 5, 5)
         store = ForcingStore(
             _forcings={"temperature": temp},
             n_timesteps=10,
-            backend="jax",
             _dynamic_forcings={"temperature"},
         )
 
@@ -301,7 +281,6 @@ class TestForcingStore:
         store = ForcingStore(
             _forcings={"temp": temp},
             n_timesteps=20,
-            backend="numpy",
             _dynamic_forcings={"temp"},
         )
 
@@ -310,7 +289,7 @@ class TestForcingStore:
         for start in range(0, 20, 7):
             end = min(start + 7, 20)
             chunk = store.get_chunk(start, end)
-            chunks.append(chunk["temp"])
+            chunks.append(np.asarray(chunk["temp"]))
 
         reconstructed = np.concatenate(chunks, axis=0)
         np.testing.assert_array_equal(reconstructed, temp)
@@ -322,12 +301,10 @@ class TestForcingStore:
             _forcings={"temp": da},
             n_timesteps=10,
             _dynamic_forcings={"temp"},
-            backend="numpy",
         )
         # The stored value is still an xr.DataArray, not materialized
         assert isinstance(store._forcings["temp"], xr.DataArray)
 
         # get_chunk materializes just the chunk
         chunk = store.get_chunk(0, 3)
-        assert isinstance(chunk["temp"], np.ndarray)
         assert chunk["temp"].shape == (3, 5, 5)

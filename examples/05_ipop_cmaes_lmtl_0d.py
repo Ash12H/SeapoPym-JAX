@@ -176,7 +176,7 @@ config = Config.from_dict(
 # =============================================================================
 
 print("Compiling model...")
-_model = compile_model(blueprint, config, backend="jax")
+_model = compile_model(blueprint, config)
 _step_fn = build_step_fn(_model)
 _n_timesteps = _model.n_timesteps
 _initial_state = _model.state

@@ -35,7 +35,6 @@ _K_SIGMOID = float(jnp.log(99.0)) / (_RECRUITMENT_TRANSITION_DAYS * 86400.0)
 
 @functional(
     name="lmtl:day_length",
-    backend="jax",
     units={
         "latitude": "degrees",
         "day_of_year": "dimensionless",
@@ -80,7 +79,6 @@ def day_length(latitude: jnp.ndarray, day_of_year: jnp.ndarray) -> jnp.ndarray:
 
 @functional(
     name="lmtl:layer_weighted_mean",
-    backend="jax",
     core_dims={"forcing": ["Z"]},
     units={
         "day_length": "dimensionless",
@@ -125,7 +123,6 @@ def layer_weighted_mean(
 
 @functional(
     name="lmtl:threshold_temperature",
-    backend="jax",
     units={"temp": "degC", "min_temp": "degC", "return": "degC"},
 )
 def threshold_temperature(temp: jnp.ndarray, min_temp: float) -> jnp.ndarray:
@@ -143,7 +140,6 @@ def threshold_temperature(temp: jnp.ndarray, min_temp: float) -> jnp.ndarray:
 
 @functional(
     name="lmtl:gillooly_temperature",
-    backend="jax",
     units={"temp": "degC", "return": "degC"},
 )
 def gillooly_temperature(temp: jnp.ndarray) -> jnp.ndarray:
@@ -174,7 +170,6 @@ def gillooly_temperature(temp: jnp.ndarray) -> jnp.ndarray:
 
 @functional(
     name="lmtl:recruitment_age",
-    backend="jax",
     units={
         "temp": "degC",
         "tau_r_0": "s",
@@ -212,7 +207,6 @@ def recruitment_age(
 
 @functional(
     name="lmtl:mortality",
-    backend="jax",
     units={
         "biomass": "g/m^2",
         "temp": "degC",
@@ -255,7 +249,6 @@ def mortality_tendency(
 
 @functional(
     name="lmtl:npp_injection",
-    backend="jax",
     core_dims={"production": ["C"]},
     out_dims=["C"],
     units={
@@ -294,7 +287,6 @@ def npp_injection(
 
 @functional(
     name="lmtl:aging_flow",
-    backend="jax",
     core_dims={"production": ["C"], "cohort_ages": ["C"]},
     out_dims=["C"],
     units={
@@ -364,7 +356,6 @@ def aging_flow(
 
 @functional(
     name="lmtl:recruitment_flow",
-    backend="jax",
     core_dims={"production": ["C"], "cohort_ages": ["C"]},
     out_dims=["C"],
     outputs=["prod_loss", "biomass_gain"],

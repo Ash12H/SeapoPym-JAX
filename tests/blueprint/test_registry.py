@@ -25,12 +25,12 @@ class TestFunctionalDecorator:
     def test_register_simple_function(self):
         """Test registering a simple function."""
 
-        @functional(name="test:simple", backend="jax")
+        @functional(name="test:simple")
         def simple_func(x):
             return x * 2
 
         # Function should be in registry
-        assert "test:simple" in list_functions("jax")
+        assert "test:simple" in list_functions()
 
         # Should be callable
         assert simple_func(5) == 10
@@ -40,7 +40,6 @@ class TestFunctionalDecorator:
 
         @functional(
             name="test:growth",
-            backend="jax",
             core_dims={"biomass": ["C"]},
             out_dims=["C"],
             units={"biomass": "g", "rate": "1/d", "return": "g/d"},
@@ -48,10 +47,9 @@ class TestFunctionalDecorator:
         def growth(biomass, rate):
             return biomass * rate
 
-        metadata = get_function("test:growth", "jax")
+        metadata = get_function("test:growth")
 
         assert metadata.name == "test:growth"
-        assert metadata.backend == "jax"
         assert metadata.core_dims == {"biomass": ["C"]}
         assert metadata.out_dims == ["C"]
         assert metadata.units == {"biomass": "g", "rate": "1/d", "return": "g/d"}
@@ -61,14 +59,13 @@ class TestFunctionalDecorator:
 
         @functional(
             name="test:predation",
-            backend="jax",
             outputs=["prey_loss", "predator_gain"],
         )
         def predation(prey, predator, rate):
             flux = prey * predator * rate
             return -flux, +flux
 
-        metadata = get_function("test:predation", "jax")
+        metadata = get_function("test:predation")
 
         assert metadata.is_multi_output
         assert metadata.output_names == ["prey_loss", "predator_gain"]
@@ -77,30 +74,22 @@ class TestFunctionalDecorator:
         """Test that invalid name format raises error."""
         with pytest.raises(ValueError, match="namespace:function_name"):
 
-            @functional(name="invalid_name", backend="jax")
+            @functional(name="invalid_name")
             def bad_func(x):
                 return x
 
     def test_overwrite_warns(self):
         """Test that re-registering the same name emits a warning."""
 
-        @functional(name="test:dup", backend="jax")
+        @functional(name="test:dup")
         def first(x):
             return x
 
         with pytest.warns(UserWarning, match="already registered"):
 
-            @functional(name="test:dup", backend="jax")
+            @functional(name="test:dup")
             def second(x):
                 return x * 2
-
-    def test_invalid_backend(self):
-        """Test that invalid backend raises error."""
-        with pytest.raises(ValueError, match="Unknown backend"):
-
-            @functional(name="test:func", backend="invalid")  # type: ignore
-            def bad_func(x):
-                return x
 
 
 class TestGetFunction:
@@ -109,31 +98,21 @@ class TestGetFunction:
     def test_get_existing_function(self):
         """Test retrieving an existing function."""
 
-        @functional(name="test:exists", backend="jax")
+        @functional(name="test:exists")
         def exists(x):
             return x
 
-        metadata = get_function("test:exists", "jax")
+        metadata = get_function("test:exists")
         assert metadata.name == "test:exists"
         assert metadata.func(10) == 10
 
     def test_get_nonexistent_function(self):
         """Test that nonexistent function raises error."""
         with pytest.raises(FunctionNotFoundError) as exc_info:
-            get_function("test:nonexistent", "jax")
+            get_function("test:nonexistent")
 
         assert "test:nonexistent" in str(exc_info.value)
         assert exc_info.value.code == "E101"
-
-    def test_get_wrong_backend(self):
-        """Test that getting from wrong backend raises error."""
-
-        @functional(name="test:jax_only", backend="jax")
-        def jax_only(x):
-            return x
-
-        with pytest.raises(FunctionNotFoundError):
-            get_function("test:jax_only", "numpy")
 
 
 class TestListFunctions:
@@ -141,42 +120,22 @@ class TestListFunctions:
 
     def test_list_empty(self):
         """Test listing empty registry."""
-        assert list_functions("jax") == []
+        assert list_functions() == []
 
-    def test_list_single_backend(self):
-        """Test listing functions for single backend."""
+    def test_list_functions(self):
+        """Test listing registered functions."""
 
-        @functional(name="test:a", backend="jax")
+        @functional(name="test:a")
         def a(x):
             return x
 
-        @functional(name="test:b", backend="jax")
+        @functional(name="test:b")
         def b(x):
             return x
 
-        @functional(name="test:c", backend="numpy")
-        def c(x):
-            return x
-
-        jax_funcs = list_functions("jax")
-        assert "test:a" in jax_funcs
-        assert "test:b" in jax_funcs
-        assert "test:c" not in jax_funcs
-
-    def test_list_all_backends(self):
-        """Test listing all functions across backends."""
-
-        @functional(name="test:jax_func", backend="jax")
-        def jax_func(x):
-            return x
-
-        @functional(name="test:numpy_func", backend="numpy")
-        def numpy_func(x):
-            return x
-
-        all_funcs = list_functions()
-        assert "test:jax_func" in all_funcs
-        assert "test:numpy_func" in all_funcs
+        funcs = list_functions()
+        assert "test:a" in funcs
+        assert "test:b" in funcs
 
 
 class TestFunctionMetadata:
@@ -185,11 +144,11 @@ class TestFunctionMetadata:
     def test_get_signature(self):
         """Test getting function signature."""
 
-        @functional(name="test:sig", backend="jax")
+        @functional(name="test:sig")
         def sig_func(a, b, c=10):
             return a + b + c
 
-        metadata = get_function("test:sig", "jax")
+        metadata = get_function("test:sig")
         sig = metadata.get_signature()
 
         params = list(sig.parameters.keys())
@@ -198,11 +157,11 @@ class TestFunctionMetadata:
     def test_get_required_inputs(self):
         """Test getting required inputs (no defaults)."""
 
-        @functional(name="test:req", backend="jax")
+        @functional(name="test:req")
         def req_func(required1, required2, optional=5):
             return required1 + required2 + optional
 
-        metadata = get_function("test:req", "jax")
+        metadata = get_function("test:req")
         required = metadata.get_required_inputs()
 
         assert required == ["required1", "required2"]
@@ -211,10 +170,10 @@ class TestFunctionMetadata:
     def test_output_names_default(self):
         """Test output_names fallback when outputs is None."""
 
-        @functional(name="test:single", backend="jax")
+        @functional(name="test:single")
         def single_func(x):
             return x
 
-        metadata = get_function("test:single", "jax")
+        metadata = get_function("test:single")
         assert metadata.outputs is None
         assert metadata.output_names == ["return"]

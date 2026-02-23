@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+pytest.importorskip("jax")
+
 from seapopym.blueprint import Blueprint, Config, ExecutionParams
 from seapopym.compiler.compiler import Compiler, TimeGrid
 
@@ -211,10 +213,6 @@ class TestCompileTimeGrid:
         end = "2000-01-11"  # 10 days
         dt = "1d"
 
-        # Forcing covers the range (t0=start, t1=end) but low resolution
-        # We want to test that compiled model gets n_timesteps from grid (10)
-        # even if forcing has shape (2,)
-
         data = np.zeros((2, 1, 1))
 
         config = Config.from_dict(
@@ -230,7 +228,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         model = compiler.compile(blueprint, config)
 
         assert model.time_grid is not None
@@ -258,7 +256,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         model = compiler.compile(blueprint, config)
 
         assert "T" in model.coords
@@ -286,7 +284,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
 
         with pytest.raises(ValueError, match="does not cover simulation range"):
             compiler.compile(blueprint, config)
@@ -317,34 +315,23 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         model = compiler.compile(blueprint, config)
-
-        # Expected: 0, 3.33, 6.66, 10 (approx)
-        # Actually logic is interp1d on indices.
-        # Source indices: 0, 1
-        # Target indices: 0, 0.33, 0.66, 1.0 (linspace(0, 1, 4))
-        # Values: 0, 3.33, 6.66, 10
 
         # Interpolation is deferred to runtime — use get_all() to verify
         all_forcings = model.forcings.get_all()
-        result = all_forcings["temp"].flatten()
+        result = np.asarray(all_forcings["temp"]).flatten()
         expected = np.linspace(0, 10, 4)
 
         np.testing.assert_allclose(result, expected, atol=1e-5)
 
     def test_temporal_slicing(self, blueprint):
         """Test that forcings are sliced to simulation temporal range before interpolation."""
-        # Forcing: 20 years of data (2001-2021, non-leap start year for simplicity)
-        # Simulation: 1 year (2001-2002)
-        # Should slice forcing to 1 year first, then interpolate if needed
-
         forcing_start = "2001-01-01"
         forcing_end = "2021-01-01"
         forcing_dates = pd.date_range(forcing_start, forcing_end, freq="1d", inclusive="left")
 
         # Create a forcing with a clear pattern: value = day_of_year
-        # This way we can verify we only get days 1-365
         forcing_values = np.array([d.dayofyear for d in forcing_dates], dtype=float)
 
         config = Config.from_dict(
@@ -367,7 +354,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         model = compiler.compile(blueprint, config)
 
         # Should have 365 timesteps (1 non-leap year)
@@ -377,8 +364,7 @@ class TestCompileTimeGrid:
         assert model.forcings["temp"].shape[0] == 365
 
         # Values should be day_of_year from 1 to 365 (first year only)
-        # NOT values from 20 years compressed
-        result = model.forcings["temp"].flatten()
-        expected = np.arange(1, 366, dtype=float)  # Days 1-365
+        result = np.asarray(model.forcings["temp"]).flatten()
+        expected = np.arange(1, 366, dtype=float)
 
         np.testing.assert_allclose(result, expected, atol=1e-5)

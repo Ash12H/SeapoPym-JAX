@@ -72,12 +72,10 @@ class SobolAnalyzer:
     """Orchestrates Sobol sensitivity analysis on a compiled model.
 
     Args:
-        model: Compiled SeapoPym model (JAX backend required).
+        model: Compiled SeapoPym model.
     """
 
     def __init__(self, model: CompiledModel) -> None:
-        if model.backend != "jax":
-            raise ValueError("SobolAnalyzer requires a model compiled with backend='jax'.")
         self.model = model
 
     def analyze(

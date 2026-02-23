@@ -12,8 +12,10 @@ Key features:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 
@@ -72,20 +74,17 @@ def interpolate_chunk(
     source_indices: Array,
     target_indices: Array,
     method: str,
-    backend: str = "jax",
 ) -> Array:
     """Interpolate a source chunk to target indices.
 
-    Replaces scipy.interpolate.interp1d with backend-native operations.
-    For JAX: uses jax.vmap(jnp.interp), which is differentiable and JIT-compilable.
-    For NumPy: uses np.interp with vectorization.
+    Uses JAX-native operations: jax.vmap(jnp.interp), which is differentiable
+    and JIT-compilable.
 
     Args:
         source_chunk: Source data, shape (S, ...).
         source_indices: Source positions, shape (S,).
         target_indices: Target positions for this chunk, shape (C,).
         method: Interpolation method ("nearest", "linear", "ffill").
-        backend: "jax" or "numpy".
 
     Returns:
         Interpolated data, shape (C, ...).
@@ -103,39 +102,20 @@ def interpolate_chunk(
         return source_chunk[ffill_idx]
 
     # method == "linear"
-    if backend == "jax":
-        import jax
-        import jax.numpy as jnp
+    src_idx = jnp.asarray(source_indices)
+    tgt_idx = jnp.asarray(target_indices)
+    chunk = jnp.asarray(source_chunk)
 
-        src_idx = jnp.asarray(source_indices)
-        tgt_idx = jnp.asarray(target_indices)
-        chunk = jnp.asarray(source_chunk)
+    original_shape = chunk.shape[1:]
+    flat = chunk.reshape(chunk.shape[0], -1)  # (S, N)
 
-        original_shape = chunk.shape[1:]
-        flat = chunk.reshape(chunk.shape[0], -1)  # (S, N)
+    result_flat = jax.vmap(
+        lambda fp: jnp.interp(tgt_idx, src_idx, fp),
+        in_axes=1,
+        out_axes=1,
+    )(flat)  # (C, N)
 
-        result_flat = jax.vmap(
-            lambda fp: jnp.interp(tgt_idx, src_idx, fp),
-            in_axes=1,
-            out_axes=1,
-        )(flat)  # (C, N)
-
-        return result_flat.reshape((len(target_indices),) + original_shape)
-    else:
-        # NumPy: vectorize np.interp over spatial dims
-        src_idx = np.asarray(source_indices)
-        tgt_idx = np.asarray(target_indices)
-        chunk = np.asarray(source_chunk)
-
-        original_shape = chunk.shape[1:]
-        flat = chunk.reshape(chunk.shape[0], -1)  # (S, N)
-
-        n_spatial = flat.shape[1]
-        result_flat = np.empty((len(tgt_idx), n_spatial), dtype=flat.dtype)
-        for i in range(n_spatial):
-            result_flat[:, i] = np.interp(tgt_idx, src_idx, flat[:, i])
-
-        return result_flat.reshape((len(tgt_idx),) + original_shape)
+    return result_flat.reshape((len(target_indices),) + original_shape)
 
 
 def _interpolate_full(
@@ -143,7 +123,6 @@ def _interpolate_full(
     source_len: int,
     target_len: int,
     method: str,
-    backend: str = "jax",
 ) -> Array:
     """Interpolate an entire forcing from source_len to target_len timesteps.
 
@@ -154,14 +133,13 @@ def _interpolate_full(
         source_len: Number of source timesteps.
         target_len: Number of target timesteps.
         method: Interpolation method.
-        backend: "jax" or "numpy".
 
     Returns:
         Interpolated array, shape (target_len, ...).
     """
     source_indices = np.arange(source_len, dtype=np.float64)
     target_indices = np.linspace(0, source_len - 1, target_len)
-    return interpolate_chunk(source, source_indices, target_indices, method, backend)
+    return interpolate_chunk(source, source_indices, target_indices, method)
 
 
 @dataclass
@@ -170,7 +148,7 @@ class ForcingStore:
 
     Forcings can be either:
     - xr.DataArray (lazy): loaded from file, materialized only when accessed
-    - Array (in-memory): already materialized numpy/jax arrays
+    - Array (in-memory): already materialized JAX arrays
 
     The store exposes a unified API for chunking and interpolation,
     replacing the duplicated _slice_forcings() logic in all runners.
@@ -179,7 +157,6 @@ class ForcingStore:
         _forcings: Raw forcing data (lazy xarray or in-memory arrays).
         n_timesteps: Total number of simulation timesteps.
         interp_method: Interpolation method ("constant", "nearest", "linear", "ffill").
-        backend: Target backend ("jax" or "numpy").
         fill_nan: Value to replace NaN with.
         _dynamic_forcings: Set of forcing names that have a time dimension.
     """
@@ -187,7 +164,6 @@ class ForcingStore:
     _forcings: dict[str, xr.DataArray | Array] = field(default_factory=dict)
     n_timesteps: int = 1
     interp_method: str = "constant"
-    backend: Literal["jax", "numpy"] = "jax"
     fill_nan: float = 0.0
     _dynamic_forcings: set[str] = field(default_factory=set)
 
@@ -212,10 +188,10 @@ class ForcingStore:
         for name, data in self._forcings.items():
             is_dynamic = name in self._dynamic_forcings
             arr = self._load_single(name, data, start, end, is_dynamic)
-            arr = self._to_backend(arr)
+            arr = jnp.asarray(arr)
 
             if not is_dynamic:
-                arr = self._broadcast_static(arr, chunk_len)
+                arr = jnp.broadcast_to(arr, (chunk_len,) + arr.shape)
 
             result[name] = arr
 
@@ -247,7 +223,7 @@ class ForcingStore:
 
         data = self._forcings[name]
         if isinstance(data, xr.DataArray):
-            return self._to_backend(data.values)
+            return jnp.asarray(data.values)
         return data
 
     def __contains__(self, name: str) -> bool:
@@ -323,7 +299,7 @@ class ForcingStore:
         target_indices = all_target_indices[start:end]
 
         return interpolate_chunk(
-            chunk_data, source_indices, target_indices, self.interp_method, self.backend
+            chunk_data, source_indices, target_indices, self.interp_method
         )
 
     def _materialize_with_nan(self, arr: Array) -> Array:
@@ -334,19 +310,3 @@ class ForcingStore:
             if nan_mask.any():
                 arr = np.where(nan_mask, self.fill_nan, arr)
         return arr
-
-    def _to_backend(self, arr: Array) -> Array:
-        """Convert array to target backend."""
-        if self.backend == "jax":
-            import jax.numpy as jnp
-
-            return jnp.asarray(arr)
-        return np.asarray(arr)
-
-    def _broadcast_static(self, arr: Array, chunk_len: int) -> Array:
-        """Broadcast a static forcing to chunk length."""
-        if self.backend == "jax":
-            import jax.numpy as jnp
-
-            return jnp.broadcast_to(arr, (chunk_len,) + arr.shape)
-        return np.broadcast_to(arr, (chunk_len,) + arr.shape)

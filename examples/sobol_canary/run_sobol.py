@@ -261,7 +261,7 @@ def main():
     config = build_config()
 
     logger.info("Compiling model (JAX backend)...")
-    model = compile_model(blueprint, config, backend="jax")
+    model = compile_model(blueprint, config)
 
     n_evals = N_SAMPLES * (len(PARAM_BOUNDS) + 2)
     logger.info(

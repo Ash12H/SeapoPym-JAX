@@ -10,7 +10,7 @@ The CompiledModel contains all data structures ready for JAX execution:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -43,7 +43,6 @@ class CompiledModel:
         shapes: Resolved dimension sizes {"Y": 180, "X": 360, ...}.
         coords: Coordinate arrays for each dimension.
         dt: Timestep in seconds.
-        backend: Target backend ("jax" or "numpy").
         trainable_params: List of parameter names that can be optimized.
         time_grid: Temporal grid (start, end, n_timesteps, coords). None if not using calendar.
         batch_size: Number of timesteps per batch. None = process all at once.
@@ -68,7 +67,6 @@ class CompiledModel:
     dt: float = 86400.0  # Default: 1 day in seconds
 
     # Configuration
-    backend: Literal["jax", "numpy"] = "jax"
     trainable_params: list[str] = field(default_factory=list)
 
     # Temporal configuration (Phase 4)
@@ -107,7 +105,6 @@ class CompiledModel:
             _forcings=numpy_forcings_dict,
             n_timesteps=self.n_timesteps,
             interp_method=self.forcings.interp_method,
-            backend="numpy",
             fill_nan=self.forcings.fill_nan,
             _dynamic_forcings=set(self.forcings._dynamic_forcings),
         )
@@ -123,7 +120,6 @@ class CompiledModel:
             shapes=self.shapes,
             coords={k: convert(v) for k, v in self.coords.items()},
             dt=self.dt,
-            backend="numpy",
             trainable_params=self.trainable_params,
         )
 

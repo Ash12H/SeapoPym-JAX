@@ -72,14 +72,6 @@ class BlueprintValidator:
     against its declarations and the function registry.
     """
 
-    def __init__(self, backend: str = "jax") -> None:
-        """Initialize the validator.
-
-        Args:
-            backend: Target backend for function resolution.
-        """
-        self.backend = backend
-
     def validate(self, blueprint: Blueprint) -> ValidationResult:
         """Run the full validation pipeline on a Blueprint.
 
@@ -120,7 +112,7 @@ class BlueprintValidator:
         """Step 2: Resolve all functions from the registry."""
         for step in blueprint.process:
             try:
-                metadata = get_function(step.func, self.backend)
+                metadata = get_function(step.func)
                 result.resolved_functions[step.func] = metadata
             except FunctionNotFoundError as e:
                 result.add_error(e)
@@ -330,14 +322,13 @@ class BlueprintValidator:
                     )
 
 
-def validate_blueprint(blueprint: Blueprint, backend: str = "jax") -> ValidationResult:
+def validate_blueprint(blueprint: Blueprint) -> ValidationResult:
     """Validate a Blueprint.
 
     Convenience function that creates a validator and runs validation.
 
     Args:
         blueprint: The Blueprint to validate.
-        backend: Target backend for function resolution.
 
     Returns:
         ValidationResult with errors, warnings, and built nodes.
@@ -345,7 +336,7 @@ def validate_blueprint(blueprint: Blueprint, backend: str = "jax") -> Validation
     Raises:
         BlueprintValidationError: If validation fails (contains all errors).
     """
-    validator = BlueprintValidator(backend=backend)
+    validator = BlueprintValidator()
     result = validator.validate(blueprint)
     if not result.valid:
         raise BlueprintValidationError(result.errors, result.warnings)
@@ -355,7 +346,6 @@ def validate_blueprint(blueprint: Blueprint, backend: str = "jax") -> Validation
 def validate_config(
     config: Config,
     blueprint: Blueprint,
-    backend: str = "jax",  # noqa: ARG001
 ) -> ValidationResult:
     """Validate a Config against a Blueprint.
 
@@ -368,7 +358,6 @@ def validate_config(
     Args:
         config: The Config to validate.
         blueprint: The Blueprint to validate against.
-        backend: Target backend.
 
     Returns:
         ValidationResult with errors and warnings.

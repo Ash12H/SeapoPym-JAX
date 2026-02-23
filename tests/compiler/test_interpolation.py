@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
+pytest.importorskip("jax")
+
 from seapopym.blueprint import Blueprint, Config
 from seapopym.compiler.compiler import Compiler, TimeGrid
 
@@ -51,7 +53,7 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         # We access internal method _prepare_forcings to test isolation
         # Need to mimic what compile() does before calling it
         shapes = {"T": nt, "Y": ny, "X": nx}
@@ -74,7 +76,7 @@ class TestForcingInterpolation:
 
         # Bathy should match input shape (ny, nx), NOT (nt, nx)
         assert forcings["bathy"].shape == (ny, nx)
-        assert np.array_equal(forcings["bathy"], bathy_data)
+        np.testing.assert_allclose(np.asarray(forcings["bathy"]), bathy_data, rtol=1e-6)
 
     def test_temporal_interpolation_linear(self, blueprint):
         """Test linear interpolation of undersampled time forcing."""
@@ -102,7 +104,7 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         shapes = {"T": target_t, "Y": 1, "X": 1}
         blueprint_dims = compiler._extract_blueprint_dims(blueprint)
         forcings, _ = compiler._prepare_forcings(
@@ -121,7 +123,7 @@ class TestForcingInterpolation:
 
         # Interpolation is deferred — use get_all() to materialize
         all_forcings = forcings.get_all()
-        res = all_forcings["temp"].flatten()
+        res = np.asarray(all_forcings["temp"]).flatten()
         expected = np.linspace(0, 40, target_t)
 
         # Should be close
@@ -151,7 +153,7 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         shapes = {"T": target_t, "Y": 1, "X": 1}
         blueprint_dims = compiler._extract_blueprint_dims(blueprint)
         forcings, _ = compiler._prepare_forcings(
@@ -170,7 +172,7 @@ class TestForcingInterpolation:
 
         # Interpolation is deferred — use get_all() to materialize
         all_forcings = forcings.get_all()
-        res = all_forcings["temp"].flatten()
+        res = np.asarray(all_forcings["temp"]).flatten()
         # indices: 0->0, 1->0.33(0), 2->0.66(1), 3->1
         # With linspace(0, 1, 4): 0.0, 0.33, 0.66, 1.0
         # round(0)=0, round(0.33)=0, round(0.66)=1, round(1)=1
@@ -201,7 +203,7 @@ class TestForcingInterpolation:
             }
         )
 
-        compiler = Compiler(backend="numpy")
+        compiler = Compiler()
         shapes = {"T": target_t, "Y": 1, "X": 1}
         blueprint_dims = compiler._extract_blueprint_dims(blueprint)
         forcings, _ = compiler._prepare_forcings(
@@ -220,7 +222,7 @@ class TestForcingInterpolation:
 
         # Interpolation is deferred — use get_all() to materialize
         all_forcings = forcings.get_all()
-        res = all_forcings["temp"].flatten()
+        res = np.asarray(all_forcings["temp"]).flatten()
         # [0, 0.33, 0.66, 1.0] -> floor -> [0, 0, 0, 1]
         # Wait, current implementation uses floor(linspace(0, N-1, M))
         # linspace(0, 1, 4): 0, 0.33, 0.66, 1

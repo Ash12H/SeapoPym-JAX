@@ -122,7 +122,7 @@ config = Config.from_dict(
 )
 
 print(f"Compiling model ({ny}x{nx} grid, {SIM_DAYS} days)...")
-model = compile_model(blueprint, config, backend="jax")
+model = compile_model(blueprint, config)
 n_timesteps = model.n_timesteps
 print(f"Model compiled: {n_timesteps} timesteps, {n_cohorts} cohorts")
 

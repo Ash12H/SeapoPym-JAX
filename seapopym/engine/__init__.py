@@ -1,7 +1,7 @@
 """Engine package for execution of compiled models.
 
 This package provides:
-- Backends: JAXBackend (lax.scan) and NumpyBackend (for loop)
+- Backends: JAXBackend (lax.scan)
 - Runners: StreamingRunner (production)
 - Step function builder for time-stepping logic
 - Async I/O for streaming outputs
@@ -16,7 +16,7 @@ Example:
     >>> final_state = runner.run(output_path="/results/sim_001/")
 """
 
-from .backends import Backend, JAXBackend, NumpyBackend, get_backend
+from .backends import JAXBackend
 from .exceptions import (
     BackendError,
     ChunkingError,
@@ -32,10 +32,7 @@ __all__ = [
     # Runners
     "StreamingRunner",
     # Backends
-    "Backend",
     "JAXBackend",
-    "NumpyBackend",
-    "get_backend",
     # Step
     "build_step_fn",
     # I/O

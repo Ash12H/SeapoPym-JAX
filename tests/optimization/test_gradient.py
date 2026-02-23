@@ -54,7 +54,7 @@ class TestBuildStepFnModes:
         from seapopym.compiler import compile_model
         from seapopym.engine.step import build_step_fn
 
-        @functional(name="test:scaled", backend="jax", units={"x": "g", "scale": "1/s", "return": "g/s"})
+        @functional(name="test:scaled", units={"x": "g", "scale": "1/s", "return": "g/s"})
         def scaled(x, scale):
             return x * scale
 
@@ -89,7 +89,7 @@ class TestBuildStepFnModes:
             }
         )
 
-        model = compile_model(blueprint, config, backend="jax")
+        model = compile_model(blueprint, config)
         step_fn = build_step_fn(model)
 
         # Should accept ((state, params), forcings)
@@ -113,7 +113,7 @@ class TestGradientComputation:
         from seapopym.compiler import compile_model
         from seapopym.engine.step import build_step_fn
 
-        @functional(name="test:linear", backend="jax", units={"x": "g", "rate": "1/s", "return": "g/s"})
+        @functional(name="test:linear", units={"x": "g", "rate": "1/s", "return": "g/s"})
         def linear_growth(x, rate):
             return rate * x
 
@@ -148,7 +148,7 @@ class TestGradientComputation:
             }
         )
 
-        model = compile_model(blueprint, config, backend="jax")
+        model = compile_model(blueprint, config)
         step_fn = build_step_fn(model)
 
         def loss_fn(params):
@@ -173,7 +173,7 @@ class TestGradientComputation:
         from seapopym.compiler import compile_model
         from seapopym.engine.step import build_step_fn
 
-        @functional(name="test:linear2", backend="jax", units={"x": "g", "rate": "1/s", "return": "g/s"})
+        @functional(name="test:linear2", units={"x": "g", "rate": "1/s", "return": "g/s"})
         def linear_growth(x, rate):
             return rate * x
 
@@ -208,7 +208,7 @@ class TestGradientComputation:
             }
         )
 
-        model = compile_model(blueprint, config, backend="jax")
+        model = compile_model(blueprint, config)
         step_fn = build_step_fn(model)
 
         def loss_fn(params):

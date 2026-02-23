@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .backends import get_backend
+from .backends import JAXBackend
 from .exceptions import ChunkingError
 from .io import DiskWriter, MemoryWriter, OutputWriter
 from .step import build_step_fn
@@ -59,7 +59,7 @@ class StreamingRunner:
         # Priority: chunk_size (parameter) > model.batch_size (config) > model.n_timesteps (all)
         self.chunk_size = chunk_size or getattr(model, "batch_size", None) or model.n_timesteps
         self.io_workers = io_workers
-        self.backend = get_backend(model.backend)
+        self.backend = JAXBackend()
 
     def run(
         self,

@@ -14,7 +14,7 @@ Example:
     >>> config = Config.load("run.yaml")
     >>>
     >>> # Using the class
-    >>> compiler = Compiler(backend="jax")
+    >>> compiler = Compiler()
     >>> compiled = compiler.compile(blueprint, config)
     >>>
     >>> # Or using the convenience function

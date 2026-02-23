@@ -10,7 +10,7 @@ import functools
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from .exceptions import FunctionNotFoundError
 
@@ -21,7 +21,6 @@ class FunctionMetadata:
 
     Attributes:
         name: Unique identifier in format "namespace:function_name".
-        backend: Target backend ("jax" or "numpy").
         core_dims: Dimensions that are not broadcast (per input).
         out_dims: Output dimensions (for single output).
         outputs: Names of outputs (for multiple outputs).
@@ -30,7 +29,6 @@ class FunctionMetadata:
     """
 
     name: str
-    backend: Literal["jax", "numpy"]
     func: Callable[..., Any]
     core_dims: dict[str, list[str]] = field(default_factory=dict)
     out_dims: list[str] | None = None
@@ -59,16 +57,12 @@ class FunctionMetadata:
         return [name for name, param in sig.parameters.items() if param.default is inspect.Parameter.empty]
 
 
-# Global registry: {backend: {name: FunctionMetadata}}
-REGISTRY: dict[str, dict[str, FunctionMetadata]] = {
-    "jax": {},
-    "numpy": {},
-}
+# Global registry: {name: FunctionMetadata}
+REGISTRY: dict[str, FunctionMetadata] = {}
 
 
 def functional(
     name: str,
-    backend: Literal["jax", "numpy"] = "jax",
     core_dims: dict[str, list[str]] | None = None,
     out_dims: list[str] | None = None,
     outputs: list[str] | None = None,
@@ -79,7 +73,6 @@ def functional(
     Args:
         name: Unique identifier in format "namespace:function_name".
               Example: "biol:growth", "phys:advection".
-        backend: Target backend ("jax" or "numpy"). Defaults to "jax".
         core_dims: Dimensions that are explicitly operated on (not broadcast).
                    Format: {"input_name": ["dim1", "dim2"]}.
         out_dims: Output dimensions for single-output functions.
@@ -94,7 +87,6 @@ def functional(
     Example:
         >>> @functional(
         ...     name="biol:growth",
-        ...     backend="jax",
         ...     core_dims={"biomass": ["C"]},
         ...     out_dims=["C"],
         ...     units={"biomass": "g", "rate": "1/d", "temp": "degC", "return": "g/d"}
@@ -105,7 +97,6 @@ def functional(
     Example (multi-output):
         >>> @functional(
         ...     name="biol:predation",
-        ...     backend="jax",
         ...     outputs=["prey_loss", "predator_gain"],
         ...     units={"prey_loss": "g/d", "predator_gain": "g/d"}
         ... )
@@ -119,14 +110,9 @@ def functional(
         if ":" not in name:
             raise ValueError(f"Function name must be in format 'namespace:function_name', got '{name}'")
 
-        # Validate backend
-        if backend not in REGISTRY:
-            raise ValueError(f"Unknown backend '{backend}'. Supported: {list(REGISTRY.keys())}")
-
         # Create metadata
         metadata = FunctionMetadata(
             name=name,
-            backend=backend,
             func=func,
             core_dims=core_dims or {},
             out_dims=out_dims,
@@ -135,14 +121,14 @@ def functional(
         )
 
         # Register in global registry
-        if name in REGISTRY[backend]:
+        if name in REGISTRY:
             import warnings
 
             warnings.warn(
-                f"Function '{name}' is already registered for backend '{backend}'. Overwriting.",
+                f"Function '{name}' is already registered. Overwriting.",
                 stacklevel=2,
             )
-        REGISTRY[backend][name] = metadata
+        REGISTRY[name] = metadata
 
         # Preserve function metadata
         @functools.wraps(func)
@@ -157,58 +143,33 @@ def functional(
     return decorator
 
 
-def get_function(name: str, backend: str = "jax") -> FunctionMetadata:
+def get_function(name: str) -> FunctionMetadata:
     """Retrieve a function from the registry.
 
     Args:
         name: Function identifier (e.g., "biol:growth").
-        backend: Target backend. Defaults to "jax".
 
     Returns:
         FunctionMetadata for the requested function.
 
     Raises:
-        FunctionNotFoundError: If function is not registered for the backend.
+        FunctionNotFoundError: If function is not registered.
     """
-    if backend not in REGISTRY:
-        raise FunctionNotFoundError(name, backend)
+    if name not in REGISTRY:
+        raise FunctionNotFoundError(name)
 
-    if name not in REGISTRY[backend]:
-        raise FunctionNotFoundError(name, backend)
-
-    return REGISTRY[backend][name]
+    return REGISTRY[name]
 
 
-def list_functions(backend: str | None = None) -> list[str]:
+def list_functions() -> list[str]:
     """List all registered function names.
 
-    Args:
-        backend: If specified, list only functions for this backend.
-                 If None, list all functions across all backends.
-
     Returns:
-        List of function names.
+        Sorted list of function names.
     """
-    if backend is not None:
-        return list(REGISTRY.get(backend, {}).keys())
-
-    # Collect unique names across all backends
-    all_names: set[str] = set()
-    for funcs in REGISTRY.values():
-        all_names.update(funcs.keys())
-    return sorted(all_names)
+    return sorted(REGISTRY.keys())
 
 
-def clear_registry(backend: str | None = None) -> None:
-    """Clear the registry (useful for testing).
-
-    Args:
-        backend: If specified, clear only this backend's registry.
-                 If None, clear all backends.
-    """
-    if backend is not None:
-        if backend in REGISTRY:
-            REGISTRY[backend].clear()
-    else:
-        for funcs in REGISTRY.values():
-            funcs.clear()
+def clear_registry() -> None:
+    """Clear the registry (useful for testing)."""
+    REGISTRY.clear()

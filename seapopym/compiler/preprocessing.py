@@ -1,7 +1,7 @@
 """Data preprocessing: xarray stripping, NaN handling, and mask generation.
 
 This module handles:
-1. Converting xarray DataArrays to NumPy/JAX arrays
+1. Converting xarray DataArrays to JAX arrays
 2. Replacing NaN values with a fill value
 3. Generating binary masks from NaN patterns
 """
@@ -9,8 +9,9 @@ This module handles:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
+import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 
@@ -58,16 +59,14 @@ def load_data(
 
 def strip_xarray(
     da: xr.DataArray,
-    backend: Literal["jax", "numpy"] = "jax",
 ) -> Array:
-    """Convert xarray DataArray to NumPy or JAX array.
+    """Convert xarray DataArray to JAX array.
 
     Args:
         da: xarray DataArray.
-        backend: Target backend.
 
     Returns:
-        NumPy array or JAX array.
+        JAX array.
     """
     # Get values (triggers compute if dask-backed)
     values = da.values
@@ -75,65 +74,45 @@ def strip_xarray(
     # Ensure C-contiguous
     values = ensure_contiguous(values)
 
-    if backend == "jax":
-        import jax.numpy as jnp
-
-        return jnp.asarray(values)
-
-    return values
+    return jnp.asarray(values)
 
 
 def preprocess_nan(
     data: Array,
     fill_value: float = 0.0,
-    backend: Literal["jax", "numpy"] = "jax",
 ) -> tuple[Array, Array]:
     """Replace NaN values and generate a mask.
 
     Args:
         data: Input array (may contain NaN).
         fill_value: Value to replace NaN with.
-        backend: Target backend.
 
     Returns:
         Tuple of (cleaned data, mask). Mask is True where data is valid.
     """
-    if backend == "jax":
-        import jax.numpy as jnp
-
-        mask = ~jnp.isnan(data)
-        data_clean = jnp.where(mask, data, fill_value)
-    else:
-        mask = ~np.isnan(data)
-        data_clean = np.where(mask, data, fill_value)
+    mask = ~jnp.isnan(data)
+    data_clean = jnp.where(mask, data, fill_value)
 
     return data_clean, mask
 
 
 def generate_mask_from_data(
     data: Array,
-    backend: Literal["jax", "numpy"] = "jax",
 ) -> Array:
     """Generate a binary mask from data (True where valid, False where NaN).
 
     Args:
         data: Input array.
-        backend: Target backend.
 
     Returns:
         Boolean mask array.
     """
-    if backend == "jax":
-        import jax.numpy as jnp
-
-        return ~jnp.isnan(data)
-    return ~np.isnan(data)
+    return ~jnp.isnan(data)
 
 
 def prepare_array(
     source: str | Path | xr.DataArray | xr.Dataset | np.ndarray | Any,
     dimension_mapping: dict[str, str] | None = None,
-    backend: Literal["jax", "numpy"] = "jax",
     fill_nan: float | None = 0.0,
     variable_name: str | None = None,
 ) -> tuple[Array, tuple[str, ...], Array | None]:
@@ -142,7 +121,6 @@ def prepare_array(
     Args:
         source: Data source (file path, xarray, or array).
         dimension_mapping: Optional dimension name mapping.
-        backend: Target backend.
         fill_nan: Value to replace NaN. If None, NaN are preserved.
         variable_name: Variable name to extract from Dataset.
 
@@ -169,21 +147,17 @@ def prepare_array(
         dims = tuple(str(d) for d in data.dims)
 
         # Strip xarray
-        arr = strip_xarray(data, backend)
+        arr = strip_xarray(data)
 
     else:
         # Raw array - no dims info
         arr = np.asarray(data)
         arr = ensure_contiguous(arr)
-
-        if backend == "jax":
-            import jax.numpy as jnp
-
-            arr = jnp.asarray(arr)
+        arr = jnp.asarray(arr)
 
     # Handle NaN
     if fill_nan is not None:
-        arr, mask = preprocess_nan(arr, fill_nan, backend)
+        arr, mask = preprocess_nan(arr, fill_nan)
 
     return arr, dims, mask
 
@@ -191,14 +165,12 @@ def prepare_array(
 def extract_coords(
     source: str | Path | xr.DataArray | xr.Dataset,
     dimension_mapping: dict[str, str] | None = None,
-    backend: Literal["jax", "numpy"] = "jax",
 ) -> dict[str, Array]:
     """Extract coordinate arrays from a data source.
 
     Args:
         source: Data source with coordinates.
         dimension_mapping: Optional dimension name mapping.
-        backend: Target backend.
 
     Returns:
         Dict mapping dimension names to coordinate arrays.
@@ -221,10 +193,7 @@ def extract_coords(
     coords: dict[str, Array] = {}
     for name, coord in ds.coords.items():
         values = coord.values
-        if backend == "jax":
-            import jax.numpy as jnp
-
-            values = jnp.asarray(values)
+        values = jnp.asarray(values)
         coords[str(name)] = values
 
     return coords

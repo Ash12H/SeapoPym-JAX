@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -153,9 +154,6 @@ class TimeGrid:
         )
 
 
-Backend = Literal["jax", "numpy"]
-
-
 class Compiler:
     """Compiler for transforming Blueprint + Config into executable structures.
 
@@ -164,27 +162,21 @@ class Compiler:
     a CompiledModel ready for JAX execution.
 
     Attributes:
-        backend: Target backend ("jax" or "numpy").
         canonical_order: Dimension order for transposition.
         fill_nan: Value to replace NaN with.
     """
 
-    backend: Backend
-
     def __init__(
         self,
-        backend: Backend = "jax",
         canonical_order: tuple[str, ...] = CANONICAL_DIMS,
         fill_nan: float = 0.0,
     ) -> None:
         """Initialize the Compiler.
 
         Args:
-            backend: Target backend for arrays.
             canonical_order: Canonical dimension order.
             fill_nan: Value to replace NaN values.
         """
-        self.backend = backend
         self.canonical_order = canonical_order
         self.fill_nan = fill_nan
 
@@ -209,8 +201,8 @@ class Compiler:
             GridAlignmentError: If dimensions are inconsistent.
         """
         # Step 1: Validate (raises aggregated errors if invalid)
-        bp_result = validate_blueprint(blueprint, self.backend)
-        validate_config(config, blueprint, self.backend)
+        bp_result = validate_blueprint(blueprint)
+        validate_config(config, blueprint)
 
         compute_nodes = bp_result.compute_nodes
         data_nodes = bp_result.data_nodes
@@ -258,7 +250,6 @@ class Compiler:
             shapes=shapes,
             coords=coords,
             dt=dt,
-            backend=self.backend,
             trainable_params=trainable,
             time_grid=time_grid,
             batch_size=config.execution.batch_size,
@@ -362,16 +353,13 @@ class Compiler:
                     nan_mask = np.isnan(arr) if np.issubdtype(arr.dtype, np.floating) else None
                     if nan_mask is not None and nan_mask.any():
                         arr = np.where(nan_mask, self.fill_nan, arr)
-                    if self.backend == "jax":
-                        import jax.numpy as jnp
-
-                        arr = jnp.asarray(arr)
+                    arr = jnp.asarray(arr)
                     raw_forcings[name] = arr
 
                 # Extract coords from first xr.DataArray source
                 if not coords_extracted:
                     try:
-                        coords = extract_coords(da, dim_mapping, self.backend)
+                        coords = extract_coords(da, dim_mapping)
                         coords_extracted = True
                     except (KeyError, ValueError, TypeError) as e:
                         logger.debug("Failed to extract coords from DataArray '%s': %s", name, e)
@@ -381,7 +369,6 @@ class Compiler:
                 arr, _dims, _mask = prepare_array(
                     source,
                     dimension_mapping=dim_mapping,
-                    backend=self.backend,
                     fill_nan=self.fill_nan,
                 )
                 raw_forcings[name] = arr
@@ -389,7 +376,7 @@ class Compiler:
                 # Extract coords from first file source
                 if not coords_extracted and isinstance(source, str):
                     try:
-                        coords = extract_coords(source, dim_mapping, self.backend)
+                        coords = extract_coords(source, dim_mapping)
                         coords_extracted = True
                     except (KeyError, ValueError, TypeError) as e:
                         logger.debug("Failed to extract coords from file '%s': %s", source, e)
@@ -398,12 +385,7 @@ class Compiler:
         if "mask" not in raw_forcings:
             mask_shape = tuple(shapes.get(d, 1) for d in ["Y", "X"] if d in shapes)
             if mask_shape:
-                if self.backend == "jax":
-                    import jax.numpy as jnp
-
-                    raw_forcings["mask"] = jnp.ones(mask_shape, dtype=jnp.bool_)
-                else:
-                    raw_forcings["mask"] = np.ones(mask_shape, dtype=np.bool_)
+                raw_forcings["mask"] = jnp.ones(mask_shape, dtype=jnp.bool_)
 
         # Add temporal coordinates from time_grid
         coords["T"] = time_grid.coords
@@ -412,7 +394,6 @@ class Compiler:
             _forcings=raw_forcings,
             n_timesteps=n_timesteps,
             interp_method=interp_method,
-            backend=self.backend,
             fill_nan=self.fill_nan,
             _dynamic_forcings=dynamic_forcings,
         )
@@ -439,7 +420,6 @@ class Compiler:
                     arr, _dims, _mask = prepare_array(
                         value,
                         dimension_mapping=dim_mapping,
-                        backend=self.backend,
                         fill_nan=self.fill_nan,
                     )
                     state[full_name] = arr
@@ -460,29 +440,22 @@ class Compiler:
             if pv.trainable:
                 trainable.append(name)
 
-            if self.backend == "jax":
-                import jax.numpy as jnp
-
-                parameters[name] = jnp.asarray(pv.value)
-            else:
-                parameters[name] = np.asarray(pv.value)
+            parameters[name] = jnp.asarray(pv.value)
         return parameters, trainable
 
 
 def compile_model(
     blueprint: Blueprint,
     config: Config,
-    backend: Literal["jax", "numpy"] = "jax",
 ) -> CompiledModel:
     """Convenience function to compile a model.
 
     Args:
         blueprint: Model definition.
         config: Experiment configuration.
-        backend: Target backend.
 
     Returns:
         CompiledModel ready for execution.
     """
-    compiler = Compiler(backend=backend)
+    compiler = Compiler()
     return compiler.compile(blueprint, config)

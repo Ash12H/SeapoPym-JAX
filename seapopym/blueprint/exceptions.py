@@ -40,15 +40,10 @@ class FunctionNotFoundError(ValidationError):
     code = "E101"
     message = "Function not found in registry"
 
-    def __init__(self, func_name: str, backend: str | None = None) -> None:
-        """Initialize with function name and optional backend."""
+    def __init__(self, func_name: str) -> None:
+        """Initialize with function name."""
         self.func_name = func_name
-        self.backend = backend
-        if backend:
-            msg = f"Function '{func_name}' not found in registry for backend '{backend}'"
-        else:
-            msg = f"Function '{func_name}' not found in registry"
-        super().__init__(msg)
+        super().__init__(f"Function '{func_name}' not found in registry")
 
 
 class SignatureMismatchError(ValidationError):

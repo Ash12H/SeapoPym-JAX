@@ -6,6 +6,9 @@ Tests the complete pipeline: Blueprint → Compile → Run
 import numpy as np
 import pytest
 
+pytest.importorskip("jax")
+import jax.numpy as jnp
+
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import compile_model
 from seapopym.engine import StreamingRunner
@@ -23,9 +26,8 @@ def clean_registry():
 class TestE2EBasicSimulation:
     """End-to-end tests for basic simulation workflow."""
 
-    def test_e2e_numpy_streaming(self, tmp_path):
-        """Test complete workflow: Blueprint → Compile → StreamingRunner (NumPy)."""
-        # 1. Define blueprint
+    def test_e2e_streaming(self, tmp_path):
+        """Test complete workflow: Blueprint → Compile → StreamingRunner."""
         blueprint = Blueprint.from_dict(
             {
                 "id": "toy-growth",
@@ -61,92 +63,7 @@ class TestE2EBasicSimulation:
             }
         )
 
-        # 2. Register function
-        @functional(name="biol:simple_growth", backend="numpy")
-        def simple_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        # 3. Create config with test data
-        n_days = 30
-        ny, nx = 10, 10
-
-        config = Config.from_dict(
-            {
-                "parameters": {"growth_rate": {"value": 0.0001}},  # Very small for stability
-                "forcings": {
-                    "temperature": np.random.uniform(15, 25, (n_days, ny, nx)),
-                    "mask": np.ones((ny, nx)),
-                },
-                "initial_state": {
-                    "biomass": np.ones((ny, nx)) * 100.0,
-                },
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-31",
-                },
-            }
-        )
-
-        # 4. Compile
-        model = compile_model(blueprint, config, backend="numpy")
-
-        assert model.shapes["Y"] == ny
-        assert model.shapes["X"] == nx
-        assert model.shapes["T"] == n_days
-
-        # 5. Run
-        runner = StreamingRunner(model, chunk_size=10)
-        final_state, _ = runner.run(str(tmp_path / "output"))
-
-        # 6. Verify
-        assert "biomass" in final_state
-        assert final_state["biomass"].shape == (ny, nx)
-        # Biomass should have grown (rate > 0, temp > 0)
-        assert np.all(final_state["biomass"] >= 100.0)
-        assert not np.any(np.isnan(final_state["biomass"]))
-
-    def test_e2e_jax_streaming(self, tmp_path):
-        """Test complete workflow: Blueprint → Compile → StreamingRunner (JAX)."""
-        pytest.importorskip("jax")
-        import jax.numpy as jnp
-
-        blueprint = Blueprint.from_dict(
-            {
-                "id": "toy-growth",
-                "version": "0.1.0",
-                "declarations": {
-                    "state": {
-                        "biomass": {"units": "g", "dims": ["Y", "X"]},
-                    },
-                    "parameters": {
-                        "growth_rate": {"units": "1/d"},
-                    },
-                    "forcings": {
-                        "temperature": {"units": "degC", "dims": ["T", "Y", "X"]},
-                        "mask": {"dims": ["Y", "X"]},
-                    },
-                },
-                "process": [
-                    {
-                        "func": "biol:simple_growth",
-                        "inputs": {
-                            "biomass": "state.biomass",
-                            "rate": "parameters.growth_rate",
-                            "temp": "forcings.temperature",
-                        },
-                        "outputs": {
-                            "tendency": "derived.growth_flux",
-                        },
-                    }
-                ],
-                "tendencies": {
-                    "biomass": [{"source": "derived.growth_flux"}],
-                },
-            }
-        )
-
-        @functional(name="biol:simple_growth", backend="jax")
+        @functional(name="biol:simple_growth")
         def simple_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
@@ -171,18 +88,15 @@ class TestE2EBasicSimulation:
             }
         )
 
-        model = compile_model(blueprint, config, backend="jax")
+        model = compile_model(blueprint, config)
         runner = StreamingRunner(model, chunk_size=10)
         final_state, _ = runner.run(str(tmp_path / "output"))
 
         assert "biomass" in final_state
         assert jnp.all(final_state["biomass"] >= 100.0)
 
-    def test_e2e_jax_gradient(self):
-        """Test complete workflow: Blueprint → Compile → GradientRunner (JAX)."""
-        pytest.importorskip("jax")
-        import jax.numpy as jnp
-
+    def test_e2e_gradient(self):
+        """Test complete workflow: Blueprint → Compile → GradientRunner."""
         blueprint = Blueprint.from_dict(
             {
                 "id": "toy-growth",
@@ -218,7 +132,7 @@ class TestE2EBasicSimulation:
             }
         )
 
-        @functional(name="biol:simple_growth", backend="jax")
+        @functional(name="biol:simple_growth")
         def simple_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
@@ -244,7 +158,7 @@ class TestE2EBasicSimulation:
             }
         )
 
-        model = compile_model(blueprint, config, backend="jax")
+        model = compile_model(blueprint, config)
         runner = GradientRunner(model)
         final_state, outputs = runner.run_with_params(dict(model.parameters))
 
@@ -292,7 +206,7 @@ class TestE2EMaskBehavior:
             }
         )
 
-        @functional(name="biol:growth", backend="numpy")
+        @functional(name="biol:growth")
         def growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
@@ -318,14 +232,14 @@ class TestE2EMaskBehavior:
             }
         )
 
-        model = compile_model(blueprint, config, backend="numpy")
+        model = compile_model(blueprint, config)
         runner = StreamingRunner(model, chunk_size=10)
         final_state, _ = runner.run(str(tmp_path / "output"))
 
         # Masked regions should be zero
-        np.testing.assert_array_equal(final_state["biomass"][:3, :], 0.0)
+        np.testing.assert_array_equal(np.asarray(final_state["biomass"][:3, :]), 0.0)
         # Unmasked regions should have grown
-        assert np.all(final_state["biomass"][3:, :] > 0)
+        assert np.all(np.asarray(final_state["biomass"][3:, :]) > 0)
 
 
 class TestE2EMultiProcess:
@@ -382,11 +296,11 @@ class TestE2EMultiProcess:
             }
         )
 
-        @functional(name="proc:growth", backend="numpy")
+        @functional(name="proc:growth")
         def growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        @functional(name="proc:mortality", backend="numpy")
+        @functional(name="proc:mortality")
         def mortality(biomass, rate):
             return -biomass * rate  # Negative tendency
 
@@ -411,10 +325,10 @@ class TestE2EMultiProcess:
             }
         )
 
-        model = compile_model(blueprint, config, backend="numpy")
+        model = compile_model(blueprint, config)
         runner = StreamingRunner(model, chunk_size=15)
         final_state, _ = runner.run(str(tmp_path / "output"))
 
         # Net growth rate is positive (0.0002 - 0.0001 = 0.0001)
         # So biomass should increase
-        assert np.all(final_state["biomass"] > 100.0)
+        assert np.all(np.asarray(final_state["biomass"]) > 100.0)

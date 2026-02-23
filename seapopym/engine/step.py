@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+import jax.numpy as jnp
+
 from seapopym.blueprint.nodes import ComputeNode
 from seapopym.engine.vectorize import (
     compute_broadcast_dims,
@@ -48,7 +50,6 @@ def build_step_fn(
     tendency_map = model.tendency_map
     default_parameters = model.parameters
     dt = model.dt
-    backend = model.backend
 
     # Pre-compute vmapped functions for nodes with core_dims
     vmapped_funcs: dict[str, tuple[Callable[..., Any], list[str] | None, tuple[int, ...] | None]] = {}
@@ -102,10 +103,10 @@ def build_step_fn(
             _handle_compute_outputs(result, compute_node.output_mapping, intermediates)
 
         # Euler explicit integration using tendency_map
-        new_state = _integrate_euler(state, intermediates, tendency_map, dt, backend)
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt)
 
         # Apply mask to state
-        new_state = _apply_mask(new_state, mask, backend)
+        new_state = _apply_mask(new_state, mask)
 
         # Build outputs (include state variables for saving)
         outputs: Outputs = {**intermediates}
@@ -148,8 +149,6 @@ def _transpose_vmap_output(result: Any, axes: tuple[int, ...]) -> Any:
     Returns:
         Transposed result.
     """
-    import jax.numpy as jnp
-
     expected_ndim = len(axes)
 
     def transpose_if_matching(arr: Any) -> Any:
@@ -253,7 +252,6 @@ def _integrate_euler(
     intermediates: dict[str, Array],
     tendency_map: dict[str, list],
     dt: float,
-    backend: str,
 ) -> State:
     """Integrate state using Euler explicit method with declarative tendency_map.
 
@@ -262,50 +260,30 @@ def _integrate_euler(
         intermediates: All computed derived values.
         tendency_map: Mapping from state var name to list of TendencySource.
         dt: Timestep in seconds.
-        backend: Backend name for array operations.
 
     Returns:
         New state after integration.
     """
-    if backend == "jax":
-        import jax.numpy as jnp
-
-        new_state = {}
-        for var_name, value in state.items():
-            if var_name in tendency_map:
-                sources = tendency_map[var_name]
-                total = sum(
-                    src.sign * intermediates[src.source.removeprefix("derived.")]
-                    for src in sources
-                )
-                new_state[var_name] = jnp.maximum(value + total * dt, 0.0)
-            else:
-                new_state[var_name] = value
-        return new_state
-    else:
-        import numpy as np
-
-        new_state = {}
-        for var_name, value in state.items():
-            if var_name in tendency_map:
-                sources = tendency_map[var_name]
-                total = sum(
-                    src.sign * intermediates[src.source.removeprefix("derived.")]
-                    for src in sources
-                )
-                new_state[var_name] = np.maximum(value + total * dt, 0.0)
-            else:
-                new_state[var_name] = np.copy(value)
-        return new_state
+    new_state = {}
+    for var_name, value in state.items():
+        if var_name in tendency_map:
+            sources = tendency_map[var_name]
+            total = sum(
+                src.sign * intermediates[src.source.removeprefix("derived.")]
+                for src in sources
+            )
+            new_state[var_name] = jnp.maximum(value + total * dt, 0.0)
+        else:
+            new_state[var_name] = value
+    return new_state
 
 
-def _apply_mask(state: State, mask: Array, _backend: str) -> State:
+def _apply_mask(state: State, mask: Array) -> State:
     """Apply mask to state variables.
 
     Args:
         state: Current state.
         mask: Binary mask (1 = valid, 0 = masked).
-        backend: Backend name.
 
     Returns:
         Masked state.
