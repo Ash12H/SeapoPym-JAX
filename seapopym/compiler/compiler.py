@@ -108,17 +108,7 @@ def _prepare_forcings(
                     )
 
                 # Slice at xarray level (still lazy)
-                forcing_times = forcing_coords.values
-                start_idx = int(np.searchsorted(forcing_times, time_grid.start, side="left"))
-                end_idx = int(np.searchsorted(forcing_times, time_grid.end, side="left"))
-
-                if end_idx - start_idx < 2:
-                    if start_idx > 0:
-                        start_idx -= 1
-                    if end_idx < len(forcing_times):
-                        end_idx += 1
-
-                da = da.isel(T=slice(start_idx, end_idx))
+                da = da.sel(T=slice(time_grid.start, time_grid.end))
 
             if is_dynamic:
                 # Keep lazy — ForcingStore will materialize at runtime
@@ -173,6 +163,7 @@ def _prepare_forcings(
         interp_method=interp_method,
         fill_nan=fill_nan,
         _dynamic_forcings=dynamic_forcings,
+        _time_coords=time_grid.coords,
     )
 
     return forcing_store, coords
@@ -295,5 +286,5 @@ def compile_model(
         dt=dt,
         trainable_params=trainable,
         time_grid=time_grid,
-        batch_size=config.execution.batch_size,
+        chunk_size=config.execution.chunk_size,
     )

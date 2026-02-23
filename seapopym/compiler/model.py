@@ -45,7 +45,7 @@ class CompiledModel:
         dt: Timestep in seconds.
         trainable_params: List of parameter names that can be optimized.
         time_grid: Temporal grid (start, end, n_timesteps, coords). None if not using calendar.
-        batch_size: Number of timesteps per batch. None = process all at once.
+        chunk_size: Number of timesteps per temporal chunk. None = process all at once.
     """
 
     # Source
@@ -71,7 +71,7 @@ class CompiledModel:
 
     # Temporal configuration (Phase 4)
     time_grid: TimeGrid | None = None
-    batch_size: int | None = None
+    chunk_size: int | None = None
 
     @property
     def mask(self) -> Array | None:
@@ -107,6 +107,7 @@ class CompiledModel:
             interp_method=self.forcings.interp_method,
             fill_nan=self.forcings.fill_nan,
             _dynamic_forcings=set(self.forcings._dynamic_forcings),
+            _time_coords=self.forcings._time_coords,
         )
 
         return CompiledModel(

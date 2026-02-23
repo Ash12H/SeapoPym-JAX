@@ -1,11 +1,11 @@
-"""ForcingStore: lazy forcing loading with JAX-native interpolation.
+"""ForcingStore: lazy forcing loading with xarray-based interpolation.
 
 Encapsulates all forcings and provides chunked access with on-the-fly
-temporal interpolation using jax.vmap(jnp.interp) instead of scipy.
+temporal interpolation using xr.DataArray.interp() / .reindex().
 
 Key features:
 - Lazy loading: xr.DataArray forcings are NOT materialized at compile time
-- JAX-native interpolation: differentiable, JIT-compilable, no scipy dependency
+- xarray interpolation: uses scipy (linear) or pandas (nearest/ffill) under the hood
 - Unified chunking API: get_chunk() replaces _slice_forcings() in all runners
 """
 
@@ -14,132 +14,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 
 from seapopym.types import Array
-
-
-def compute_source_window(
-    source_len: int,
-    target_len: int,
-    start: int,
-    end: int,
-    method: str,
-) -> tuple[int, int]:
-    """Compute the source index window needed to interpolate a target chunk.
-
-    Works in index space: target_indices = linspace(0, source_len-1, target_len).
-    For the target chunk [start, end), determines which source indices are needed.
-
-    Args:
-        source_len: Number of source timesteps.
-        target_len: Number of target timesteps.
-        start: Start of target chunk (inclusive).
-        end: End of target chunk (exclusive).
-        method: Interpolation method ("nearest", "linear", "ffill").
-
-    Returns:
-        Tuple of (src_start, src_end) — inclusive start, exclusive end.
-    """
-    if source_len <= 1 or target_len <= 1:
-        return 0, source_len
-
-    target_indices = np.linspace(0, source_len - 1, target_len)
-    chunk_indices = target_indices[start:end]
-
-    min_idx = chunk_indices[0]
-    max_idx = chunk_indices[-1]
-
-    if method == "nearest":
-        src_start = int(np.clip(np.round(min_idx), 0, source_len - 1))
-        src_end = int(np.clip(np.round(max_idx), 0, source_len - 1)) + 1
-    elif method == "linear":
-        src_start = int(np.clip(np.floor(min_idx), 0, source_len - 1))
-        src_end = int(np.clip(np.ceil(max_idx), 0, source_len - 1)) + 1
-    elif method == "ffill":
-        src_start = int(np.clip(np.floor(min_idx), 0, source_len - 1))
-        src_end = int(np.clip(np.floor(max_idx), 0, source_len - 1)) + 1
-    else:
-        src_start = 0
-        src_end = source_len
-
-    return src_start, src_end
-
-
-def interpolate_chunk(
-    source_chunk: Array,
-    source_indices: Array,
-    target_indices: Array,
-    method: str,
-) -> Array:
-    """Interpolate a source chunk to target indices.
-
-    Uses JAX-native operations: jax.vmap(jnp.interp), which is differentiable
-    and JIT-compilable.
-
-    Args:
-        source_chunk: Source data, shape (S, ...).
-        source_indices: Source positions, shape (S,).
-        target_indices: Target positions for this chunk, shape (C,).
-        method: Interpolation method ("nearest", "linear", "ffill").
-
-    Returns:
-        Interpolated data, shape (C, ...).
-    """
-    if method == "nearest":
-        nearest_idx = np.round(target_indices).astype(int)
-        offset = int(source_indices[0])
-        nearest_idx = np.clip(nearest_idx - offset, 0, len(source_indices) - 1)
-        return source_chunk[nearest_idx]
-
-    if method == "ffill":
-        ffill_idx = np.floor(target_indices).astype(int)
-        offset = int(source_indices[0])
-        ffill_idx = np.clip(ffill_idx - offset, 0, len(source_indices) - 1)
-        return source_chunk[ffill_idx]
-
-    # method == "linear"
-    src_idx = jnp.asarray(source_indices)
-    tgt_idx = jnp.asarray(target_indices)
-    chunk = jnp.asarray(source_chunk)
-
-    original_shape = chunk.shape[1:]
-    flat = chunk.reshape(chunk.shape[0], -1)  # (S, N)
-
-    result_flat = jax.vmap(
-        lambda fp: jnp.interp(tgt_idx, src_idx, fp),
-        in_axes=1,
-        out_axes=1,
-    )(flat)  # (C, N)
-
-    return result_flat.reshape((len(target_indices),) + original_shape)
-
-
-def _interpolate_full(
-    source: Array,
-    source_len: int,
-    target_len: int,
-    method: str,
-) -> Array:
-    """Interpolate an entire forcing from source_len to target_len timesteps.
-
-    Convenience wrapper around interpolate_chunk for eager (compile-time) use.
-
-    Args:
-        source: Source array, shape (source_len, ...).
-        source_len: Number of source timesteps.
-        target_len: Number of target timesteps.
-        method: Interpolation method.
-
-    Returns:
-        Interpolated array, shape (target_len, ...).
-    """
-    source_indices = np.arange(source_len, dtype=np.float64)
-    target_indices = np.linspace(0, source_len - 1, target_len)
-    return interpolate_chunk(source, source_indices, target_indices, method)
 
 
 @dataclass
@@ -159,6 +38,7 @@ class ForcingStore:
         interp_method: Interpolation method ("constant", "nearest", "linear", "ffill").
         fill_nan: Value to replace NaN with.
         _dynamic_forcings: Set of forcing names that have a time dimension.
+        _time_coords: Target datetime coordinates for interpolation (from TimeGrid).
     """
 
     _forcings: dict[str, xr.DataArray | Array] = field(default_factory=dict)
@@ -166,6 +46,7 @@ class ForcingStore:
     interp_method: str = "constant"
     fill_nan: float = 0.0
     _dynamic_forcings: set[str] = field(default_factory=set)
+    _time_coords: np.ndarray | None = None
 
     def get_chunk(self, start: int, end: int) -> dict[str, Array]:
         """Load and interpolate a temporal chunk [start, end).
@@ -269,38 +150,18 @@ class ForcingStore:
             return self._materialize_with_nan(chunk)
 
         # Interpolation needed
-        return self._interpolate_lazy(name, data, source_len, start, end)
+        target_times = self._time_coords[start:end]
+        chunk = self._xarray_interpolate(data, target_times)
+        return self._materialize_with_nan(chunk)
 
-    def _interpolate_lazy(
-        self,
-        name: str,
-        data: xr.DataArray,
-        source_len: int,
-        start: int,
-        end: int,
-    ) -> Array:
-        """Load source window from lazy DataArray and interpolate."""
-        # Compute source window
-        src_start, src_end = compute_source_window(
-            source_len, self.n_timesteps, start, end, self.interp_method
-        )
-
-        # Load only the needed window
-        chunk_data = data.isel(T=slice(src_start, src_end)).values
-
-        # Preprocess NaN
-        nan_mask = np.isnan(chunk_data)
-        if nan_mask.any():
-            chunk_data = np.where(nan_mask, self.fill_nan, chunk_data)
-
-        # Compute index mappings
-        source_indices = np.arange(src_start, src_end, dtype=np.float64)
-        all_target_indices = np.linspace(0, source_len - 1, self.n_timesteps)
-        target_indices = all_target_indices[start:end]
-
-        return interpolate_chunk(
-            chunk_data, source_indices, target_indices, self.interp_method
-        )
+    def _xarray_interpolate(self, data: xr.DataArray, target_times: np.ndarray) -> np.ndarray:
+        """Interpolate a lazy DataArray to target times via xarray."""
+        if self.interp_method == "linear":
+            return data.interp(T=target_times, method="linear",
+                               kwargs={"fill_value": "extrapolate"}).values
+        if self.interp_method in ("nearest", "ffill"):
+            return data.reindex(T=target_times, method=self.interp_method).values
+        raise ValueError(f"Unknown interp_method: {self.interp_method}")
 
     def _materialize_with_nan(self, arr: Array) -> Array:
         """Materialize array and replace NaN with fill_nan."""

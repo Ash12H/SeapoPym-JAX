@@ -1,142 +1,11 @@
-"""Tests for ForcingStore, compute_source_window, and interpolate_chunk."""
+"""Tests for ForcingStore."""
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
-from seapopym.compiler.forcing import (
-    ForcingStore,
-    _interpolate_full,
-    compute_source_window,
-    interpolate_chunk,
-)
-
-
-class TestComputeSourceWindow:
-    """Tests for compute_source_window()."""
-
-    def test_full_range(self):
-        """Full chunk covers all source indices."""
-        src_start, src_end = compute_source_window(
-            source_len=5, target_len=10, start=0, end=10, method="linear"
-        )
-        assert src_start == 0
-        assert src_end == 5
-
-    def test_first_half_linear(self):
-        """First half of target should need first portion of source."""
-        src_start, src_end = compute_source_window(
-            source_len=10, target_len=20, start=0, end=10, method="linear"
-        )
-        assert src_start == 0
-        # target_indices[9] = linspace(0, 9, 20)[9] = 9 * 9/19 ≈ 4.26
-        # ceil(4.26) = 5
-        assert src_end == 6  # indices 0..5 inclusive
-
-    def test_second_half_linear(self):
-        """Second half of target should need second portion of source."""
-        src_start, src_end = compute_source_window(
-            source_len=10, target_len=20, start=10, end=20, method="linear"
-        )
-        # target_indices[10] = linspace(0, 9, 20)[10] = 10 * 9/19 ≈ 4.73
-        # floor(4.73) = 4
-        assert src_start == 4
-        assert src_end == 10
-
-    def test_nearest(self):
-        """Nearest uses round()."""
-        src_start, src_end = compute_source_window(
-            source_len=4, target_len=8, start=0, end=4, method="nearest"
-        )
-        # target_indices = linspace(0, 3, 8) = [0, 0.43, 0.86, 1.29, ...]
-        # round([0, 0.43, 0.86, 1.29]) = [0, 0, 1, 1]
-        assert src_start == 0
-        assert src_end == 2  # 0 and 1
-
-    def test_ffill(self):
-        """Forward fill uses floor()."""
-        src_start, src_end = compute_source_window(
-            source_len=2, target_len=4, start=0, end=4, method="ffill"
-        )
-        # target_indices = linspace(0, 1, 4) = [0, 0.33, 0.66, 1]
-        # floor = [0, 0, 0, 1]
-        assert src_start == 0
-        assert src_end == 2
-
-    def test_single_source(self):
-        """Edge case: only 1 source timestep."""
-        src_start, src_end = compute_source_window(
-            source_len=1, target_len=10, start=0, end=10, method="linear"
-        )
-        assert src_start == 0
-        assert src_end == 1
-
-
-class TestInterpolateChunk:
-    """Tests for interpolate_chunk() and _interpolate_full()."""
-
-    def test_linear_1d(self):
-        """Linear interpolation of a 1D ramp."""
-        source = np.array([0.0, 10.0, 20.0, 30.0, 40.0]).reshape(-1, 1)
-        source_idx = np.arange(5, dtype=np.float64)
-        target_idx = np.linspace(0, 4, 9)
-
-        result = interpolate_chunk(source, source_idx, target_idx, "linear")
-        expected = np.linspace(0, 40, 9).reshape(-1, 1)
-        np.testing.assert_allclose(np.asarray(result), expected, atol=1e-5)
-
-    def test_linear_2d(self):
-        """Linear interpolation preserves spatial dims."""
-        source = np.arange(6).reshape(2, 3).astype(float)  # (2, 3)
-        source_idx = np.array([0.0, 1.0])
-        target_idx = np.array([0.0, 0.5, 1.0])
-
-        result = interpolate_chunk(source, source_idx, target_idx, "linear")
-        assert result.shape == (3, 3)
-        np.testing.assert_allclose(np.asarray(result[0]), source[0], atol=1e-5)
-        np.testing.assert_allclose(np.asarray(result[2]), source[1], atol=1e-5)
-        np.testing.assert_allclose(np.asarray(result[1]), (source[0] + source[1]) / 2, atol=1e-5)
-
-    def test_nearest(self):
-        """Nearest neighbor interpolation."""
-        source = np.array([10.0, 20.0]).reshape(-1, 1)
-        source_idx = np.array([0.0, 1.0])
-        target_idx = np.linspace(0, 1, 4)  # [0, 0.33, 0.66, 1]
-
-        result = interpolate_chunk(source, source_idx, target_idx, "nearest")
-        expected = np.array([10.0, 10.0, 20.0, 20.0]).reshape(-1, 1)
-        np.testing.assert_array_equal(np.asarray(result), expected)
-
-    def test_ffill(self):
-        """Forward fill interpolation."""
-        source = np.array([10.0, 20.0]).reshape(-1, 1)
-        source_idx = np.array([0.0, 1.0])
-        target_idx = np.linspace(0, 1, 4)  # [0, 0.33, 0.66, 1]
-
-        result = interpolate_chunk(source, source_idx, target_idx, "ffill")
-        expected = np.array([10.0, 10.0, 10.0, 20.0]).reshape(-1, 1)
-        np.testing.assert_array_equal(np.asarray(result), expected)
-
-    def test_interpolate_full_linear(self):
-        """Full interpolation from source_len to target_len."""
-        source = np.linspace(0, 40, 5).reshape(-1, 1, 1)
-        result = _interpolate_full(source, 5, 9, "linear")
-        expected = np.linspace(0, 40, 9).reshape(-1, 1, 1)
-        np.testing.assert_allclose(np.asarray(result), expected, atol=1e-5)
-
-    def test_interpolate_full_nearest(self):
-        """Full interpolation with nearest method."""
-        source = np.array([10.0, 20.0]).reshape(-1, 1, 1)
-        result = _interpolate_full(source, 2, 4, "nearest")
-        expected = np.array([10.0, 10.0, 20.0, 20.0]).reshape(-1, 1, 1)
-        np.testing.assert_array_equal(np.asarray(result), expected)
-
-    def test_interpolate_full_ffill(self):
-        """Full interpolation with ffill method."""
-        source = np.array([10.0, 20.0]).reshape(-1, 1, 1)
-        result = _interpolate_full(source, 2, 4, "ffill")
-        expected = np.array([10.0, 10.0, 10.0, 20.0]).reshape(-1, 1, 1)
-        np.testing.assert_array_equal(np.asarray(result), expected)
+from seapopym.compiler.forcing import ForcingStore
 
 
 class TestForcingStore:
@@ -245,20 +114,20 @@ class TestForcingStore:
 
     def test_lazy_xarray_interpolated(self):
         """Lazy xr.DataArray needing interpolation."""
-        # 5 source timesteps → 10 target timesteps, linear
+        source_times = pd.date_range("2000-01-01", periods=5, freq="2D")
         data = np.linspace(0, 40, 5).reshape(-1, 1, 1).astype(np.float64)
-        da = xr.DataArray(data, dims=["T", "Y", "X"])
+        da = xr.DataArray(data, dims=["T", "Y", "X"], coords={"T": source_times})
+        target_times = pd.date_range(source_times[0], source_times[-1], periods=10).to_numpy()
+
         store = ForcingStore(
             _forcings={"temp": da},
             n_timesteps=10,
             interp_method="linear",
             _dynamic_forcings={"temp"},
+            _time_coords=target_times,
         )
-
-        all_data = store.get_chunk(0, 10)
-        result = np.asarray(all_data["temp"]).flatten()
-        expected = np.linspace(0, 40, 10)
-        np.testing.assert_allclose(result, expected, atol=1e-5)
+        result = np.asarray(store.get_chunk(0, 10)["temp"]).flatten()
+        np.testing.assert_allclose(result, np.linspace(0, 40, 10), atol=1e-5)
 
     def test_jax_arrays(self):
         """ForcingStore produces JAX arrays."""

@@ -1,6 +1,7 @@
 """Tests for temporal interpolation of forcings."""
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -30,11 +31,11 @@ class TestForcingInterpolation:
 
     def test_static_forcing_no_interpolation(self, blueprint):
         """Test that static forcings (no time dim) are NOT interpolated."""
-        # Config with static forcing (Y, X)
         ny, nx = 10, 5
         nt = 100
 
         bathy_data = np.random.rand(ny, nx)
+        target_coords = pd.date_range("2000-01-01", periods=nt, freq="1D").to_numpy()
 
         config = Config.from_dict(
             {
@@ -44,7 +45,7 @@ class TestForcingInterpolation:
                     "time_index": xr.DataArray(np.arange(nt), dims=["T"]),
                 },
                 "execution": {
-                    "forcing_interpolation": "linear",  # Enable interpolation globally
+                    "forcing_interpolation": "linear",
                     "time_start": "2000-01-01",
                     "time_end": "2000-01-02",
                 },
@@ -65,7 +66,7 @@ class TestForcingInterpolation:
                 end=np.datetime64("2000-01-02"),
                 dt_seconds=86400,
                 n_timesteps=nt,
-                coords=np.array([]),
+                coords=target_coords,
             ),
             blueprint_dims=blueprint_dims,
             fill_nan=0.0,
@@ -77,25 +78,24 @@ class TestForcingInterpolation:
 
     def test_temporal_interpolation_linear(self, blueprint):
         """Test linear interpolation of undersampled time forcing."""
-        # Source: 5 timesteps. Target: 9 timesteps.
-        # 0, 1, 2, 3, 4 -> 0.0, 0.5, 1.0, 1.5, ...
         source_t = 5
-        target_t = 9  # implies dt is halved approx
+        target_t = 9
 
-        # Simple ramp: 0, 10, 20, 30, 40
+        source_times = pd.date_range("2000-01-01", periods=source_t, freq="1D")
         data = np.linspace(0, 40, source_t).reshape(-1, 1, 1)  # (T, Y, X)
+        target_coords = pd.date_range(source_times[0], source_times[-1], periods=target_t).to_numpy()
 
         config = Config.from_dict(
             {
                 "parameters": {},
                 "forcings": {
-                    "temp": xr.DataArray(data, dims=["T", "Y", "X"]),
+                    "temp": xr.DataArray(data, dims=["T", "Y", "X"], coords={"T": source_times}),
                     "time_index": xr.DataArray(np.arange(target_t), dims=["T"]),
                 },
                 "execution": {
                     "forcing_interpolation": "linear",
                     "time_start": "2000-01-01",
-                    "time_end": "2000-01-02",
+                    "time_end": "2000-01-05",
                 },
                 "initial_state": {},
             }
@@ -108,37 +108,34 @@ class TestForcingInterpolation:
             {},
             shapes,
             time_grid=TimeGrid(
-                start=np.datetime64("2000-01-01"),
-                end=np.datetime64("2000-01-02"),
+                start=source_times[0].to_datetime64(),
+                end=source_times[-1].to_datetime64(),
                 dt_seconds=86400,
                 n_timesteps=target_t,
-                coords=np.array([]),
+                coords=target_coords,
             ),
             blueprint_dims=blueprint_dims,
             fill_nan=0.0,
         )
 
-        # Interpolation is deferred — use get_all() to materialize
         all_forcings = forcings.get_all()
         res = np.asarray(all_forcings["temp"]).flatten()
         expected = np.linspace(0, 40, target_t)
-
-        # Should be close
         np.testing.assert_allclose(res, expected, atol=1e-5)
 
     def test_temporal_interpolation_nearest(self, blueprint):
         """Test nearest neighbor interpolation."""
-        # source_t = 2 (implicit in data shape)
         target_t = 4
 
-        # [10, 20] -> [10, 10, 20, 20] roughly
+        source_times = pd.date_range("2000-01-01", periods=2, freq="1D")
         data = np.array([10.0, 20.0]).reshape(-1, 1, 1)
+        target_coords = pd.date_range(source_times[0], source_times[-1], periods=target_t).to_numpy()
 
         config = Config.from_dict(
             {
                 "parameters": {},
                 "forcings": {
-                    "temp": xr.DataArray(data, dims=["T", "Y", "X"]),
+                    "temp": xr.DataArray(data, dims=["T", "Y", "X"], coords={"T": source_times}),
                     "time_index": xr.DataArray(np.arange(target_t), dims=["T"]),
                 },
                 "execution": {
@@ -157,38 +154,34 @@ class TestForcingInterpolation:
             {},
             shapes,
             time_grid=TimeGrid(
-                start=np.datetime64("2000-01-01"),
-                end=np.datetime64("2000-01-02"),
+                start=source_times[0].to_datetime64(),
+                end=source_times[-1].to_datetime64(),
                 dt_seconds=86400,
                 n_timesteps=target_t,
-                coords=np.array([]),
+                coords=target_coords,
             ),
             blueprint_dims=blueprint_dims,
             fill_nan=0.0,
         )
 
-        # Interpolation is deferred — use get_all() to materialize
         all_forcings = forcings.get_all()
         res = np.asarray(all_forcings["temp"]).flatten()
-        # indices: 0->0, 1->0.33(0), 2->0.66(1), 3->1
-        # With linspace(0, 1, 4): 0.0, 0.33, 0.66, 1.0
-        # round(0)=0, round(0.33)=0, round(0.66)=1, round(1)=1
         expected = [10.0, 10.0, 20.0, 20.0]
-
         np.testing.assert_array_equal(res, expected)
 
     def test_temporal_interpolation_ffill(self, blueprint):
         """Test forward fill interpolation."""
-        # source_t = 2 (implicit in data shape)
         target_t = 4
 
+        source_times = pd.date_range("2000-01-01", periods=2, freq="1D")
         data = np.array([10.0, 20.0]).reshape(-1, 1, 1)
+        target_coords = pd.date_range(source_times[0], source_times[-1], periods=target_t).to_numpy()
 
         config = Config.from_dict(
             {
                 "parameters": {},
                 "forcings": {
-                    "temp": xr.DataArray(data, dims=["T", "Y", "X"]),
+                    "temp": xr.DataArray(data, dims=["T", "Y", "X"], coords={"T": source_times}),
                     "time_index": xr.DataArray(np.arange(target_t), dims=["T"]),
                 },
                 "execution": {
@@ -207,24 +200,17 @@ class TestForcingInterpolation:
             {},
             shapes,
             time_grid=TimeGrid(
-                start=np.datetime64("2000-01-01"),
-                end=np.datetime64("2000-01-02"),
+                start=source_times[0].to_datetime64(),
+                end=source_times[-1].to_datetime64(),
                 dt_seconds=86400,
                 n_timesteps=target_t,
-                coords=np.array([]),
+                coords=target_coords,
             ),
             blueprint_dims=blueprint_dims,
             fill_nan=0.0,
         )
 
-        # Interpolation is deferred — use get_all() to materialize
         all_forcings = forcings.get_all()
         res = np.asarray(all_forcings["temp"]).flatten()
-        # [0, 0.33, 0.66, 1.0] -> floor -> [0, 0, 0, 1]
-        # Wait, current implementation uses floor(linspace(0, N-1, M))
-        # linspace(0, 1, 4): 0, 0.33, 0.66, 1
-        # floor: 0, 0, 0, 1
-        # So we expect 10, 10, 10, 20
         expected = [10.0, 10.0, 10.0, 20.0]
-
         np.testing.assert_array_equal(res, expected)
