@@ -3,7 +3,6 @@
 import numpy as np
 import pytest
 
-pytest.importorskip("jax")
 import jax.numpy as jnp
 
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional

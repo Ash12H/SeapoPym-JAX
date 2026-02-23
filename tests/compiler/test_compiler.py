@@ -4,8 +4,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-pytest.importorskip("jax")
-
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import CANONICAL_DIMS, CompiledModel, Compiler, compile_model
 

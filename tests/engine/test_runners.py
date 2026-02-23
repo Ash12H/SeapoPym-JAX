@@ -3,8 +3,6 @@
 import numpy as np
 import pytest
 
-pytest.importorskip("jax")
-
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import compile_model
 from seapopym.engine.exceptions import ChunkingError

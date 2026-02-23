@@ -1,24 +1,19 @@
 """Engine package for execution of compiled models.
 
 This package provides:
-- Backends: JAXBackend (lax.scan)
-- Runners: StreamingRunner (production)
+- Runners: StreamingRunner (production, with chunking and async I/O)
 - Step function builder for time-stepping logic
-- Async I/O for streaming outputs
 
 Example:
     >>> from seapopym.compiler import compile_model
     >>> from seapopym.engine import StreamingRunner
     >>>
-    >>> # Production mode (with disk I/O)
     >>> model = compile_model(blueprint, config)
     >>> runner = StreamingRunner(model, chunk_size=365)
     >>> final_state = runner.run(output_path="/results/sim_001/")
 """
 
-from .backends import JAXBackend
 from .exceptions import (
-    BackendError,
     ChunkingError,
     EngineError,
     EngineIOError,
@@ -31,8 +26,6 @@ from .step import build_step_fn
 __all__ = [
     # Runners
     "StreamingRunner",
-    # Backends
-    "JAXBackend",
     # Step
     "build_step_fn",
     # I/O
@@ -40,7 +33,6 @@ __all__ = [
     # Exceptions
     "EngineError",
     "StepError",
-    "BackendError",
     "ChunkingError",
     "EngineIOError",
 ]

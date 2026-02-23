@@ -5,8 +5,6 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-pytest.importorskip("jax")
-
 from seapopym.blueprint import Blueprint, Config, ExecutionParams
 from seapopym.compiler.compiler import Compiler, TimeGrid
 

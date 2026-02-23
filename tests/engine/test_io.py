@@ -107,7 +107,6 @@ class TestDiskWriter:
 
     def test_jax_array_conversion(self, tmp_path):
         """Test that JAX arrays are converted to numpy."""
-        pytest.importorskip("jax")
         import jax.numpy as jnp
 
         output_path = tmp_path / "output"

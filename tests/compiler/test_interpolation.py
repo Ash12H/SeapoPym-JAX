@@ -4,8 +4,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-pytest.importorskip("jax")
-
 from seapopym.blueprint import Blueprint, Config
 from seapopym.compiler.compiler import Compiler, TimeGrid
 

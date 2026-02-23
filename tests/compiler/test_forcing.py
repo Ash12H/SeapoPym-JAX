@@ -4,8 +4,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-pytest.importorskip("jax")
-
 from seapopym.compiler.forcing import (
     ForcingStore,
     _interpolate_full,
