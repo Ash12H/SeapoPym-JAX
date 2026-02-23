@@ -1,23 +1,17 @@
 """Compiler package for transforming Blueprint + Config into executable JAX structures.
 
 This package provides:
-- Compiler: Main class for compiling blueprints
+- compile_model: Compile a Blueprint + Config into a CompiledModel
 - CompiledModel: Dataclass containing pytrees ready for execution
-- compile_model: Convenience function for compilation
+- TimeGrid: Temporal grid configuration
 - Shape inference, dimension mapping, and preprocessing utilities
 
 Example:
     >>> from seapopym.blueprint import Blueprint, Config
-    >>> from seapopym.compiler import Compiler, compile_model
+    >>> from seapopym.compiler import compile_model
     >>>
     >>> blueprint = Blueprint.load("model.yaml")
     >>> config = Config.load("run.yaml")
-    >>>
-    >>> # Using the class
-    >>> compiler = Compiler(backend="jax")
-    >>> compiled = compiler.compile(blueprint, config)
-    >>>
-    >>> # Or using the convenience function
     >>> compiled = compile_model(blueprint, config)
     >>>
     >>> # Access compiled data
@@ -25,52 +19,24 @@ Example:
     >>> compiled.shapes  # {"Y": 180, "X": 360, ...}
 """
 
-from .compiler import Compiler, compile_model
-from .exceptions import (
-    CompilerError,
-    GridAlignmentError,
-    MissingDimensionError,
-    ShapeInferenceError,
-    TransposeError,
-)
+from .compiler import compile_model
+from .exceptions import CompilerError, GridAlignmentError, ShapeInferenceError, TransposeError
 from .forcing import ForcingStore
 from .inference import infer_shapes
-from .model import CANONICAL_DIMS, CompiledModel
-from .preprocessing import prepare_array, preprocess_nan, strip_xarray
-from .transpose import (
-    apply_dimension_mapping,
-    get_canonical_order,
-    transpose_array,
-    transpose_canonical,
-)
-from .units import UnitValidator, validate_units
+from .model import CompiledModel
+from .time_grid import TimeGrid
+from seapopym.blueprint.units import UnitValidator, validate_units
 
 __all__ = [
-    # Main API
-    "Compiler",
     "compile_model",
     "CompiledModel",
     "ForcingStore",
-    # Constants
-    "CANONICAL_DIMS",
-    # Inference
+    "TimeGrid",
     "infer_shapes",
-    # Transpose
-    "apply_dimension_mapping",
-    "get_canonical_order",
-    "transpose_canonical",
-    "transpose_array",
-    # Preprocessing
-    "prepare_array",
-    "preprocess_nan",
-    "strip_xarray",
-    # Units
     "UnitValidator",
     "validate_units",
-    # Exceptions
     "CompilerError",
     "ShapeInferenceError",
     "GridAlignmentError",
-    "MissingDimensionError",
     "TransposeError",
 ]

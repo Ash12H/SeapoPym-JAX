@@ -133,7 +133,7 @@ config = Config.from_dict(
             "time_end": end_date,
             "dt": dt,
             "forcing_interpolation": "linear",
-            "batch_size": 1000,
+            "chunk_size": 800,
         },
     }
 )
@@ -145,8 +145,7 @@ config = Config.from_dict(
 if __name__ == "__main__":
     jax.config.update("jax_default_device", jax.devices("cpu")[0])
     print(f"Compiling model ({blueprint.id})...")
-    model = compile_model(blueprint, config, backend="jax")
-    print(f"Model compiled. Backend: {model.backend}")
+    model = compile_model(blueprint, config)
 
     runner = StreamingRunner(model)
     print(f"Running simulation on {grid_size} grid for {len(dates)} days...")

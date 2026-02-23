@@ -14,7 +14,7 @@ Example:
     >>> config = Config.load("run.yaml")
     >>>
     >>> # Register a custom function
-    >>> @functional(name="biol:growth", backend="jax")
+    >>> @functional(name="biol:growth")
     ... def growth(biomass, rate, temp):
     ...     return biomass * rate * jnp.exp(temp / 10)
 """

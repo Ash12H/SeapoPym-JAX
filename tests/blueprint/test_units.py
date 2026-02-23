@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from seapopym.blueprint import Blueprint
+from seapopym.blueprint import Blueprint, clear_registry
 from seapopym.blueprint.registry import functional
 from seapopym.blueprint.exceptions import UnitError
-from seapopym.compiler.units import UnitValidator
+from seapopym.blueprint.units import UnitValidator
+
+
+@pytest.fixture(autouse=True)
+def clean_registry():
+    """Clear registry before and after each test."""
+    clear_registry()
+    yield
+    clear_registry()
 
 
 # Sample functions for testing
@@ -88,11 +96,8 @@ class TestUnitValidator:
 
     def test_validate_process_chain_success(self):
         """Test successful validation of a process chain."""
-        # Register test function
-        # Register test function
         functional(
             name="test:growth",
-            backend="numpy",
             units={"biomass": "g", "rate": "1/s", "return": "g/s"},
         )(sample_growth)
 
@@ -122,7 +127,7 @@ class TestUnitValidator:
         # Resolve functions
         from seapopym.blueprint.registry import get_function
 
-        resolved = {"test:growth": get_function("test:growth", "numpy")}
+        resolved = {"test:growth": get_function("test:growth")}
 
         # Validate
         validator = UnitValidator()
@@ -132,11 +137,8 @@ class TestUnitValidator:
 
     def test_validate_process_chain_input_mismatch(self):
         """Test validation failure with input unit mismatch."""
-        # Register test function expecting m/s
-        # Register test function expecting m/s
         functional(
             name="test:transport",
-            backend="numpy",
             units={"biomass": "g", "velocity": "m/s", "return": "g*m/s"},
         )(sample_transport)
 
@@ -165,7 +167,7 @@ class TestUnitValidator:
         # Resolve functions
         from seapopym.blueprint.registry import get_function
 
-        resolved = {"test:transport": get_function("test:transport", "numpy")}
+        resolved = {"test:transport": get_function("test:transport")}
 
         # Validate
         validator = UnitValidator()
@@ -177,11 +179,8 @@ class TestUnitValidator:
 
     def test_validate_process_chain_tendency_must_have_time_dimension(self):
         """Test that tendencies must have /s time dimension."""
-        # Register function returning g (not g/s)
-        # Register function returning g (not g/s)
         functional(
             name="test:bad_growth",
-            backend="numpy",
             units={"biomass": "g", "rate": "dimensionless", "return": "g"},  # Missing /s!
         )(sample_growth)
 
@@ -211,7 +210,7 @@ class TestUnitValidator:
         # Resolve functions
         from seapopym.blueprint.registry import get_function
 
-        resolved = {"test:bad_growth": get_function("test:bad_growth", "numpy")}
+        resolved = {"test:bad_growth": get_function("test:bad_growth")}
 
         # Validate
         validator = UnitValidator()
@@ -224,13 +223,10 @@ class TestUnitValidator:
 
     def test_validate_units_convenience_function(self):
         """Test the convenience function validate_units()."""
-        from seapopym.compiler.units import validate_units
+        from seapopym.blueprint.units import validate_units
 
-        # Register test function
-        # Register test function
         functional(
             name="test:conv_growth",
-            backend="numpy",
             units={"biomass": "g", "rate": "1/s", "return": "g/s"},
         )(sample_growth)
 
@@ -260,7 +256,7 @@ class TestUnitValidator:
         # Resolve functions
         from seapopym.blueprint.registry import get_function
 
-        resolved = {"test:conv_growth": get_function("test:conv_growth", "numpy")}
+        resolved = {"test:conv_growth": get_function("test:conv_growth")}
 
         # Validate
         errors = validate_units(blueprint, resolved)

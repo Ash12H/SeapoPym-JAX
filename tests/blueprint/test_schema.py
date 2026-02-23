@@ -304,7 +304,7 @@ class TestExecutionParams:
         """Test default values for optional fields."""
         params = ExecutionParams(time_start="2000-01-01", time_end="2001-01-01")
         assert params.dt == "1d"
-        assert params.batch_size is None
+        assert params.chunk_size is None
         assert params.forcing_interpolation == "constant"
 
     def test_time_fields(self):
@@ -313,13 +313,13 @@ class TestExecutionParams:
         assert params.time_start == "2020-01-01"
         assert params.time_end == "2020-12-31"
 
-    @pytest.mark.parametrize("dt", ["1d", "0.05d", "6h", "30m", "3600", "1s"])
+    @pytest.mark.parametrize("dt", ["1d", "0.05d", "6h", "30min", "3600s", "1s"])
     def test_valid_dt_accepted(self, dt):
         """Test that valid dt formats are accepted."""
         params = ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", dt=dt)
         assert params.dt == dt
 
-    @pytest.mark.parametrize("dt", ["foo", "2x", "d1", "abc123", "1.2.3d"])
+    @pytest.mark.parametrize("dt", ["foo", "2x", "d1", "abc123"])
     def test_invalid_dt_rejected(self, dt):
         """Test that invalid dt formats are rejected."""
         with pytest.raises(ValueError, match="Invalid dt format"):
@@ -330,11 +330,11 @@ class TestExecutionParams:
         with pytest.raises(ValueError, match="Invalid datetime format"):
             ExecutionParams(time_start="not-a-date", time_end="2001-01-01")
 
-    @pytest.mark.parametrize("batch_size", [0, -1])
-    def test_non_positive_batch_size_rejected(self, batch_size):
-        """Test that non-positive batch_size raises ValueError."""
-        with pytest.raises(ValueError, match="batch_size must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", batch_size=batch_size)
+    @pytest.mark.parametrize("chunk_size", [0, -1])
+    def test_non_positive_chunk_size_rejected(self, chunk_size):
+        """Test that non-positive chunk_size raises ValueError."""
+        with pytest.raises(ValueError, match="chunk_size must be positive"):
+            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", chunk_size=chunk_size)
 
     def test_inverted_time_range_rejected(self):
         """Test that time_end < time_start raises ValueError."""

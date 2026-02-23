@@ -317,8 +317,7 @@ config = Config.from_dict(
 # =============================================================================
 
 print("\nCompilation du modèle...")
-model = compile_model(blueprint, config, backend="jax")
-print(f"  Backend: {model.backend}")
+model = compile_model(blueprint, config)
 print(f"  Timesteps: {model.n_timesteps}")
 
 print("\nExécution de la simulation...")

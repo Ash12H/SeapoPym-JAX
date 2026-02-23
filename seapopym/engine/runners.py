@@ -16,7 +16,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .backends import get_backend
 from .exceptions import ChunkingError
 from .io import DiskWriter, MemoryWriter, OutputWriter
 from .step import build_step_fn
@@ -51,15 +50,14 @@ class StreamingRunner:
 
         Args:
             model: Compiled model to execute.
-            chunk_size: Number of timesteps per chunk. If None, uses model.batch_size.
-                If both None, processes entire simulation in one batch.
+            chunk_size: Number of timesteps per chunk. If None, uses model.chunk_size.
+                If both None, processes entire simulation in one chunk.
             io_workers: Number of async I/O workers.
         """
         self.model = model
-        # Priority: chunk_size (parameter) > model.batch_size (config) > model.n_timesteps (all)
-        self.chunk_size = chunk_size or getattr(model, "batch_size", None) or model.n_timesteps
+        # Priority: chunk_size (parameter) > model.chunk_size (config) > model.n_timesteps (all)
+        self.chunk_size = chunk_size or getattr(model, "chunk_size", None) or model.n_timesteps
         self.io_workers = io_workers
-        self.backend = get_backend(model.backend)
 
     def run(
         self,
@@ -130,11 +128,8 @@ class StreamingRunner:
                 forcings_chunk = self.model.forcings.get_chunk(start_t, end_t)
 
                 # Run scan on chunk
-                (state, params), outputs = self.backend.scan(
-                    step_fn=step_fn,
-                    init=(state, params),
-                    xs=forcings_chunk,
-                    length=chunk_len,
+                (state, params), outputs = self._scan(
+                    step_fn, (state, params), forcings_chunk, chunk_len
                 )
 
                 # Append outputs to writer (it will filter what it needs)
@@ -151,3 +146,15 @@ class StreamingRunner:
 
         logger.info("Simulation complete")
         return state, final_results
+
+    @staticmethod
+    def _scan(step_fn, init, xs, length):
+        """JIT-compiled lax.scan wrapper."""
+        import jax
+        import jax.lax as lax
+
+        @jax.jit
+        def _jitted(init_state, inputs):
+            return lax.scan(step_fn, init_state, inputs, length=length)
+
+        return _jitted(init, xs)

@@ -3,7 +3,6 @@
 Error codes:
 - E201: ShapeInferenceError
 - E202: GridAlignmentError
-- E203: MissingDimensionError
 - E204: TransposeError
 """
 
@@ -44,21 +43,6 @@ class GridAlignmentError(CompilerError):
         self.sizes = sizes
         size_details = ", ".join(f"{k}={v}" for k, v in sizes.items())
         super().__init__(f"Dimension '{dimension}' has inconsistent sizes: {size_details}")
-
-
-class MissingDimensionError(CompilerError):
-    """E203: A required dimension is missing from the data."""
-
-    code = "E203"
-
-    def __init__(self, dimension: str, variable: str, available: list[str]) -> None:
-        """Initialize with missing dimension, variable name, and available dims."""
-        self.dimension = dimension
-        self.variable = variable
-        self.available = available
-        super().__init__(
-            f"Variable '{variable}' is missing required dimension '{dimension}'. " f"Available: {available}"
-        )
 
 
 class TransposeError(CompilerError):

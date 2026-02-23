@@ -251,10 +251,10 @@ class ExecutionParams(BaseModel):
     Attributes:
         time_start: Simulation start time (ISO format, e.g., "2000-01-01").
         time_end: Simulation end time (ISO format, e.g., "2020-12-31").
-        dt: Timestep duration (e.g., "1d", "0.05d", "6h", "30m").
-        batch_size: Number of timesteps per execution batch.
-            - None (default): Process entire time range in one batch.
-            - int > 0: Split execution into batches of this size.
+        dt: Timestep duration (e.g., "1d", "0.05d", "6h", "30min").
+        chunk_size: Number of timesteps per temporal chunk.
+            - None (default): Process entire time range in one chunk.
+            - int > 0: Split execution into chunks of this size.
 
             Purpose:
             - Memory optimization: Limits output accumulation in RAM.
@@ -281,22 +281,26 @@ class ExecutionParams(BaseModel):
     time_start: str
     time_end: str
     dt: str = "1d"
-    batch_size: int | None = None
+    chunk_size: int | None = None
     forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
     output_path: str | None = None
 
     @field_validator("dt")
     @classmethod
     def validate_dt(cls, v: str) -> str:
-        """Validate timestep format (e.g. '1d', '6h', '30m', '0.05d')."""
-        import re
+        """Validate timestep format using pint (e.g. '1d', '6h', '30min', '0.05d')."""
+        import pint
 
-        if re.fullmatch(r"\d+(\.\d+)?[smhd]", v) or re.fullmatch(r"\d+(\.\d+)?", v):
-            return v
-        raise ValueError(
-            f"Invalid dt format: '{v}'. Expected '<number><unit>' "
-            f"where unit is s, m, h, or d (e.g. '1d', '6h', '30m', '0.05d')."
-        )
+        _ureg = pint.UnitRegistry()
+        try:
+            quantity = _ureg(v)
+            quantity.to("seconds")
+        except (pint.UndefinedUnitError, pint.DimensionalityError, Exception):
+            raise ValueError(
+                f"Invalid dt format: '{v}'. Expected a time duration "
+                f"(e.g. '1d', '6h', '30min', '1.5h')."
+            )
+        return v
 
     @field_validator("time_start", "time_end")
     @classmethod
@@ -320,22 +324,22 @@ class ExecutionParams(BaseModel):
         except Exception as e:
             raise ValueError(f"Invalid datetime format: {v}. Use ISO format (e.g., '2000-01-01').") from e
 
-    @field_validator("batch_size")
+    @field_validator("chunk_size")
     @classmethod
-    def validate_batch_size(cls, v: int | None) -> int | None:
-        """Validate that batch_size is positive if provided.
+    def validate_chunk_size(cls, v: int | None) -> int | None:
+        """Validate that chunk_size is positive if provided.
 
         Args:
-            v: Batch size to validate.
+            v: Chunk size to validate.
 
         Returns:
-            The validated batch size.
+            The validated chunk size.
 
         Raises:
-            ValueError: If batch_size is not positive.
+            ValueError: If chunk_size is not positive.
         """
         if v is not None and v <= 0:
-            raise ValueError(f"batch_size must be positive, got {v}")
+            raise ValueError(f"chunk_size must be positive, got {v}")
         return v
 
     @model_validator(mode="after")

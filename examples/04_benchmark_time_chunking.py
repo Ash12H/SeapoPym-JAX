@@ -116,13 +116,13 @@ config = Config.from_dict(
             "time_end": end_date,
             "dt": DT,
             "forcing_interpolation": "linear",
-            "batch_size": 1000,
+            "chunk_size": 1000,
         },
     }
 )
 
 print(f"Compiling model ({ny}x{nx} grid, {SIM_DAYS} days)...")
-model = compile_model(blueprint, config, backend="jax")
+model = compile_model(blueprint, config)
 n_timesteps = model.n_timesteps
 print(f"Model compiled: {n_timesteps} timesteps, {n_cohorts} cohorts")
 

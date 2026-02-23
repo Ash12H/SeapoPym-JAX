@@ -20,13 +20,12 @@ def setup_registry():
     """Setup test functions in registry."""
     clear_registry()
 
-    @functional(name="test:simple", backend="jax")
+    @functional(name="test:simple")
     def simple(x):
         return x * 2
 
     @functional(
         name="test:growth",
-        backend="jax",
         units={"biomass": "g", "rate": "1/d", "return": "g/d"},
     )
     def growth(biomass, rate):
@@ -34,21 +33,20 @@ def setup_registry():
 
     @functional(
         name="test:multi",
-        backend="jax",
         outputs=["out1", "out2"],
     )
     def multi(x):
         return x, x * 2
 
-    @functional(name="test:core_func", backend="jax", core_dims={"x": ["C"]})
+    @functional(name="test:core_func", core_dims={"x": ["C"]})
     def core_func(x):
         return x
 
-    @functional(name="test:core_out", backend="jax", core_dims={"field": ["C"]}, out_dims=["Z"])
+    @functional(name="test:core_out", core_dims={"field": ["C"]}, out_dims=["Z"])
     def core_out(field):
         return field
 
-    @functional(name="test:forcing_func", backend="jax")
+    @functional(name="test:forcing_func")
     def forcing_func(temp):
         return temp
 
@@ -82,7 +80,7 @@ class TestValidateBlueprint:
         )
 
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         assert any(e.code == "E101" for e in exc_info.value.validation_errors)
 
     def test_missing_required_input(self):
@@ -108,7 +106,7 @@ class TestValidateBlueprint:
         )
 
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         assert any(e.code == "E102" for e in exc_info.value.validation_errors)
 
     def test_output_count_mismatch(self):
@@ -134,7 +132,7 @@ class TestValidateBlueprint:
         )
 
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         assert any(e.code == "E107" for e in exc_info.value.validation_errors)
 
     def test_extra_input_argument(self):
@@ -156,7 +154,7 @@ class TestValidateBlueprint:
             }
         )
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         e102 = [e for e in exc_info.value.validation_errors if e.code == "E102"]
         assert len(e102) == 1
         assert "typo" in e102[0].extra
@@ -183,7 +181,7 @@ class TestValidateBlueprint:
             }
         )
 
-        result = validate_blueprint(bp, backend="jax")
+        result = validate_blueprint(bp)
         assert result.valid
         assert len(result.compute_nodes) == 1
         assert len(result.data_nodes) > 0
@@ -217,7 +215,7 @@ class TestValidateBlueprint:
         )
 
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         assert any(e.code == "E105" for e in exc_info.value.validation_errors)
         error_msgs = [str(e) for e in exc_info.value.validation_errors if e.code == "E105"]
         assert any("Unit mismatch" in msg for msg in error_msgs)
@@ -226,7 +224,7 @@ class TestValidateBlueprint:
         """Test validation fails if tendency source lacks time dimension."""
         from seapopym.blueprint import functional
 
-        @functional(name="test:bad_tendency", backend="jax", units={"return": "count"})
+        @functional(name="test:bad_tendency", units={"return": "count"})
         def bad_tendency(x):
             return x
 
@@ -253,7 +251,7 @@ class TestValidateBlueprint:
         )
 
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         assert any(e.code == "E105" for e in exc_info.value.validation_errors)
         error_msgs = [str(e) for e in exc_info.value.validation_errors if e.code == "E105"]
         assert any("lacks a time dimension" in msg for msg in error_msgs)
@@ -286,7 +284,7 @@ class TestValidateBlueprint:
         )
 
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
 
         err = exc_info.value
         assert err.error_count() == 2
@@ -317,7 +315,7 @@ class TestValidateBlueprint:
         )
 
         # Valid blueprint — no exception, just verify result has warnings list
-        result = validate_blueprint(bp, backend="jax")
+        result = validate_blueprint(bp)
         assert isinstance(result.warnings, list)
 
     def test_low_level_validator_returns_result(self):
@@ -343,7 +341,7 @@ class TestValidateBlueprint:
         )
 
         # Low-level: returns ValidationResult without raising
-        validator = BlueprintValidator(backend="jax")
+        validator = BlueprintValidator()
         result = validator.validate(bp)
         assert not result.valid
         assert any(e.code == "E101" for e in result.errors)
@@ -367,7 +365,7 @@ class TestValidateBlueprint:
             }
         )
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         assert any(e.code == "E103" for e in exc_info.value.validation_errors)
 
     def test_core_dims_warning_on_scalar(self):
@@ -388,7 +386,7 @@ class TestValidateBlueprint:
                 ],
             }
         )
-        validator = BlueprintValidator(backend="jax")
+        validator = BlueprintValidator()
         result = validator.validate(bp)
         assert any("no dimensions" in w for w in result.warnings)
 
@@ -410,7 +408,7 @@ class TestValidateBlueprint:
                 ],
             }
         )
-        result = validate_blueprint(bp, backend="jax")
+        result = validate_blueprint(bp)
         assert result.valid
         node = result.compute_nodes[0]
         assert "T" not in node.input_dims["temp"]
@@ -436,7 +434,7 @@ class TestValidateBlueprint:
             }
         )
         with pytest.raises(BlueprintValidationError) as exc_info:
-            validate_blueprint(bp, backend="jax")
+            validate_blueprint(bp)
         assert any(e.code == "E106" for e in exc_info.value.validation_errors)
 
     def test_tendency_source_unproduced_warning(self):
@@ -460,7 +458,7 @@ class TestValidateBlueprint:
                 },
             }
         )
-        validator = BlueprintValidator(backend="jax")
+        validator = BlueprintValidator()
         result = validator.validate(bp)
         assert any("derived.ghost" in w for w in result.warnings)
 
@@ -482,7 +480,7 @@ class TestValidateBlueprint:
                 ],
             }
         )
-        result = validate_blueprint(bp, backend="jax")
+        result = validate_blueprint(bp)
         assert result.valid
         # broadcast = (Y, X) [C removed as core_dim], out_dims = [Z]
         output_node = result.data_nodes["derived.result"]
@@ -508,7 +506,7 @@ class TestValidateBlueprint:
                 ],
             }
         )
-        result = validate_blueprint(bp, backend="jax")
+        result = validate_blueprint(bp)
         assert result.valid
         # broadcast = (Y, X) [C removed as core_dim], no out_dims
         output_node = result.data_nodes["derived.result"]

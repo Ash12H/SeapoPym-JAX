@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+import jax.numpy as jnp
+
 from seapopym.blueprint import Blueprint, Config, clear_registry, functional
 from seapopym.compiler import compile_model
 
@@ -91,45 +93,15 @@ def simple_config():
 class TestBuildStepFn:
     """Tests for build_step_fn function."""
 
-    def test_build_step_fn_numpy(self, simple_blueprint, simple_config):
-        """Test building step function with numpy backend."""
+    def test_build_step_fn(self, simple_blueprint, simple_config):
+        """Test building step function."""
 
         # Register test function
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
-
-        from seapopym.engine.step import build_step_fn
-
-        step_fn = build_step_fn(model)
-
-        # Test a single step
-        state = {"biomass": np.ones((5, 5)) * 100.0}
-        params = model.parameters
-        forcings_t = {
-            "temperature": np.ones((5, 5)) * 20.0,
-            "mask": np.ones((5, 5)),
-        }
-
-        (new_state, _params), outputs = step_fn((state, params), forcings_t)
-
-        # Check state was updated
-        assert "biomass" in new_state
-        assert new_state["biomass"].shape == (5, 5)
-
-    def test_build_step_fn_jax(self, simple_blueprint, simple_config):
-        """Test building step function with JAX backend."""
-        pytest.importorskip("jax")
-        import jax.numpy as jnp
-
-        # Register test function for JAX
-        @functional(name="test:growth", backend="jax")
-        def test_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        model = compile_model(simple_blueprint, simple_config, backend="jax")
+        model = compile_model(simple_blueprint, simple_config)
 
         from seapopym.engine.step import build_step_fn
 
@@ -145,39 +117,40 @@ class TestBuildStepFn:
 
         (new_state, _params), outputs = step_fn((state, params), forcings_t)
 
+        # Check state was updated
         assert "biomass" in new_state
         assert new_state["biomass"].shape == (5, 5)
 
     def test_mask_application(self, simple_blueprint, simple_config):
         """Test that mask is applied correctly."""
 
-        @functional(name="test:growth", backend="numpy")
+        @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config, backend="numpy")
+        model = compile_model(simple_blueprint, simple_config)
 
         from seapopym.engine.step import build_step_fn
 
         step_fn = build_step_fn(model)
 
         # Create mask with some zeros
-        mask = np.ones((5, 5))
-        mask[0, :] = 0  # First row masked
+        mask = jnp.ones((5, 5))
+        mask = mask.at[0, :].set(0)  # First row masked
 
-        state = {"biomass": np.ones((5, 5)) * 100.0}
+        state = {"biomass": jnp.ones((5, 5)) * 100.0}
         params = model.parameters
         forcings_t = {
-            "temperature": np.ones((5, 5)) * 20.0,
+            "temperature": jnp.ones((5, 5)) * 20.0,
             "mask": mask,
         }
 
         (new_state, _params), outputs = step_fn((state, params), forcings_t)
 
         # First row should be zero (masked)
-        np.testing.assert_array_equal(new_state["biomass"][0, :], 0.0)
+        np.testing.assert_array_equal(np.asarray(new_state["biomass"][0, :]), 0.0)
         # Other rows should have values
-        assert np.all(new_state["biomass"][1:, :] > 0)
+        assert np.all(np.asarray(new_state["biomass"][1:, :]) > 0)
 
 
 class TestResolveInputs:
@@ -188,14 +161,14 @@ class TestResolveInputs:
         from seapopym.engine.step import _resolve_inputs
 
         inputs_mapping = {"biomass": "state.biomass"}
-        state = {"biomass": np.array([1.0, 2.0])}
+        state = {"biomass": jnp.array([1.0, 2.0])}
         forcings = {}
         params = {}
         intermediates = {}
 
         result = _resolve_inputs(inputs_mapping, state, forcings, params, intermediates)
 
-        np.testing.assert_array_equal(result["biomass"], [1.0, 2.0])
+        np.testing.assert_array_equal(np.asarray(result["biomass"]), [1.0, 2.0])
 
     def test_resolve_forcings_input(self):
         """Test resolving forcing variable."""
@@ -203,13 +176,13 @@ class TestResolveInputs:
 
         inputs_mapping = {"temp": "forcings.temperature"}
         state = {}
-        forcings = {"temperature": np.array([20.0, 25.0])}
+        forcings = {"temperature": jnp.array([20.0, 25.0])}
         params = {}
         intermediates = {}
 
         result = _resolve_inputs(inputs_mapping, state, forcings, params, intermediates)
 
-        np.testing.assert_array_equal(result["temp"], [20.0, 25.0])
+        np.testing.assert_array_equal(np.asarray(result["temp"]), [20.0, 25.0])
 
     def test_resolve_parameter_input(self):
         """Test resolving parameter."""
@@ -218,38 +191,38 @@ class TestResolveInputs:
         inputs_mapping = {"rate": "parameters.growth_rate"}
         state = {}
         forcings = {}
-        params = {"growth_rate": np.array(0.1)}
+        params = {"growth_rate": jnp.array(0.1)}
         intermediates = {}
 
         result = _resolve_inputs(inputs_mapping, state, forcings, params, intermediates)
 
-        assert result["rate"] == 0.1
+        assert float(result["rate"]) == pytest.approx(0.1)
 
 
 class TestIntegrateEuler:
     """Tests for Euler integration."""
 
-    def test_euler_integration_numpy(self):
-        """Test Euler integration with numpy."""
+    def test_euler_integration(self):
+        """Test Euler integration."""
         from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
-        state = {"x": np.array([10.0, 20.0])}
-        intermediates = {"flux": np.array([1.0, 2.0])}
+        state = {"x": jnp.array([10.0, 20.0])}
+        intermediates = {"flux": jnp.array([1.0, 2.0])}
         tendency_map = {"x": [TendencySource(source="derived.flux")]}
         dt = 1.0
 
-        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt)
 
-        np.testing.assert_array_equal(new_state["x"], [11.0, 22.0])
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [11.0, 22.0])
 
     def test_euler_integration_multiple_tendencies(self):
         """Test Euler integration with multiple tendencies."""
         from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
-        state = {"x": np.array([10.0])}
-        intermediates = {"flux1": np.array([1.0]), "flux2": np.array([2.0])}
+        state = {"x": jnp.array([10.0])}
+        intermediates = {"flux1": jnp.array([1.0]), "flux2": jnp.array([2.0])}
         tendency_map = {
             "x": [
                 TendencySource(source="derived.flux1"),
@@ -258,32 +231,32 @@ class TestIntegrateEuler:
         }
         dt = 1.0
 
-        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt)
 
-        np.testing.assert_array_equal(new_state["x"], [13.0])  # 10 + (1+2)*1
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [13.0])  # 10 + (1+2)*1
 
     def test_euler_no_tendency(self):
         """Test Euler integration with no tendency (state unchanged)."""
         from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
-        state = {"x": np.array([10.0]), "y": np.array([5.0])}
-        intermediates = {"flux": np.array([1.0])}
+        state = {"x": jnp.array([10.0]), "y": jnp.array([5.0])}
+        intermediates = {"flux": jnp.array([1.0])}
         tendency_map = {"x": [TendencySource(source="derived.flux")]}  # No tendency for y
         dt = 1.0
 
-        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt)
 
-        np.testing.assert_array_equal(new_state["x"], [11.0])
-        np.testing.assert_array_equal(new_state["y"], [5.0])  # Unchanged
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [11.0])
+        np.testing.assert_array_equal(np.asarray(new_state["y"]), [5.0])  # Unchanged
 
     def test_euler_with_sign(self):
         """Test Euler integration with negative sign on a tendency source."""
         from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
-        state = {"x": np.array([10.0])}
-        intermediates = {"gain": np.array([3.0]), "loss": np.array([1.0])}
+        state = {"x": jnp.array([10.0])}
+        intermediates = {"gain": jnp.array([3.0]), "loss": jnp.array([1.0])}
         tendency_map = {
             "x": [
                 TendencySource(source="derived.gain"),
@@ -292,6 +265,6 @@ class TestIntegrateEuler:
         }
         dt = 1.0
 
-        new_state = _integrate_euler(state, intermediates, tendency_map, dt, "numpy")
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt)
 
-        np.testing.assert_array_equal(new_state["x"], [12.0])  # 10 + (3 - 1)*1
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [12.0])  # 10 + (3 - 1)*1

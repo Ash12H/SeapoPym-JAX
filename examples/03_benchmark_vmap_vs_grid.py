@@ -125,13 +125,13 @@ config_1x1 = Config.from_dict(
             "time_end": end_date,
             "dt": DT,
             "forcing_interpolation": "linear",
-            "batch_size": 1000,
+            "chunk_size": 1000,
         },
     }
 )
 
 print("Compiling 1x1 model for vmap benchmark...")
-_model_1x1 = compile_model(blueprint, config_1x1, backend="jax")
+_model_1x1 = compile_model(blueprint, config_1x1)
 _step_fn_1x1 = build_step_fn(_model_1x1)
 _n_timesteps_1x1 = _model_1x1.n_timesteps
 _initial_state_1x1 = _model_1x1.state
@@ -235,12 +235,12 @@ def build_grid_model(ny: int, nx: int):
                 "time_end": end_date,
                 "dt": DT,
                 "forcing_interpolation": "linear",
-                "batch_size": 1000,
+                "chunk_size": 1000,
             },
         }
     )
 
-    model = compile_model(blueprint, config, backend="jax")
+    model = compile_model(blueprint, config)
     step_fn = build_step_fn(model)
     return model, step_fn
 

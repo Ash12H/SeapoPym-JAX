@@ -6,7 +6,8 @@ import pytest
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config, ExecutionParams
-from seapopym.compiler.compiler import Compiler, TimeGrid
+from seapopym.compiler import compile_model
+from seapopym.compiler.time_grid import TimeGrid
 
 
 class TestTimeGrid:
@@ -60,28 +61,20 @@ class TestTimeGrid:
         grid = TimeGrid.from_config("2000-01-01", "2000-01-10", "3d")
         assert grid.n_timesteps == 3
 
-    def test_leap_year_handling(self):
-        """Test handling of leap years."""
-        # 2000 is a leap year, Feb has 29 days
-        grid = TimeGrid.from_config("2000-02-01", "2000-03-01", "1d")
-        # Feb 2000: 29 days -> [02-01, 03-01) = 29 steps
-        assert grid.n_timesteps == 29
-
-    def test_non_leap_year_handling(self):
-        """Test handling of non-leap years."""
-        # 2001 is not a leap year, Feb has 28 days
-        grid = TimeGrid.from_config("2001-02-01", "2001-03-01", "1d")
-        assert grid.n_timesteps == 28
-
-    def test_month_boundaries(self):
-        """Test handling of variable month lengths."""
-        # January has 31 days
-        grid_jan = TimeGrid.from_config("2000-01-01", "2000-02-01", "1d")
-        assert grid_jan.n_timesteps == 31
-
-        # April has 30 days
-        grid_apr = TimeGrid.from_config("2000-04-01", "2000-05-01", "1d")
-        assert grid_apr.n_timesteps == 30
+    @pytest.mark.parametrize(
+        "start, end, expected",
+        [
+            ("2000-02-01", "2000-03-01", 29),  # leap year
+            ("2001-02-01", "2001-03-01", 28),  # non-leap year
+            ("2000-01-01", "2000-02-01", 31),  # January
+            ("2000-04-01", "2000-05-01", 30),  # April
+        ],
+        ids=["leap_feb", "non_leap_feb", "january", "april"],
+    )
+    def test_calendar_month_lengths(self, start, end, expected):
+        """Test handling of variable month lengths and leap years."""
+        grid = TimeGrid.from_config(start, end, "1d")
+        assert grid.n_timesteps == expected
 
     def test_long_simulation(self):
         """Test long simulation (20 years)."""
@@ -116,14 +109,14 @@ class TestExecutionParams:
             time_start="2000-01-01",
             time_end="2020-12-31",
             dt="1d",
-            batch_size=1000,
+            chunk_size=1000,
             forcing_interpolation="linear",
         )
 
         assert params.time_start == "2000-01-01"
         assert params.time_end == "2020-12-31"
         assert params.dt == "1d"
-        assert params.batch_size == 1000
+        assert params.chunk_size == 1000
         assert params.forcing_interpolation == "linear"
 
     def test_minimal_params(self):
@@ -131,7 +124,7 @@ class TestExecutionParams:
         params = ExecutionParams(time_start="2000-01-01", time_end="2000-12-31")
 
         assert params.dt == "1d"  # default
-        assert params.batch_size is None  # default
+        assert params.chunk_size is None  # default
         assert params.forcing_interpolation == "constant"  # default
 
     def test_missing_time_start_error(self):
@@ -164,15 +157,15 @@ class TestExecutionParams:
         with pytest.raises(ValueError, match="Invalid datetime format"):
             ExecutionParams(time_start="2000-01-01", time_end="not-a-date")
 
-    def test_negative_batch_size_error(self):
-        """Test error when batch_size is negative."""
+    def test_negative_chunk_size_error(self):
+        """Test error when chunk_size is negative."""
         with pytest.raises(ValueError, match="must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", batch_size=-100)
+            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", chunk_size=-100)
 
-    def test_zero_batch_size_error(self):
-        """Test error when batch_size is zero."""
+    def test_zero_chunk_size_error(self):
+        """Test error when chunk_size is zero."""
         with pytest.raises(ValueError, match="must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", batch_size=0)
+            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", chunk_size=0)
 
     def test_invalid_forcing_interpolation(self):
         """Test error with invalid forcing_interpolation method."""
@@ -211,10 +204,6 @@ class TestCompileTimeGrid:
         end = "2000-01-11"  # 10 days
         dt = "1d"
 
-        # Forcing covers the range (t0=start, t1=end) but low resolution
-        # We want to test that compiled model gets n_timesteps from grid (10)
-        # even if forcing has shape (2,)
-
         data = np.zeros((2, 1, 1))
 
         config = Config.from_dict(
@@ -230,8 +219,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
-        model = compiler.compile(blueprint, config)
+        model = compile_model(blueprint, config)
 
         assert model.time_grid is not None
         assert model.time_grid.n_timesteps == 10
@@ -258,8 +246,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
-        model = compiler.compile(blueprint, config)
+        model = compile_model(blueprint, config)
 
         assert "T" in model.coords
         assert len(model.coords["T"]) == 4
@@ -286,10 +273,8 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
-
         with pytest.raises(ValueError, match="does not cover simulation range"):
-            compiler.compile(blueprint, config)
+            compile_model(blueprint, config)
 
     def test_interpolation_triggered(self, blueprint):
         """Test that interpolation logic is triggered for mismatching shapes."""
@@ -317,34 +302,24 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
-        model = compiler.compile(blueprint, config)
-
-        # Expected: 0, 3.33, 6.66, 10 (approx)
-        # Actually logic is interp1d on indices.
-        # Source indices: 0, 1
-        # Target indices: 0, 0.33, 0.66, 1.0 (linspace(0, 1, 4))
-        # Values: 0, 3.33, 6.66, 10
+        model = compile_model(blueprint, config)
 
         # Interpolation is deferred to runtime — use get_all() to verify
         all_forcings = model.forcings.get_all()
-        result = all_forcings["temp"].flatten()
-        expected = np.linspace(0, 10, 4)
+        result = np.asarray(all_forcings["temp"]).flatten()
+        # xarray interpolates in real time space:
+        # source [0, 10] at [Jan 1, Jan 5], target [Jan 1, Jan 2, Jan 3, Jan 4]
+        expected = np.array([0.0, 2.5, 5.0, 7.5])
 
         np.testing.assert_allclose(result, expected, atol=1e-5)
 
     def test_temporal_slicing(self, blueprint):
         """Test that forcings are sliced to simulation temporal range before interpolation."""
-        # Forcing: 20 years of data (2001-2021, non-leap start year for simplicity)
-        # Simulation: 1 year (2001-2002)
-        # Should slice forcing to 1 year first, then interpolate if needed
-
         forcing_start = "2001-01-01"
         forcing_end = "2021-01-01"
         forcing_dates = pd.date_range(forcing_start, forcing_end, freq="1d", inclusive="left")
 
         # Create a forcing with a clear pattern: value = day_of_year
-        # This way we can verify we only get days 1-365
         forcing_values = np.array([d.dayofyear for d in forcing_dates], dtype=float)
 
         config = Config.from_dict(
@@ -367,18 +342,16 @@ class TestCompileTimeGrid:
             }
         )
 
-        compiler = Compiler(backend="numpy")
-        model = compiler.compile(blueprint, config)
+        model = compile_model(blueprint, config)
 
         # Should have 365 timesteps (1 non-leap year)
         assert model.n_timesteps == 365
 
-        # Forcing should be sliced to 365 values
-        assert model.forcings["temp"].shape[0] == 365
+        # Interpolation is deferred — use get_all() to materialize
+        all_forcings = model.forcings.get_all()
+        result = np.asarray(all_forcings["temp"]).flatten()
 
         # Values should be day_of_year from 1 to 365 (first year only)
-        # NOT values from 20 years compressed
-        result = model.forcings["temp"].flatten()
-        expected = np.arange(1, 366, dtype=float)  # Days 1-365
+        expected = np.arange(1, 366, dtype=float)
 
         np.testing.assert_allclose(result, expected, atol=1e-5)

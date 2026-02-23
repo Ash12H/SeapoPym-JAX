@@ -3,7 +3,6 @@
 Error codes as per architecture:
 - E300: EngineError (base)
 - E301: StepError
-- E302: BackendError
 - E303: ChunkingError
 - E304: IOError
 """
@@ -32,18 +31,6 @@ class StepError(EngineError):
         self.timestep = timestep
         self.reason = reason
         super().__init__(f"Step failed at timestep {timestep}: {reason}")
-
-
-class BackendError(EngineError):
-    """E302: Backend not available or misconfigured."""
-
-    code = "E302"
-
-    def __init__(self, backend: str, reason: str) -> None:
-        """Initialize with backend name and failure reason."""
-        self.backend = backend
-        self.reason = reason
-        super().__init__(f"Backend '{backend}' error: {reason}")
 
 
 class ChunkingError(EngineError):

@@ -164,7 +164,6 @@ class TestInferShapes:
 
     def test_empty_config(self):
         """Test with empty config."""
-        """Test with empty config."""
         config = Config.from_dict(
             {
                 "execution": {

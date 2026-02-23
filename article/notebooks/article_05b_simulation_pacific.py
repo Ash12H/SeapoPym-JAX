@@ -512,8 +512,7 @@ if __name__ == "__main__":
 
     blueprint_no = create_blueprint_no_transport()
     print("Compiling model (no transport)...")
-    model_no = compile_model(blueprint_no, config_no_transport, backend="jax")
-    print(f"Model compiled. Backend: {model_no.backend}")
+    model_no = compile_model(blueprint_no, config_no_transport)
 
     runner_no = StreamingRunner(model_no)
     print(f"Running simulation ({START_DATE} to {END_DATE}, dt={DT})...")
@@ -533,8 +532,7 @@ if __name__ == "__main__":
 
     blueprint_tr = create_blueprint_transport()
     print("Compiling model (with transport)...")
-    model_tr = compile_model(blueprint_tr, config_transport, backend="jax")
-    print(f"Model compiled. Backend: {model_tr.backend}")
+    model_tr = compile_model(blueprint_tr, config_transport)
 
     runner_tr = StreamingRunner(model_tr)
     print(f"Running simulation ({START_DATE} to {END_DATE}, dt={DT})...")

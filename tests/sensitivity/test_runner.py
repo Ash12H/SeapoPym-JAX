@@ -8,10 +8,10 @@ from seapopym.compiler import compile_model
 from seapopym.sensitivity.runner import SobolRunner
 
 
-def _make_minimal_model(backend="jax"):
+def _make_minimal_model():
     """Create a minimal compiled model for testing."""
 
-    @functional(name="test:sobol_growth", backend="jax", units={"x": "g", "rate": "1/s", "return": "g/s"})
+    @functional(name="test:sobol_growth", units={"x": "g", "rate": "1/s", "return": "g/s"})
     def growth(x, rate):
         return rate * x
 
@@ -44,7 +44,7 @@ def _make_minimal_model(backend="jax"):
         }
     )
 
-    return compile_model(blueprint, config, backend=backend)
+    return compile_model(blueprint, config)
 
 
 class TestSobolRunner:

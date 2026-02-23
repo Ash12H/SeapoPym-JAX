@@ -15,7 +15,7 @@ from seapopym.sensitivity.sobol import SobolAnalyzer, SobolResult
 def _make_test_model():
     """Create a simple model where 'rate' clearly drives the output."""
 
-    @functional(name="test:sobol_linear", backend="jax", units={"x": "g", "rate": "1/s", "return": "g/s"})
+    @functional(name="test:sobol_linear", units={"x": "g", "rate": "1/s", "return": "g/s"})
     def linear(x, rate):
         return rate * x
 
@@ -48,7 +48,7 @@ def _make_test_model():
         }
     )
 
-    return compile_model(blueprint, config, backend="jax")
+    return compile_model(blueprint, config)
 
 
 class TestSobolAnalyzer:
@@ -141,10 +141,3 @@ class TestSobolAnalyzer:
                 n_samples=64,
             )
 
-    def test_numpy_backend_rejected(self):
-        """Should reject models with numpy backend."""
-        model = _make_test_model()
-        model_np = model.to_numpy()
-
-        with pytest.raises(ValueError, match="jax"):
-            SobolAnalyzer(model_np)
