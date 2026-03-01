@@ -178,9 +178,13 @@ class TruncatedNormal:
         return (self.low, self.high)
 
     def sample(self, key: Array) -> Array:
-        # Rejection sampling from normal, clipped to bounds
-        raw = self.loc + self.scale * jax.random.normal(key)
-        return jnp.clip(raw, self.low, self.high)
+        # CDF inverse sampling (unbiased)
+        u = jax.random.uniform(key)
+        a = (self.low - self.loc) / self.scale
+        b = (self.high - self.loc) / self.scale
+        cdf_a = jstats.norm.cdf(a)
+        cdf_b = jstats.norm.cdf(b)
+        return self.loc + self.scale * jstats.norm.ppf(cdf_a + u * (cdf_b - cdf_a))
 
 
 @dataclass(frozen=True)
@@ -240,10 +244,6 @@ class PriorSet:
             result[name] = prior.sample(subkey)
         return result
 
-    def _bounds_arrays(self) -> dict[str, tuple[float, float]]:
-        """Eagerly evaluate bounds (safe outside JIT)."""
-        return {name: prior.bounds for name, prior in self.priors.items()}
-
     def to_unit(self, params: Params) -> Params:
         """Map physical parameters to unit space [0, 1] using prior bounds.
 
@@ -253,7 +253,7 @@ class PriorSet:
         Returns:
             Parameter values normalized to [0, 1].
         """
-        bounds = self._bounds_arrays()
+        bounds = self.get_bounds()
         result = {}
         for name in self.priors:
             if name in params:
@@ -270,7 +270,7 @@ class PriorSet:
         Returns:
             Parameter values in physical space.
         """
-        bounds = self._bounds_arrays()
+        bounds = self.get_bounds()
         result = {}
         for name in self.priors:
             if name in params_unit:
@@ -284,7 +284,7 @@ class PriorSet:
         Returns:
             Scalar: sum of log(high - low) for all priors.
         """
-        bounds = self._bounds_arrays()
+        bounds = self.get_bounds()
         total = 0.0
         for low, high in bounds.values():
             total += float(jnp.log(high - low))

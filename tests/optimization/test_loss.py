@@ -120,6 +120,33 @@ class TestNRMSE:
         with pytest.raises(ValueError, match="Unknown normalization mode"):
             nrmse(pred, obs, mode="invalid")  # type: ignore[arg-type]
 
+    def test_nrmse_masked_mean_mode(self):
+        """NRMSE with mask and mean normalization."""
+        pred = jnp.array([10.0, 20.0, 30.0, 999.0])
+        obs = jnp.array([11.0, 21.0, 31.0, 0.0])
+        mask = jnp.array([True, True, True, False])
+        result = nrmse(pred, obs, mask, mode="mean")
+        # RMSE over masked = 1.0, masked mean(obs) = 21.0, NRMSE = 1/21
+        assert float(result) == pytest.approx(1.0 / 21.0, abs=0.001)
+
+    def test_nrmse_masked_minmax_mode(self):
+        """NRMSE with mask and minmax normalization."""
+        pred = jnp.array([0.0, 5.0, 10.0, 999.0])
+        obs = jnp.array([1.0, 5.0, 9.0, 0.0])
+        mask = jnp.array([True, True, True, False])
+        result = nrmse(pred, obs, mask, mode="minmax")
+        # Masked range = 9 - 1 = 8
+        assert float(result) > 0.0
+        assert jnp.isfinite(result)
+
+    def test_nrmse_masked_invalid_mode(self):
+        """NRMSE with mask should raise error for invalid mode."""
+        pred = jnp.array([1.0, 2.0])
+        obs = jnp.array([1.0, 2.0])
+        mask = jnp.array([True, True])
+        with pytest.raises(ValueError, match="Unknown normalization mode"):
+            nrmse(pred, obs, mask, mode="invalid")  # type: ignore[arg-type]
+
 
 class TestGradients:
     """Test that loss functions are differentiable."""
