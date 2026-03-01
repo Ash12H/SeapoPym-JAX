@@ -13,26 +13,47 @@ Note on forcings:
 from __future__ import annotations
 
 import logging
+import math
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+import jax
+import jax.lax as lax
+
+from seapopym.types import State
 
 from .exceptions import ChunkingError
-from .io import DiskWriter, MemoryWriter, OutputWriter
+from .io import DiskWriter, MemoryWriter, resolve_var_dims
 from .step import build_step_fn
 
 if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
+    from seapopym.engine.io import OutputWriter
 
 logger = logging.getLogger(__name__)
 
-from seapopym.types import State
+
+def _scan(
+    step_fn: Callable,
+    init: tuple[State, dict[str, Any]],
+    xs: Any,
+    length: int,
+) -> tuple[tuple[State, dict[str, Any]], dict[str, Any]]:
+    """JIT-compiled lax.scan wrapper."""
+
+    @jax.jit
+    def _jitted(init_state: tuple[State, dict[str, Any]], inputs: Any) -> tuple[tuple[State, dict[str, Any]], dict[str, Any]]:
+        return lax.scan(step_fn, init_state, inputs, length=length)
+
+    return _jitted(init, xs)
 
 
 class StreamingRunner:
     """Runner for production simulations with chunking and disk I/O.
 
     Processes the simulation in temporal chunks, writing each chunk
-    to disk while computing the next one.
+    to disk.
 
     Example:
         >>> model = compile_model(blueprint, config)
@@ -53,8 +74,48 @@ class StreamingRunner:
                 If both None, processes entire simulation in one chunk.
         """
         self.model = model
+        self.chunk_size: int
         # Priority: chunk_size (parameter) > model.chunk_size (config) > model.n_timesteps (all)
-        self.chunk_size = chunk_size or getattr(model, "chunk_size", None) or model.n_timesteps
+        if chunk_size is not None:
+            self.chunk_size = chunk_size
+        elif getattr(model, "chunk_size", None) is not None:
+            self.chunk_size = cast(int, model.chunk_size)
+        else:
+            self.chunk_size = model.n_timesteps
+
+    def _build_writer(
+        self,
+        output_path: str | Path | None,
+        output_vars: list[str],
+    ) -> OutputWriter:
+        """Build and initialize the appropriate output writer.
+
+        Args:
+            output_path: Path for disk output, or None for in-memory.
+            output_vars: Variables to export.
+
+        Returns:
+            Initialized OutputWriter.
+        """
+        n_timesteps = self.model.n_timesteps
+
+        # Prepare coordinates for writer (with real timestamps from time_grid)
+        writer_coords = dict(self.model.coords)
+        if self.model.time_grid is not None:
+            writer_coords["T"] = self.model.time_grid.coords[:n_timesteps]
+
+        # Resolve per-variable dims from data_nodes
+        var_dims = resolve_var_dims(self.model.data_nodes, output_vars)
+
+        # Initialize Writer Strategy
+        writer: OutputWriter
+        writer = (
+            DiskWriter(output_path)
+            if output_path is not None
+            else MemoryWriter(self.model)
+        )
+        writer.initialize(self.model.shapes, output_vars, coords=writer_coords, var_dims=var_dims)
+        return writer
 
     def run(
         self,
@@ -78,10 +139,7 @@ class StreamingRunner:
         if self.chunk_size <= 0:
             raise ChunkingError(self.chunk_size, n_timesteps, "chunk_size must be positive")
 
-        # Calculate number of chunks
-        n_full_chunks = n_timesteps // self.chunk_size
-        remainder = n_timesteps % self.chunk_size
-        n_chunks = n_full_chunks + (1 if remainder > 0 else 0)
+        n_chunks = math.ceil(n_timesteps / self.chunk_size)
 
         logger.info(f"Starting simulation: {n_timesteps} steps in {n_chunks} chunks (chunk_size={self.chunk_size})")
 
@@ -95,35 +153,9 @@ class StreamingRunner:
         # Determine variables to export
         output_vars = export_variables if export_variables is not None else list(state.keys())
 
-        # Prepare coordinates for writer (with real timestamps from time_grid)
-        writer_coords = dict(self.model.coords)
-        if self.model.time_grid is not None:
-            # Use the full time coordinates from time_grid
-            # (sliced to n_timesteps in case of any discrepancy)
-            writer_coords["T"] = self.model.time_grid.coords[:n_timesteps]
-
-        # Resolve per-variable dims from data_nodes
-        var_dims: dict[str, tuple[str, ...]] = {}
-        for node in self.model.data_nodes.values():
-            if node.dims is None:
-                continue
-            short = node.name.split(".")[-1] if "." in node.name else node.name
-            if node.name in output_vars:
-                var_dims[node.name] = tuple(node.dims)
-            elif short in output_vars:
-                var_dims[short] = tuple(node.dims)
-
-        # Initialize Writer Strategy
-        writer: OutputWriter
-        writer = (
-            DiskWriter(output_path)
-            if output_path is not None
-            else MemoryWriter(self.model)
-        )
+        writer = self._build_writer(output_path, output_vars)
 
         try:
-            writer.initialize(self.model.shapes, output_vars, coords=writer_coords, var_dims=var_dims)
-
             # Process chunks
             for chunk_idx in range(n_chunks):
                 start_t = chunk_idx * self.chunk_size
@@ -136,33 +168,18 @@ class StreamingRunner:
                 forcings_chunk = self.model.forcings.get_chunk(start_t, end_t)
 
                 # Run scan on chunk
-                (state, params), outputs = self._scan(
+                (state, params), outputs = _scan(
                     step_fn, (state, params), forcings_chunk, chunk_len
                 )
 
                 # Append outputs to writer (it will filter what it needs)
-                # Note: 'outputs' from JAX contains state + derived variables
                 writer.append(outputs, chunk_idx)
 
             # Finalize and get results
             final_results = writer.finalize()
 
         finally:
-            # Ensure resources are released
-            if hasattr(writer, "close"):
-                writer.close()
+            writer.close()
 
         logger.info("Simulation complete")
         return state, final_results
-
-    @staticmethod
-    def _scan(step_fn, init, xs, length):
-        """JIT-compiled lax.scan wrapper."""
-        import jax
-        import jax.lax as lax
-
-        @jax.jit
-        def _jitted(init_state, inputs):
-            return lax.scan(step_fn, init_state, inputs, length=length)
-
-        return _jitted(init, xs)

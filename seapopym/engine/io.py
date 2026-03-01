@@ -14,6 +14,7 @@ import numpy as np
 if TYPE_CHECKING:
     import xarray as xr
 
+    from seapopym.blueprint.nodes import DataNode
     from seapopym.compiler import CompiledModel
 
 
@@ -22,6 +23,35 @@ from .exceptions import EngineIOError
 logger = logging.getLogger(__name__)
 
 from seapopym.types import Array
+
+
+def resolve_var_dims(
+    data_nodes: dict[str, DataNode],
+    variables: list[str],
+) -> dict[str, tuple[str, ...]]:
+    """Resolve dimensions for variables using data_nodes.
+
+    Args:
+        data_nodes: Mapping of node names to DataNode objects.
+        variables: List of variable names to resolve.
+
+    Returns:
+        Mapping from variable name to its dimension tuple.
+    """
+    resolved: dict[str, tuple[str, ...]] = {}
+
+    for node in data_nodes.values():
+        if node.dims is None:
+            continue
+
+        node_short_name = node.name.split(".")[-1] if "." in node.name else node.name
+
+        if node.name in variables:
+            resolved[node.name] = tuple(node.dims)
+        elif node_short_name in variables:
+            resolved[node_short_name] = tuple(node.dims)
+
+    return resolved
 
 
 class OutputWriter(Protocol):
@@ -295,19 +325,4 @@ class MemoryWriter:
 
     def _resolve_variable_dims(self) -> dict[str, tuple[str, ...]]:
         """Resolve dimensions for all requested variables using data_nodes."""
-        resolved = {}
-
-        for node in self.model.data_nodes.values():
-            if node.dims is None:
-                continue
-
-            # Check if node name matches any requested variable
-            # Handle both short names ("biomass") and fully qualified names ("state.biomass")
-            node_short_name = node.name.split(".")[-1] if "." in node.name else node.name
-
-            if node.name in self.variables:
-                resolved[node.name] = tuple(d for d in node.dims)
-            elif node_short_name in self.variables:
-                resolved[node_short_name] = tuple(d for d in node.dims)
-
-        return resolved
+        return resolve_var_dims(self.model.data_nodes, self.variables)
