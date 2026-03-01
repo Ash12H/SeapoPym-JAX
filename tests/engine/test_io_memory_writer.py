@@ -1,3 +1,5 @@
+"""Tests for MemoryWriter."""
+
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -34,20 +36,20 @@ def test_memory_writer_lifecycle(mock_model):
     variables = ["biomass"]
     writer.initialize({}, variables)
 
-    # Simuler 2 chunks
+    # Simulate 2 chunks
     # Chunk 1: time 0-5
     chunk1 = {
         "biomass": np.ones((5, 5, 5)),
         "production": np.zeros((5, 5, 5)),  # Should be ignored because not in variables
         "hidden": np.ones((5, 5, 5)),  # Should be ignored
     }
-    writer.append(chunk1, 0)
+    writer.append(chunk1)
 
     # Chunk 2: time 5-10
     chunk2 = {
         "biomass": np.ones((5, 5, 5)) * 2,
     }
-    writer.append(chunk2, 1)
+    writer.append(chunk2)
 
     # Finalize
     ds = writer.finalize()

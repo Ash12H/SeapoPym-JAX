@@ -29,7 +29,7 @@ class TestDiskWriter:
 
         # Write a chunk
         data = {"biomass": np.ones((10, 5, 5)) * 100.0}
-        writer.append(data, chunk_index=0)
+        writer.append(data)
         writer.finalize()
         writer.close()
 
@@ -49,7 +49,7 @@ class TestDiskWriter:
         # Write multiple chunks
         for i in range(3):
             data = {"biomass": np.ones((5, 5, 5)) * (i + 1)}
-            writer.append(data, chunk_index=i)
+            writer.append(data)
 
         writer.finalize()
         writer.close()
@@ -70,7 +70,7 @@ class TestDiskWriter:
             "biomass": np.ones((5, 5, 5)) * 100.0,
             "temperature": np.ones((5, 5, 5)) * 20.0,
         }
-        writer.append(data, chunk_index=0)
+        writer.append(data)
         writer.finalize()
         writer.close()
 
@@ -87,7 +87,7 @@ class TestDiskWriter:
         with DiskWriter(output_path) as writer:
             writer.initialize({"Y": 5, "X": 5}, ["biomass"])
             data = {"biomass": np.ones((5, 5, 5)) * 100.0}
-            writer.append(data, chunk_index=0)
+            writer.append(data)
 
         # Should have flushed and closed
         import zarr
@@ -101,7 +101,7 @@ class TestDiskWriter:
         writer = DiskWriter(output_path)
 
         with pytest.raises(EngineIOError):
-            writer.append({"biomass": np.ones((5, 5, 5))}, chunk_index=0)
+            writer.append({"biomass": np.ones((5, 5, 5))})
 
         writer.close()
 
@@ -115,7 +115,7 @@ class TestDiskWriter:
 
             # Use JAX array
             data = {"biomass": jnp.ones((5, 5, 5)) * 100.0}
-            writer.append(data, chunk_index=0)
+            writer.append(data)
 
         # Should have been converted and written
         import zarr

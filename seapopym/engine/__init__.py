@@ -1,7 +1,7 @@
 """Engine package for execution of compiled models.
 
 This package provides:
-- Runners: StreamingRunner (production, with chunking and async I/O)
+- Runners: StreamingRunner (production, with chunking and disk I/O)
 - Step function builder for time-stepping logic
 
 Example:

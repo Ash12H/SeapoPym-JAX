@@ -173,7 +173,7 @@ class StreamingRunner:
                 )
 
                 # Append outputs to writer (it will filter what it needs)
-                writer.append(outputs, chunk_idx)
+                writer.append(outputs)
 
             # Finalize and get results
             final_results = writer.finalize()

@@ -11,18 +11,17 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
+from seapopym.types import Array
+
+from .exceptions import EngineIOError
+
 if TYPE_CHECKING:
     import xarray as xr
 
     from seapopym.blueprint.nodes import DataNode
     from seapopym.compiler import CompiledModel
 
-
-from .exceptions import EngineIOError
-
 logger = logging.getLogger(__name__)
-
-from seapopym.types import Array
 
 
 def resolve_var_dims(
@@ -74,12 +73,11 @@ class OutputWriter(Protocol):
         """
         ...
 
-    def append(self, data: dict[str, Array], chunk_index: int) -> None:
+    def append(self, data: dict[str, Array]) -> None:
         """Append a chunk of data.
 
         Args:
             data: Dictionary of arrays for the chunk.
-            chunk_index: Index of the current chunk.
         """
         ...
 
@@ -97,8 +95,8 @@ class DiskWriter:
 
     Example:
         >>> writer = DiskWriter(output_path="/results/sim/")
-        >>> writer.append({"biomass": arr}, chunk_index=0)
-        >>> writer.append({"biomass": arr}, chunk_index=1)
+        >>> writer.append({"biomass": arr})
+        >>> writer.append({"biomass": arr})
         >>> writer.finalize()
     """
 
@@ -180,13 +178,11 @@ class DiskWriter:
     def append(
         self,
         data: dict[str, Array],
-        chunk_index: int,
     ) -> None:
         """Write a chunk of data synchronously.
 
         Args:
             data: Dict mapping variable names to arrays.
-            chunk_index: Chunk index (for logging).
         """
         if not self._initialized:
             raise EngineIOError(str(self.output_path), "Writer not initialized")
@@ -264,7 +260,7 @@ class MemoryWriter:
         else:
             self._coords = {k: np.asarray(v) for k, v in self.model.coords.items()}
 
-    def append(self, data: dict[str, Array], chunk_index: int) -> None:  # noqa: ARG002
+    def append(self, data: dict[str, Array]) -> None:
         """Append chunk to memory."""
         # We accumulate specific variables
         for var_name in self.variables:

@@ -20,11 +20,11 @@ from seapopym.engine.vectorize import (
     compute_output_transpose_axes,
     wrap_with_vmap,
 )
+from seapopym.types import Array, Forcings, Outputs, Params, State
 
 if TYPE_CHECKING:
+    from seapopym.blueprint.schema import TendencySource
     from seapopym.compiler import CompiledModel
-
-from seapopym.types import Array, Forcings, Outputs, Params, State
 
 
 def build_step_fn(
@@ -48,7 +48,6 @@ def build_step_fn(
     # Extract what we need from model (closure captures these)
     compute_nodes: list[ComputeNode] = model.compute_nodes
     tendency_map = model.tendency_map
-    default_parameters = model.parameters
     dt = model.dt
 
     # Pre-compute vmapped functions for nodes with core_dims
@@ -109,9 +108,7 @@ def build_step_fn(
         new_state = _apply_mask(new_state, mask)
 
         # Build outputs (include state variables for saving)
-        outputs: Outputs = {**intermediates}
-        for var_name, value in new_state.items():
-            outputs[var_name] = value
+        outputs: Outputs = {**intermediates, **new_state}
 
         return new_state, outputs
 
@@ -250,7 +247,7 @@ def _handle_compute_outputs(
 def _integrate_euler(
     state: State,
     intermediates: dict[str, Array],
-    tendency_map: dict[str, list],
+    tendency_map: dict[str, list[TendencySource]],
     dt: float,
 ) -> State:
     """Integrate state using Euler explicit method with declarative tendency_map.
