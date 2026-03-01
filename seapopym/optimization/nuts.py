@@ -18,9 +18,9 @@ import blackjax.progress_bar
 import jax
 import jax.numpy as jnp
 
-logger = logging.getLogger(__name__)
-
 from seapopym.types import Array, Params
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
