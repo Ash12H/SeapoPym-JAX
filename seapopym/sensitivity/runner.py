@@ -19,20 +19,19 @@ import jax.lax as lax
 import jax.numpy as jnp
 
 from seapopym.engine.step import build_step_fn
+from seapopym.types import Array
 
 if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
 
 logger = logging.getLogger(__name__)
 
-from seapopym.types import Array
-
 
 class SobolRunner:
     """Runs batched simulations with temporal chunking and point extraction.
 
     Uses jax.vmap to parallelize model evaluations across parameter sets,
-    and temporal chunking to control GPU memory usage. Point extraction
+    and temporal chunking to control device memory usage. Point extraction
     is performed inside the scan body so that lax.scan only accumulates
     a small (n_points,) vector per timestep instead of full spatial grids.
 

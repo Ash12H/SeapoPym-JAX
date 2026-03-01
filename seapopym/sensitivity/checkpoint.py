@@ -14,14 +14,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-
-from seapopym.types import Array
 
 
 class SobolCheckpoint:
@@ -143,7 +140,7 @@ class SobolCheckpoint:
             "qoi_names": self.qoi_names,
             "extraction_points": self.extraction_points,
         }
-        with open(self.meta_path, "w") as f:
+        with open(self.meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
 
     def _validate_metadata(self) -> None:
@@ -151,7 +148,7 @@ class SobolCheckpoint:
         if not self.meta_path.exists():
             return
 
-        with open(self.meta_path) as f:
+        with open(self.meta_path, encoding="utf-8") as f:
             existing = json.load(f)
 
         if existing["qoi_names"] != self.qoi_names:

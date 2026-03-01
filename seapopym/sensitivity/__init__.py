@@ -1,7 +1,7 @@
 """Sensitivity analysis module for SeapoPym.
 
 This module provides Sobol variance-based global sensitivity analysis,
-leveraging JAX's vmap for batched model evaluation on GPU.
+leveraging JAX's vmap for batched model evaluation via JAX.
 
 Main components:
 - SobolAnalyzer: Orchestrates the full Sobol analysis workflow
@@ -12,6 +12,11 @@ Requires the optional SALib dependency:
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from seapopym.sensitivity.sobol import SobolAnalyzer, SobolResult
 
 __all__ = [
     "SobolAnalyzer",

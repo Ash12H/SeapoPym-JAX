@@ -1,6 +1,6 @@
 """Quantity of Interest (QoI) functions for sensitivity analysis.
 
-All functions are pure JAX operations, suitable for GPU execution.
+All functions are pure JAX operations, compatible with JAX JIT.
 They operate on time series extracted at specific grid points.
 
 Input shape convention: (batch_size, T, n_points)

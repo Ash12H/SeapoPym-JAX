@@ -1,9 +1,9 @@
 """Sobol sensitivity analysis for SeapoPym models.
 
 Orchestrates the three phases of Sobol analysis:
-1. Sampling (CPU): Generate Saltelli parameter samples via SALib
-2. Evaluation (GPU): Run batched model evaluations via SobolRunner
-3. Analysis (CPU): Compute Sobol indices via SALib
+1. Sampling (SALib): Generate Saltelli parameter samples via SALib
+2. Evaluation (JAX): Run batched model evaluations via SobolRunner
+3. Analysis (SALib): Compute Sobol indices via SALib
 
 Example:
     >>> from seapopym.sensitivity import SobolAnalyzer
@@ -22,23 +22,24 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from SALib.analyze import sobol as sobol_analyze
+from SALib.sample import sobol as sobol_sample
 
 from seapopym.sensitivity.checkpoint import SobolCheckpoint
 from seapopym.sensitivity.qoi import available_qoi, compute_qoi
 from seapopym.sensitivity.runner import SobolRunner
+from seapopym.types import Array
 
 if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
 
 logger = logging.getLogger(__name__)
-
-from seapopym.types import Array
 
 _DEFAULT_QOI = ["mean", "var", "argmax", "median"]
 
@@ -106,9 +107,6 @@ class SobolAnalyzer:
         Returns:
             SobolResult with Sobol indices per QoI and per extraction point.
         """
-        from SALib.analyze import sobol as sobol_analyze
-        from SALib.sample import sobol as sobol_sample
-
         qoi_names = qoi if qoi is not None else _DEFAULT_QOI
         self._validate_inputs(param_bounds, qoi_names, n_samples)
 
@@ -119,21 +117,85 @@ class SobolAnalyzer:
             "bounds": [list(b) for b in param_bounds.values()],
         }
 
-        # Phase 1: Generate Saltelli samples (CPU)
+        # Phase 1: Generate Saltelli samples (SALib)
+        param_samples = self._sample(problem, n_samples, calc_second_order)
+
+        # Phase 2: Evaluate model in batches (JAX)
+        runner = SobolRunner(self.model, extraction_points, output_variable, chunk_size)
+        all_qoi, time_per_sim = self._evaluate(
+            runner=runner,
+            param_samples=param_samples,
+            problem=problem,
+            qoi_names=qoi_names,
+            batch_size=batch_size,
+            checkpoint_path=checkpoint_path,
+            extraction_points=extraction_points,
+        )
+
+        # Phase 3: Compute Sobol indices (SALib)
+        logger.info("Computing Sobol indices...")
+        return self._compute_indices(
+            problem=problem,
+            all_qoi=all_qoi,
+            qoi_names=qoi_names,
+            extraction_points=extraction_points,
+            n_samples=n_samples,
+            calc_second_order=calc_second_order,
+            time_per_sim=time_per_sim,
+        )
+
+    @staticmethod
+    def _sample(problem: dict, n_samples: int, calc_second_order: bool) -> np.ndarray:
+        """Generate Saltelli parameter samples via SALib.
+
+        Args:
+            problem: SALib problem dict.
+            n_samples: Base sample size N.
+            calc_second_order: Whether to compute second-order indices.
+
+        Returns:
+            Saltelli sample matrix of shape (n_total, D).
+        """
         logger.info(f"Generating Saltelli samples: N={n_samples}, D={problem['num_vars']}")
         param_samples = sobol_sample.sample(problem, n_samples, calc_second_order=calc_second_order)
-        n_total = param_samples.shape[0]
-        logger.info(f"Total model evaluations: {n_total}")
+        logger.info(f"Total model evaluations: {param_samples.shape[0]}")
+        return param_samples
 
-        # Phase 2: Evaluate model in batches (GPU)
-        runner = SobolRunner(self.model, extraction_points, output_variable, chunk_size)
+    def _evaluate(
+        self,
+        runner: SobolRunner,
+        param_samples: np.ndarray,
+        problem: dict,
+        qoi_names: list[str],
+        batch_size: int,
+        checkpoint_path: str | Path | None,
+        extraction_points: list[tuple[int, int]],
+    ) -> tuple[dict[str, list[np.ndarray]], float]:
+        """Evaluate model in batches and collect QoI values.
+
+        Handles checkpoint loading/saving, batch padding, memory logging,
+        and QoI computation for each batch.
+
+        Args:
+            runner: Configured SobolRunner instance.
+            param_samples: Saltelli sample matrix of shape (n_total, D).
+            problem: SALib problem dict.
+            qoi_names: List of QoI names to compute.
+            batch_size: Number of parameter sets per batch.
+            checkpoint_path: Path for Parquet checkpoint, or None.
+            extraction_points: List of (y, x) grid indices.
+
+        Returns:
+            Tuple of (all_qoi dict, time_per_sim in seconds).
+        """
+        n_total = param_samples.shape[0]
 
         # Setup checkpoint if requested
         checkpoint = None
         start_sample = 0
         if checkpoint_path is not None:
             checkpoint = SobolCheckpoint(Path(checkpoint_path), problem, qoi_names, extraction_points)
-            start_sample, _ = checkpoint.load()
+            start_sample, existing_df = checkpoint.load()
             if start_sample > 0:
                 logger.info(f"Resuming from sample {start_sample}/{n_total}")
 
@@ -142,7 +204,6 @@ class SobolAnalyzer:
 
         # If resuming, load already computed QoI
         if start_sample > 0 and checkpoint is not None:
-            _, existing_df = checkpoint.load()
             for qoi_name in qoi_names:
                 all_qoi[qoi_name].append(checkpoint.extract_qoi_array(existing_df, qoi_name))
 
@@ -196,7 +257,7 @@ class SobolAnalyzer:
             eval_elapsed += time.perf_counter() - t_batch_start
             eval_count += actual_batch_size
 
-            # Log GPU memory after first batch (includes JIT compilation peak)
+            # Log device memory after first batch (includes JIT compilation peak)
             if not _mem_logged:
                 _mem_logged = True
                 try:
@@ -205,12 +266,18 @@ class SobolAnalyzer:
                         peak_gb = mem.get("peak_bytes_in_use", 0) / 1e9
                         curr_gb = mem.get("bytes_in_use", 0) / 1e9
                         limit_gb = mem.get("bytes_limit", 0) / 1e9
-                        logger.info(
-                            f"GPU memory: {curr_gb:.2f} GiB in use, "
-                            f"{peak_gb:.2f} GiB peak, "
-                            f"{limit_gb:.2f} GiB limit "
-                            f"({peak_gb/limit_gb*100:.0f}% peak utilization)"
-                        )
+                        if limit_gb > 0:
+                            logger.info(
+                                f"Device memory: {curr_gb:.2f} GiB in use, "
+                                f"{peak_gb:.2f} GiB peak, "
+                                f"{limit_gb:.2f} GiB limit "
+                                f"({peak_gb/limit_gb*100:.0f}% peak utilization)"
+                            )
+                        else:
+                            logger.info(
+                                f"Device memory: {curr_gb:.2f} GiB in use, "
+                                f"{peak_gb:.2f} GiB peak"
+                            )
                 except Exception:
                     pass
 
@@ -224,23 +291,15 @@ class SobolAnalyzer:
 
         # Compute average time per simulation
         time_per_sim = eval_elapsed / eval_count if eval_count > 0 else 0.0
-        logger.info(
-            f"Evaluation done: {eval_count} sims in {eval_elapsed:.1f}s "
-            f"({time_per_sim:.3f} s/sim, {1/time_per_sim:.1f} sim/s)"
-        )
+        if eval_count > 0:
+            logger.info(
+                f"Evaluation done: {eval_count} sims in {eval_elapsed:.1f}s "
+                f"({time_per_sim:.3f} s/sim, {1/time_per_sim:.1f} sim/s)"
+            )
+        else:
+            logger.info("All samples loaded from checkpoint, no evaluation needed")
 
-        # Phase 3: Compute Sobol indices (CPU)
-        logger.info("Computing Sobol indices...")
-        return self._compute_indices(
-            problem=problem,
-            all_qoi=all_qoi,
-            qoi_names=qoi_names,
-            extraction_points=extraction_points,
-            n_samples=n_samples,
-            calc_second_order=calc_second_order,
-            sobol_analyze=sobol_analyze,
-            time_per_sim=time_per_sim,
-        )
+        return all_qoi, time_per_sim
 
     def _validate_inputs(
         self,
@@ -287,7 +346,6 @@ class SobolAnalyzer:
         extraction_points: list[tuple[int, int]],
         n_samples: int,
         calc_second_order: bool,
-        sobol_analyze: Any,
         time_per_sim: float = 0.0,
     ) -> SobolResult:
         """Compute Sobol indices from collected QoI values.
@@ -299,7 +357,6 @@ class SobolAnalyzer:
             extraction_points: List of (y, x) points.
             n_samples: Base sample size.
             calc_second_order: Whether second-order was requested.
-            sobol_analyze: SALib sobol analyze module.
 
         Returns:
             SobolResult with Sobol indices.
