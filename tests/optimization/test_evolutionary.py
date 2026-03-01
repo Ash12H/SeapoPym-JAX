@@ -53,35 +53,32 @@ class TestFlattenUnflatten:
         opt = EvolutionaryOptimizer()
         params = {"x": jnp.array(5.0)}
 
-        keys, flat, lower, upper = opt._flatten(params)
+        keys, flat = opt._flatten(params)
 
         assert keys == ["x"]
         assert flat.shape == (1,)
         assert float(flat[0]) == pytest.approx(5.0)
-        assert lower is None
-        assert upper is None
 
     def test_flatten_multiple_params(self):
-        """Flatten should concatenate multiple parameters."""
+        """Flatten should concatenate multiple parameters sorted by key."""
         opt = EvolutionaryOptimizer()
         params = {"a": jnp.array(1.0), "b": jnp.array(2.0)}
 
-        keys, flat, _, _ = opt._flatten(params)
+        keys, flat = opt._flatten(params)
 
-        assert keys == ["a", "b"]  # Sorted
+        assert keys == ["a", "b"]
         assert flat.shape == (2,)
         assert float(flat[0]) == pytest.approx(1.0)
         assert float(flat[1]) == pytest.approx(2.0)
 
-    def test_flatten_with_bounds(self):
-        """Flatten should return bounds arrays."""
+    def test_build_bounds_arrays(self):
+        """_build_bounds_arrays should return lower/upper matching flat vector."""
         opt = EvolutionaryOptimizer(bounds={"x": (0.0, 10.0)})
         params = {"x": jnp.array(5.0)}
 
-        keys, flat, lower, upper = opt._flatten(params)
+        keys, _ = opt._flatten(params)
+        lower, upper = opt._build_bounds_arrays(keys, params)
 
-        assert lower is not None
-        assert upper is not None
         assert float(lower[0]) == pytest.approx(0.0)
         assert float(upper[0]) == pytest.approx(10.0)
 
@@ -100,7 +97,7 @@ class TestFlattenUnflatten:
         opt = EvolutionaryOptimizer()
         params = {"x": jnp.array(3.0), "y": jnp.array(-2.0)}
 
-        keys, flat, _, _ = opt._flatten(params)
+        keys, flat = opt._flatten(params)
         shapes = {k: jnp.atleast_1d(params[k]).shape for k in keys}
         result = opt._unflatten(keys, flat, shapes, params)
 
@@ -108,30 +105,30 @@ class TestFlattenUnflatten:
         assert float(result["y"]) == pytest.approx(-2.0)
 
 
-class TestApplyBounds:
-    """Tests for bounds application."""
+class TestNormalization:
+    """Tests for normalize/denormalize."""
 
-    def test_apply_bounds_clips_population(self):
-        """apply_bounds should clip values to bounds."""
+    def test_normalize_maps_to_unit_interval(self):
+        """_normalize should map [lower, upper] to [0, 1]."""
         opt = EvolutionaryOptimizer()
-        population = jnp.array([[15.0], [-5.0], [5.0]])
         lower = jnp.array([0.0])
         upper = jnp.array([10.0])
 
-        clipped = opt._apply_bounds(population, lower, upper)
+        assert float(opt._normalize(jnp.array([0.0]), lower, upper)[0]) == pytest.approx(0.0)
+        assert float(opt._normalize(jnp.array([5.0]), lower, upper)[0]) == pytest.approx(0.5)
+        assert float(opt._normalize(jnp.array([10.0]), lower, upper)[0]) == pytest.approx(1.0)
 
-        assert float(clipped[0, 0]) == pytest.approx(10.0)
-        assert float(clipped[1, 0]) == pytest.approx(0.0)
-        assert float(clipped[2, 0]) == pytest.approx(5.0)
-
-    def test_apply_bounds_no_bounds(self):
-        """apply_bounds should pass through with None bounds."""
+    def test_denormalize_roundtrip(self):
+        """Normalize then denormalize should return original value."""
         opt = EvolutionaryOptimizer()
-        population = jnp.array([[15.0], [-5.0]])
+        lower = jnp.array([-5.0, 0.0])
+        upper = jnp.array([5.0, 100.0])
+        original = jnp.array([2.5, 75.0])
 
-        result = opt._apply_bounds(population, None, None)
+        normed = opt._normalize(original, lower, upper)
+        restored = opt._denormalize(normed, lower, upper)
 
-        assert jnp.allclose(result, population)
+        assert jnp.allclose(restored, original)
 
 
 class TestEvolutionaryOptimizerRun:
@@ -144,7 +141,7 @@ class TestEvolutionaryOptimizerRun:
             x = params["x"]
             return (x - 3.0) ** 2  # Minimum at x=3
 
-        opt = EvolutionaryOptimizer(popsize=16, seed=42)
+        opt = EvolutionaryOptimizer(popsize=16, bounds={"x": (-5.0, 10.0)}, seed=42)
         initial_params = {"x": jnp.array(0.0)}
 
         result = opt.run(loss_fn, initial_params, n_generations=50)
@@ -194,7 +191,7 @@ class TestEvolutionaryOptimizerRun:
             y = params["y"]
             return (x - 1.0) ** 2 + (y - 2.0) ** 2  # Minimum at (1, 2)
 
-        opt = EvolutionaryOptimizer(popsize=32, seed=42)
+        opt = EvolutionaryOptimizer(popsize=32, bounds={"x": (-5.0, 5.0), "y": (-5.0, 5.0)}, seed=42)
         initial_params = {"x": jnp.array(0.0), "y": jnp.array(0.0)}
 
         result = opt.run(loss_fn, initial_params, n_generations=100)

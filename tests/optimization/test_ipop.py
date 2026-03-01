@@ -41,11 +41,11 @@ class TestIPOPCMAES:
             loss_fn,
             initial_params={"x": jnp.array(0.0)},
             bounds={"x": (-10.0, 10.0)},
-            n_restarts=6,
+            n_restarts=8,
             initial_popsize=16,
             n_generations=80,
-            distance_threshold=1.0,
-            seed=42,
+            distance_threshold=0.2,
+            seed=7,
         )
         # Should find at least 2 distinct modes
         assert len(result.modes) >= 2

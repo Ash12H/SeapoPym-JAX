@@ -34,13 +34,14 @@ Runner qui connecte le modèle compilé aux loss functions.
 
 Stratégies population-based via evosax.
 
-- [ ] **`evolutionary.py`** (291 LOC) — `EvolutionaryOptimizer`
-  - Early stopping near-zero : `min_fitness < best_loss * (1 - tol_fun)` trop strict ?
-  - Vérifier `_build_strategy()` / `_init_state()` API evosax
-  - Ruff / pyright / coverage
-- [ ] **`ipop.py`** (185 LOC) — `run_ipop`, `run_ipop_cmaes`
-  - Mode detection via distance euclidienne normalisée
-  - Ruff / pyright / coverage
+- [x] **`evolutionary.py`** (291 LOC) — `EvolutionaryOptimizer`
+  - Fix ruff E402 (imports after logger)
+  - Fix tests: `_flatten` API mismatch (2 vs 4 return values), `_apply_bounds` removed → `TestNormalization`
+  - Fix `test_run_minimizes_quadratic` / `test_run_multivariate` (missing bounds → targets unreachable)
+- [x] **`ipop.py`** (185 LOC) — `run_ipop`, `run_ipop_cmaes`
+  - Fix ruff E402 (imports after logger)
+  - Fix pyright: `strategy` param `str` → `Literal["cma_es", "simple_ga"]`
+  - Fix `test_bimodal_finds_two_modes` (distance_threshold trop élevé pour bounds normalisés)
 
 ## Milestone 5 — Hybride + module entry (`hybrid`, `__init__`)
 
