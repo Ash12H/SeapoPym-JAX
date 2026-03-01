@@ -19,22 +19,16 @@ Socle commun utilisé par tous les autres modules.
 
 Composants pour estimation MAP et échantillonnage MCMC.
 
-- [ ] **`likelihood.py`** (182 LOC) — `GaussianLikelihood`, `make_log_posterior`
-  - Vérifier correction Jacobienne dans `reparameterize_log_posterior`
-  - Ruff / pyright / coverage
-- [ ] **`nuts.py`** (152 LOC) — `NUTSResult`, `run_nuts`
-  - `# type: ignore` sur BlackJAX — acceptable ?
-  - Vérifier warmup reuse pattern
-  - Ruff / pyright / coverage
+- [x] **`likelihood.py`** — Fix `_bounds_arrays()` → `get_bounds()`, +3 tests (reparameterize, jacobian, missing sigma KeyError)
+- [x] **`nuts.py`** — Fix import order (ruff E402), `# type: ignore` BlackJAX justifiés
 
 ## Milestone 3 — Optimisation gradient (`gradient`)
 
 Runner qui connecte le modèle compilé aux loss functions.
 
-- [ ] **`gradient.py`** (294 LOC) — `GradientRunner`, `SparseObservations`
-  - Gestion cohorts hardcodée `[..., 0]` — à rendre flexible ?
-  - Pas de validation des indices temporels des observations
-  - Ruff / pyright / coverage
+- [x] **`gradient.py`** (294 LOC) — `GradientRunner`, `SparseObservations`
+  - SparseObservations limitation (T,Y,X rigide) documentée → `docs/design/sparse-observations-redesign.md`
+  - +3 tests GradientRunner (unknown loss_type, rmse/nrmse, compute_value_and_gradient)
 
 ## Milestone 4 — Optimisation évolutionnaire (`evolutionary`, `ipop`)
 
