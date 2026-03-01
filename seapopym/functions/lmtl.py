@@ -243,6 +243,20 @@ def mortality_tendency(
 
 
 # =============================================================================
+# HELPERS
+# =============================================================================
+
+
+def _cohort_durations(cohort_ages: jnp.ndarray) -> jnp.ndarray:
+    """Compute cohort time durations from age boundaries.
+
+    Last cohort (plus-group) reuses the duration of the penultimate cohort.
+    """
+    d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
+    return jnp.concatenate([d_tau_raw, d_tau_raw[-1:]])
+
+
+# =============================================================================
 # PRODUCTION DYNAMICS
 # =============================================================================
 
@@ -323,10 +337,7 @@ def aging_flow(
     Returns:
         Aging tendency [g/m^2/s] with shape (C,).
     """
-    # Cohort durations
-    d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
-    last_d_tau = d_tau_raw[-1:]
-    d_tau = jnp.concatenate([d_tau_raw, last_d_tau])
+    d_tau = _cohort_durations(cohort_ages)
 
     # Aging rate
     aging_coef = 1.0 / d_tau
@@ -392,10 +403,7 @@ def recruitment_flow(
         - prod_loss: Production loss tendency [g/m^2/s] with shape (C,).
         - biomass_gain: Biomass gain tendency [g/m^2/s] (scalar).
     """
-    # Cohort durations
-    d_tau_raw = cohort_ages[1:] - cohort_ages[:-1]
-    last_d_tau = d_tau_raw[-1:]
-    d_tau = jnp.concatenate([d_tau_raw, last_d_tau])
+    d_tau = _cohort_durations(cohort_ages)
 
     # Aging coefficient
     aging_coef = 1.0 / d_tau

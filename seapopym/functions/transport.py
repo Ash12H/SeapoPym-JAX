@@ -55,10 +55,10 @@ class BoundaryType(IntEnum):
 # - axis: -1 for X (east/west), -2 for Y (north/south)
 # - boundary_slice: indexer for the boundary edge to fix in non-periodic mode
 _DIRECTION_CONFIG = {
-    "east": (-1, -1, lambda s: (slice(None), -1)),
-    "west": (1, -1, lambda s: (slice(None), 0)),
-    "north": (-1, -2, lambda s: (-1, slice(None))),
-    "south": (1, -2, lambda s: (0, slice(None))),
+    "east": (-1, -1, lambda _: (slice(None), -1)),
+    "west": (1, -1, lambda _: (slice(None), 0)),
+    "north": (-1, -2, lambda _: (-1, slice(None))),
+    "south": (1, -2, lambda _: (0, slice(None))),
 }
 
 
