@@ -1,6 +1,6 @@
 """Catalogue de modeles pre-definis."""
 
-from importlib.resources import files
+from importlib.resources import as_file, files
 
 from seapopym.blueprint import Blueprint
 
@@ -13,8 +13,8 @@ def load_model(name: str) -> Blueprint:
     Args:
         name: Nom du modele (ex: "seapodym_lmtl", "seapodym_lmtl_no_transport").
     """
-    path = _MODELS_DIR / f"{name}.yaml"
-    return Blueprint.load(path)
+    with as_file(_MODELS_DIR / f"{name}.yaml") as path:
+        return Blueprint.load(path)
 
 
 LMTL_NO_TRANSPORT = load_model("seapodym_lmtl_no_transport")
