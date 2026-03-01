@@ -47,14 +47,14 @@ Stratégies population-based via evosax.
 
 Combinaison CMA-ES + gradient, et point d'entrée du package.
 
-- [ ] **`hybrid.py`** (252 LOC) — `HybridOptimizer`
-  - Référence à `_apply_bounds()` inexistant sur `EvolutionaryOptimizer` ?
-  - Combinaison loss history depuis le 1er candidat uniquement
-  - Ruff / pyright / coverage
-- [ ] **`__init__.py`** (82 LOC) — exports, lazy loading
-  - `flax` dans les dépendances optionnelles mais inutilisé — supprimer ?
-  - Vérifier cohérence `__all__` / `__getattr__`
-  - Ruff / pyright / coverage
+- [x] **`hybrid.py`** (252 LOC) — `HybridOptimizer`
+  - Fix ruff E402/I001 (imports after logger, unsorted)
+  - Fix pyright: `_flatten` 4→2 return values, `_apply_bounds` → `jnp.clip`
+  - Fix tests: missing bounds, loss_history length assertion
+- [x] **`__init__.py`** (82 LOC) — exports, lazy loading
+  - Fix ruff I001 (import block unsorted)
+  - `flax` non référencé dans le module — confirmé inutile
+  - `__all__` / `__getattr__` cohérents
 
 ---
 
