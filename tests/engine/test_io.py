@@ -1,4 +1,4 @@
-"""Tests for async I/O functionality."""
+"""Tests for I/O functionality."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ class TestDiskWriter:
 
         # Write a chunk
         data = {"biomass": np.ones((10, 5, 5)) * 100.0}
-        writer.append(data, chunk_index=0)
+        writer.append(data)
         writer.finalize()
         writer.close()
 
@@ -49,7 +49,7 @@ class TestDiskWriter:
         # Write multiple chunks
         for i in range(3):
             data = {"biomass": np.ones((5, 5, 5)) * (i + 1)}
-            writer.append(data, chunk_index=i)
+            writer.append(data)
 
         writer.finalize()
         writer.close()
@@ -70,7 +70,7 @@ class TestDiskWriter:
             "biomass": np.ones((5, 5, 5)) * 100.0,
             "temperature": np.ones((5, 5, 5)) * 20.0,
         }
-        writer.append(data, chunk_index=0)
+        writer.append(data)
         writer.finalize()
         writer.close()
 
@@ -87,7 +87,7 @@ class TestDiskWriter:
         with DiskWriter(output_path) as writer:
             writer.initialize({"Y": 5, "X": 5}, ["biomass"])
             data = {"biomass": np.ones((5, 5, 5)) * 100.0}
-            writer.append(data, chunk_index=0)
+            writer.append(data)
 
         # Should have flushed and closed
         import zarr
@@ -101,7 +101,7 @@ class TestDiskWriter:
         writer = DiskWriter(output_path)
 
         with pytest.raises(EngineIOError):
-            writer.append({"biomass": np.ones((5, 5, 5))}, chunk_index=0)
+            writer.append({"biomass": np.ones((5, 5, 5))})
 
         writer.close()
 
@@ -115,7 +115,7 @@ class TestDiskWriter:
 
             # Use JAX array
             data = {"biomass": jnp.ones((5, 5, 5)) * 100.0}
-            writer.append(data, chunk_index=0)
+            writer.append(data)
 
         # Should have been converted and written
         import zarr
@@ -123,27 +123,55 @@ class TestDiskWriter:
         store = zarr.open(str(output_path), mode="r")
         assert store["biomass"].shape[0] == 5  # type: ignore[union-attr]
 
-
-class TestDiskWriterConcurrency:
-    """Tests for concurrent write behavior."""
-
-    def test_parallel_writes(self, tmp_path):
-        """Test that multiple writes can proceed in parallel."""
+    def test_var_dims_shapes(self, tmp_path):
+        """Test that var_dims produces correct per-variable shapes."""
         output_path = tmp_path / "output"
-        writer = DiskWriter(output_path, max_workers=2)
-        writer.initialize({"Y": 10, "X": 10}, ["biomass"])
+        writer = DiskWriter(output_path)
+        writer.initialize(
+            {"C": 3, "Y": 4, "X": 5},
+            ["biomass", "cohort_var"],
+            var_dims={"biomass": ("Y", "X"), "cohort_var": ("C", "Y", "X")},
+        )
 
-        # Submit multiple writes quickly
-        for i in range(5):
-            data = {"biomass": np.random.rand(10, 10, 10)}
-            writer.append(data, chunk_index=i)
+        import zarr
 
-        # Flush should wait for all
-        writer.finalize()
+        # biomass: (T, Y, X) → initial shape (0, 4, 5)
+        assert writer.store["biomass"].shape == (0, 4, 5)
+        assert writer.store["biomass"].attrs["_ARRAY_DIMENSIONS"] == ["T", "Y", "X"]
+
+        # cohort_var: (T, C, Y, X) → initial shape (0, 3, 4, 5)
+        assert writer.store["cohort_var"].shape == (0, 3, 4, 5)
+        assert writer.store["cohort_var"].attrs["_ARRAY_DIMENSIONS"] == ["T", "C", "Y", "X"]
+
         writer.close()
 
-        # Verify all data written
+    def test_coords_written_to_zarr(self, tmp_path):
+        """Test that coordinate arrays are written to the zarr store."""
+        output_path = tmp_path / "output"
+        writer = DiskWriter(output_path)
+
+        coords = {"Y": np.arange(5), "X": np.arange(3)}
+        writer.initialize({"Y": 5, "X": 3}, ["biomass"], coords=coords)
+
         import zarr
 
         store = zarr.open(str(output_path), mode="r")
-        assert store["biomass"].shape[0] == 50  # type: ignore[union-attr]  # 5 chunks * 10 timesteps
+        np.testing.assert_array_equal(store["Y"][:], np.arange(5))
+        np.testing.assert_array_equal(store["X"][:], np.arange(3))
+
+        writer.close()
+
+    def test_array_dimensions_attr(self, tmp_path):
+        """Test that _ARRAY_DIMENSIONS attribute is set on variables."""
+        output_path = tmp_path / "output"
+        writer = DiskWriter(output_path)
+        writer.initialize({"Y": 5, "X": 5}, ["biomass"])
+
+        import zarr
+
+        store = zarr.open(str(output_path), mode="r")
+        assert store["biomass"].attrs["_ARRAY_DIMENSIONS"] == ["T", "Y", "X"]
+
+        writer.close()
+
+

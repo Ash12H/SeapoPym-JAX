@@ -5,89 +5,8 @@ import pytest
 
 import jax.numpy as jnp
 
-from seapopym.blueprint import Blueprint, Config, clear_registry, functional
+from seapopym.blueprint import functional
 from seapopym.compiler import compile_model
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Clear registry before each test."""
-    clear_registry()
-    yield
-    clear_registry()
-
-
-@pytest.fixture
-def simple_blueprint():
-    """Create a simple blueprint for testing."""
-    return Blueprint.from_dict(
-        {
-            "id": "test-model",
-            "version": "0.1.0",
-            "declarations": {
-                "state": {
-                    "biomass": {
-                        "units": "g",
-                        "dims": ["Y", "X"],
-                    }
-                },
-                "parameters": {
-                    "growth_rate": {
-                        "units": "1/d",
-                    }
-                },
-                "forcings": {
-                    "temperature": {
-                        "units": "degC",
-                        "dims": ["T", "Y", "X"],
-                    },
-                    "mask": {
-                        "dims": ["Y", "X"],
-                    },
-                },
-            },
-            "process": [
-                {
-                    "func": "test:growth",
-                    "inputs": {
-                        "biomass": "state.biomass",
-                        "rate": "parameters.growth_rate",
-                        "temp": "forcings.temperature",
-                    },
-                    "outputs": {
-                        "tendency": "derived.growth_flux",
-                    },
-                }
-            ],
-            "tendencies": {
-                "biomass": [{"source": "derived.growth_flux"}],
-            },
-        }
-    )
-
-
-@pytest.fixture
-def simple_config():
-    """Create a simple config for testing."""
-    return Config.from_dict(
-        {
-            "parameters": {
-                "growth_rate": {"value": 0.1},
-            },
-            "forcings": {
-                "temperature": np.ones((10, 5, 5)) * 20.0,
-                "mask": np.ones((5, 5)),
-            },
-            "initial_state": {
-                "biomass": np.ones((5, 5)) * 100.0,
-            },
-            "execution": {
-                "dt": "1d",
-                "time_start": "2000-01-01",
-                "time_end": "2000-01-11",
-            },
-        }
-    )
 
 
 class TestBuildStepFn:
@@ -198,6 +117,194 @@ class TestResolveInputs:
 
         assert float(result["rate"]) == pytest.approx(0.1)
 
+    def test_resolve_direct_reference_state(self):
+        """Test resolving a direct reference (no category prefix) found in state."""
+        from seapopym.engine.step import _resolve_inputs
+
+        result = _resolve_inputs(
+            {"b": "biomass"},
+            state={"biomass": jnp.array(1.0)},
+            forcings_t={},
+            parameters={},
+            intermediates={},
+        )
+        assert float(result["b"]) == pytest.approx(1.0)
+
+    def test_resolve_direct_reference_forcings(self):
+        """Test resolving a direct reference found in forcings."""
+        from seapopym.engine.step import _resolve_inputs
+
+        result = _resolve_inputs(
+            {"t": "temperature"},
+            state={},
+            forcings_t={"temperature": jnp.array(20.0)},
+            parameters={},
+            intermediates={},
+        )
+        assert float(result["t"]) == pytest.approx(20.0)
+
+    def test_resolve_direct_reference_parameters(self):
+        """Test resolving a direct reference found in parameters."""
+        from seapopym.engine.step import _resolve_inputs
+
+        result = _resolve_inputs(
+            {"r": "growth_rate"},
+            state={},
+            forcings_t={},
+            parameters={"growth_rate": jnp.array(0.5)},
+            intermediates={},
+        )
+        assert float(result["r"]) == pytest.approx(0.5)
+
+    def test_resolve_direct_reference_intermediates(self):
+        """Test resolving a direct reference found in intermediates."""
+        from seapopym.engine.step import _resolve_inputs
+
+        result = _resolve_inputs(
+            {"f": "flux"},
+            state={},
+            forcings_t={},
+            parameters={},
+            intermediates={"flux": jnp.array(3.0)},
+        )
+        assert float(result["f"]) == pytest.approx(3.0)
+
+    def test_resolve_direct_reference_not_found(self):
+        """Test that a direct reference not found anywhere raises KeyError."""
+        from seapopym.engine.step import _resolve_inputs
+
+        with pytest.raises(KeyError, match="Cannot resolve input"):
+            _resolve_inputs(
+                {"x": "nonexistent"},
+                state={},
+                forcings_t={},
+                parameters={},
+                intermediates={},
+            )
+
+    def test_resolve_unknown_category(self):
+        """Test that an unknown category raises KeyError."""
+        from seapopym.engine.step import _resolve_inputs
+
+        with pytest.raises(KeyError, match="Unknown category"):
+            _resolve_inputs(
+                {"x": "unknown_cat.var"},
+                state={},
+                forcings_t={},
+                parameters={},
+                intermediates={},
+            )
+
+
+class TestTransposeVmapOutput:
+    """Tests for _transpose_vmap_output."""
+
+    def test_transpose_single_array(self):
+        """Test transposing a single array."""
+        from seapopym.engine.step import _transpose_vmap_output
+
+        arr = jnp.zeros((2, 3, 4))
+        result = _transpose_vmap_output(arr, (2, 0, 1))
+        assert result.shape == (4, 2, 3)
+
+    def test_transpose_tuple_of_arrays(self):
+        """Test transposing a tuple of arrays."""
+        from seapopym.engine.step import _transpose_vmap_output
+
+        a = jnp.zeros((2, 3, 4))
+        b = jnp.zeros((2, 3, 4))
+        result = _transpose_vmap_output((a, b), (2, 0, 1))
+        assert isinstance(result, tuple)
+        assert result[0].shape == (4, 2, 3)
+        assert result[1].shape == (4, 2, 3)
+
+    def test_transpose_skips_mismatched_ndim(self):
+        """Test that arrays with wrong ndim are returned unchanged."""
+        from seapopym.engine.step import _transpose_vmap_output
+
+        arr = jnp.zeros((2, 3))  # 2D, but axes expect 3D
+        result = _transpose_vmap_output(arr, (2, 0, 1))
+        assert result.shape == (2, 3)  # Unchanged
+
+    def test_transpose_scalar_passthrough(self):
+        """Test that a scalar passes through unchanged."""
+        from seapopym.engine.step import _transpose_vmap_output
+
+        result = _transpose_vmap_output(42, (1, 0))
+        assert result == 42
+
+
+class TestHandleComputeOutputs:
+    """Tests for _handle_compute_outputs."""
+
+    def test_single_output(self):
+        """Test handling a single compute output."""
+        from seapopym.engine.step import _handle_compute_outputs
+
+        intermediates: dict = {}
+        _handle_compute_outputs(
+            jnp.array(1.0),
+            {"tendency": "derived.growth_flux"},
+            intermediates,
+        )
+        assert "growth_flux" in intermediates
+
+    def test_multi_output(self):
+        """Test handling multiple compute outputs."""
+        from seapopym.engine.step import _handle_compute_outputs
+
+        intermediates: dict = {}
+        _handle_compute_outputs(
+            (jnp.array(1.0), jnp.array(2.0)),
+            {"a": "derived.flux_a", "b": "derived.flux_b"},
+            intermediates,
+        )
+        assert float(intermediates["flux_a"]) == pytest.approx(1.0)
+        assert float(intermediates["flux_b"]) == pytest.approx(2.0)
+
+    def test_multi_output_wrong_type(self):
+        """Test that a non-tuple for multi-output raises TypeError."""
+        from seapopym.engine.step import _handle_compute_outputs
+
+        with pytest.raises(TypeError, match="expected tuple"):
+            _handle_compute_outputs(
+                jnp.array(1.0),
+                {"a": "derived.flux_a", "b": "derived.flux_b"},
+                {},
+            )
+
+    def test_multi_output_wrong_count(self):
+        """Test that wrong number of outputs raises ValueError."""
+        from seapopym.engine.step import _handle_compute_outputs
+
+        with pytest.raises(ValueError, match="expected 2"):
+            _handle_compute_outputs(
+                (jnp.array(1.0),),
+                {"a": "derived.flux_a", "b": "derived.flux_b"},
+                {},
+            )
+
+
+class TestApplyMask:
+    """Tests for _apply_mask."""
+
+    def test_no_op_mask(self):
+        """Test that mask=1.0 is a no-op."""
+        from seapopym.engine.step import _apply_mask
+
+        state = {"x": jnp.array([1.0, 2.0])}
+        result = _apply_mask(state, 1.0)
+        assert result is state  # Same object (no copy)
+
+    def test_array_mask(self):
+        """Test applying a real mask array."""
+        from seapopym.engine.step import _apply_mask
+
+        state = {"x": jnp.array([10.0, 20.0, 30.0])}
+        mask = jnp.array([1.0, 0.0, 1.0])
+        result = _apply_mask(state, mask)
+        np.testing.assert_array_equal(np.asarray(result["x"]), [10.0, 0.0, 30.0])
+
 
 class TestIntegrateEuler:
     """Tests for Euler integration."""
@@ -268,3 +375,18 @@ class TestIntegrateEuler:
         new_state = _integrate_euler(state, intermediates, tendency_map, dt)
 
         np.testing.assert_array_equal(np.asarray(new_state["x"]), [12.0])  # 10 + (3 - 1)*1
+
+    def test_euler_clamp_non_negative(self):
+        """Test that Euler integration clamps state to >= 0."""
+        from seapopym.blueprint.schema import TendencySource
+        from seapopym.engine.step import _integrate_euler
+
+        state = {"x": jnp.array([1.0])}
+        intermediates = {"loss": jnp.array([10.0])}
+        tendency_map = {"x": [TendencySource(source="derived.loss", sign=-1.0)]}
+        dt = 1.0
+
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt)
+
+        # 1.0 + (-10.0)*1.0 = -9.0 → clamped to 0.0
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [0.0])

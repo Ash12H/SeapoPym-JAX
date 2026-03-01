@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import jax
+
 from seapopym.dims import CANONICAL_DIMS
 
 
@@ -195,8 +197,6 @@ def wrap_with_vmap(
         ... )
         >>> # wrapped now accepts (C, Y, X) arrays and vmaps over Y, X
     """
-    import jax
-
     # Compute which dimensions to vmap over
     broadcast_dims = compute_broadcast_dims(input_dims, core_dims)
 

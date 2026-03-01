@@ -3,131 +3,73 @@
 import numpy as np
 import pytest
 
-from seapopym.blueprint import Blueprint, Config, clear_registry, functional
+from seapopym.blueprint import Config, functional
 from seapopym.compiler import compile_model
 from seapopym.engine.exceptions import ChunkingError
 from seapopym.engine.runners import StreamingRunner
 
 
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Clear registry before each test."""
-    clear_registry()
-    yield
-    clear_registry()
-
-
-@pytest.fixture
-def simple_blueprint():
-    """Create a simple blueprint for testing."""
-    return Blueprint.from_dict(
-        {
-            "id": "test-model",
-            "version": "0.1.0",
-            "declarations": {
-                "state": {
-                    "biomass": {
-                        "units": "g",
-                        "dims": ["Y", "X"],
-                    }
-                },
-                "parameters": {
-                    "growth_rate": {
-                        "units": "1/d",
-                    }
-                },
-                "forcings": {
-                    "temperature": {
-                        "units": "degC",
-                        "dims": ["T", "Y", "X"],
-                    },
-                    "mask": {
-                        "dims": ["Y", "X"],
-                    },
-                },
-            },
-            "process": [
-                {
-                    "func": "test:growth",
-                    "inputs": {
-                        "biomass": "state.biomass",
-                        "rate": "parameters.growth_rate",
-                        "temp": "forcings.temperature",
-                    },
-                    "outputs": {
-                        "tendency": "derived.growth_flux",
-                    },
-                }
-            ],
-            "tendencies": {
-                "biomass": [{"source": "derived.growth_flux"}],
-            },
-        }
-    )
-
-
-@pytest.fixture
-def simple_config():
-    """Create a simple config with 30 timesteps."""
-    return Config.from_dict(
-        {
-            "parameters": {
-                "growth_rate": {"value": 0.001},  # Small rate to avoid overflow
-            },
-            "forcings": {
-                "temperature": np.ones((30, 5, 5)) * 20.0,
-                "mask": np.ones((5, 5)),
-            },
-            "initial_state": {
-                "biomass": np.ones((5, 5)) * 100.0,
-            },
-            "execution": {
-                "dt": "1d",
-                "time_start": "2000-01-01",
-                "time_end": "2000-01-31",  # 30 days
-            },
-        }
-    )
-
-
 class TestStreamingRunner:
     """Tests for StreamingRunner."""
 
-    def test_init(self, simple_blueprint, simple_config):
+    @pytest.fixture
+    def runner_config(self):
+        """Config with 30 timesteps (runner tests need more steps for chunking)."""
+        return Config.from_dict(
+            {
+                "parameters": {
+                    "growth_rate": {"value": 0.001},  # Small rate to avoid overflow
+                },
+                "forcings": {
+                    "temperature": np.ones((30, 5, 5)) * 20.0,
+                    "mask": np.ones((5, 5)),
+                },
+                "initial_state": {
+                    "biomass": np.ones((5, 5)) * 100.0,
+                },
+                "execution": {
+                    "dt": "1d",
+                    "time_start": "2000-01-01",
+                    "time_end": "2000-01-31",  # 30 days
+                },
+            }
+        )
+
+    def test_init(self, simple_blueprint, runner_config):
         """Test runner initialization."""
 
         @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config)
+        model = compile_model(simple_blueprint, runner_config)
         runner = StreamingRunner(model, chunk_size=10)
 
         assert runner.chunk_size == 10
         assert runner.model is model
 
-    def test_chunk_size_from_config(self, simple_blueprint, simple_config):
+    def test_chunk_size_from_config(self, simple_blueprint, runner_config):
         """Test that runner uses chunk_size from model config if chunk_size not provided."""
         # Manually set chunk_size in config before compiling
-        simple_config.execution.chunk_size = 15
+        runner_config.execution.chunk_size = 15
 
         @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config)
+        model = compile_model(simple_blueprint, runner_config)
         runner = StreamingRunner(model)
 
         assert runner.chunk_size == 15
 
-    def test_run(self, simple_blueprint, simple_config, tmp_path):
+    def test_run(self, simple_blueprint, runner_config, tmp_path):
         """Test running simulation."""
 
         @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config)
+        model = compile_model(simple_blueprint, runner_config)
         runner = StreamingRunner(model, chunk_size=10)
 
         output_path = tmp_path / "output"
@@ -139,14 +81,14 @@ class TestStreamingRunner:
         # Biomass should have grown
         assert np.all(np.asarray(final_state["biomass"]) >= 100.0)
 
-    def test_chunking_exact_division(self, simple_blueprint, simple_config, tmp_path):
+    def test_chunking_exact_division(self, simple_blueprint, runner_config, tmp_path):
         """Test chunking when timesteps divide evenly."""
 
         @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config)
+        model = compile_model(simple_blueprint, runner_config)
         runner = StreamingRunner(model, chunk_size=10)  # 30 / 10 = 3 chunks
 
         output_path = tmp_path / "output"
@@ -204,14 +146,14 @@ class TestStreamingRunner:
         with pytest.raises(ChunkingError):
             runner.run(str(tmp_path / "output"))
 
-    def test_run_in_memory(self, simple_blueprint, simple_config):
+    def test_run_in_memory(self, simple_blueprint, runner_config):
         """Test running simulation with in-memory output (no path)."""
 
         @functional(name="test:growth")
         def test_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        model = compile_model(simple_blueprint, simple_config)
+        model = compile_model(simple_blueprint, runner_config)
         runner = StreamingRunner(model, chunk_size=10)
 
         final_state, outputs = runner.run(output_path=None)
