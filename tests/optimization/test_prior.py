@@ -187,3 +187,31 @@ class TestPriorSet:
         assert "alpha" in grads
         assert "beta" in grads
         assert jnp.isfinite(grads["beta"])
+
+    def test_to_unit_from_unit_roundtrip(self):
+        """from_unit(to_unit(x)) should return x."""
+        ps = PriorSet({"x": Uniform(2.0, 8.0), "y": Normal(loc=0.0, scale=1.0)})
+        params = {"x": jnp.array(5.0), "y": jnp.array(0.0)}
+        roundtrip = ps.from_unit(ps.to_unit(params))
+        assert float(roundtrip["x"]) == pytest.approx(5.0, abs=1e-5)
+        assert float(roundtrip["y"]) == pytest.approx(0.0, abs=1e-5)
+
+    def test_to_unit_at_bounds(self):
+        """to_unit at bounds should give 0 and 1."""
+        ps = PriorSet({"x": Uniform(2.0, 8.0)})
+        assert float(ps.to_unit({"x": jnp.array(2.0)})["x"]) == pytest.approx(0.0, abs=1e-6)
+        assert float(ps.to_unit({"x": jnp.array(8.0)})["x"]) == pytest.approx(1.0, abs=1e-6)
+
+    def test_log_det_jacobian_known_value(self):
+        """For Uniform(0, 10), log_det_jacobian should be log(10)."""
+        ps = PriorSet({"x": Uniform(0.0, 10.0)})
+        ldj = ps.log_det_jacobian()
+        assert float(ldj) == pytest.approx(float(jnp.log(10.0)), abs=1e-5)
+
+    def test_log_prob_missing_param(self):
+        """log_prob should ignore priors whose key is absent from params."""
+        ps = PriorSet({"x": Uniform(0.0, 1.0), "y": Normal(loc=0.0, scale=1.0)})
+        # Only pass "x", "y" is missing
+        lp_partial = ps.log_prob({"x": jnp.array(0.5)})
+        lp_x_only = Uniform(0.0, 1.0).log_prob(jnp.array(0.5))
+        assert float(lp_partial) == pytest.approx(float(lp_x_only), abs=1e-5)

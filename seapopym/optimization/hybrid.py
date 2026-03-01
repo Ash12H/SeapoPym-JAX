@@ -12,12 +12,11 @@ from collections.abc import Callable
 import jax
 import jax.numpy as jnp
 
-logger = logging.getLogger(__name__)
-
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
 from seapopym.optimization.optimizer import Optimizer, OptimizeResult
-
 from seapopym.types import Array, Params
+
+logger = logging.getLogger(__name__)
 
 
 class HybridOptimizer:
@@ -147,7 +146,8 @@ class HybridOptimizer:
         shapes = {k: jnp.atleast_1d(initial_params[k]).shape for k in keys}
 
         # Flatten initial params
-        flat_keys, x0, lower, upper = evo_opt._flatten(initial_params)
+        flat_keys, x0 = evo_opt._flatten(initial_params)
+        lower, upper = evo_opt._build_bounds_arrays(flat_keys, initial_params)
 
         # Initialize strategy
         from evosax.algorithms import CMA_ES
@@ -176,7 +176,7 @@ class HybridOptimizer:
             key, ask_key, tell_key = jax.random.split(key, 3)
 
             population, state = strategy.ask(ask_key, state, es_params)
-            population = evo_opt._apply_bounds(population, lower, upper)
+            population = jnp.clip(population, lower, upper)
             fitness = eval_population(population)
             state, _metrics = strategy.tell(tell_key, population, fitness, state, es_params)
 

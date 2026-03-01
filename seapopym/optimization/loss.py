@@ -102,8 +102,8 @@ def nrmse(
             norm_factor = jnp.abs(jnp.sum(obs_masked) / jnp.maximum(n_points, 1.0))
         elif mode == "minmax":
             # For masked minmax, we use a large/small init value trick
-            obs_for_min = jnp.where(mask, observations, jnp.inf)
-            obs_for_max = jnp.where(mask, observations, -jnp.inf)
+            obs_for_min = jnp.asarray(jnp.where(mask, observations, jnp.inf))
+            obs_for_max = jnp.asarray(jnp.where(mask, observations, -jnp.inf))
             norm_factor = jnp.max(obs_for_max) - jnp.min(obs_for_min)
         else:
             raise ValueError(f"Unknown normalization mode: {mode}")

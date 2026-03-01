@@ -167,7 +167,7 @@ def reparameterize_log_posterior(
     """
     # Precompute bounds eagerly (outside JIT) to avoid ConcretizationTypeError
     # when priors like HalfNormal compute bounds via jstats.norm.ppf + float().
-    bounds = prior_set._bounds_arrays()
+    bounds = prior_set.get_bounds()
     log_det_jac = prior_set.log_det_jacobian()
 
     def log_posterior_unit(params_unit: Params) -> Array:

@@ -299,3 +299,22 @@ class TestScaling:
         # All received values should be in original space [0, 10], not [0, 1]
         for val in received_params:
             assert 0.0 <= val <= 10.0
+
+    def test_mixed_bounded_unbounded_params(self):
+        """Params with bounds on some keys should pass through unbounded ones."""
+
+        def loss_fn(params):
+            return (params["x"] - 5.0) ** 2 + (params["y"] - 3.0) ** 2
+
+        opt = Optimizer(
+            algorithm="adam",
+            learning_rate=0.3,
+            bounds={"x": (0.0, 10.0)},
+            scaling="bounds",
+        )
+        initial_params = {"x": jnp.array(1.0), "y": jnp.array(0.0)}
+
+        result = opt.run(loss_fn, initial_params, n_steps=200)
+
+        assert float(result.params["x"]) == pytest.approx(5.0, abs=0.2)
+        assert float(result.params["y"]) == pytest.approx(3.0, abs=0.2)

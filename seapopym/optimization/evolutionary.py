@@ -19,10 +19,10 @@ import jax.numpy as jnp
 import optax
 from evosax.algorithms import CMA_ES, SimpleGA
 
-logger = logging.getLogger(__name__)
-
 from seapopym.optimization.optimizer import OptimizeResult
 from seapopym.types import Array, Params
+
+logger = logging.getLogger(__name__)
 
 
 class EvolutionaryOptimizer:

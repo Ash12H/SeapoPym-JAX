@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from seapopym.optimization.likelihood import GaussianLikelihood, make_log_posterior
+from seapopym.optimization.likelihood import GaussianLikelihood, make_log_posterior, reparameterize_log_posterior
 from seapopym.optimization.prior import HalfNormal, Normal, PriorSet, Uniform
 
 
@@ -175,3 +175,36 @@ class TestMakeLogPosteriorMode2:
         good_params = {"a": jnp.array(2.0), "sigma": jnp.array(0.5)}
         bad_params = {"a": jnp.array(5.0), "sigma": jnp.array(0.5)}
         assert float(log_post(good_params)) > float(log_post(bad_params))
+
+    def test_missing_sigma_raises_key_error(self):
+        predict_fn = self._make_predict_fn()
+        log_post = make_log_posterior(
+            loss_fn=None,
+            prior_set=self.prior_set,
+            likelihood=self.likelihood,  # sigma free
+            sigma_prior=self.sigma_prior,
+            observations_for_likelihood=(predict_fn, self.obs),
+        )
+        # Mode 2 with sigma free but no "sigma" in params → KeyError
+        with pytest.raises(KeyError, match="sigma"):
+            log_post({"a": jnp.array(2.0)})
+
+
+class TestReparameterizeLogPosterior:
+    def test_reparameterize_finite_in_unit_space(self):
+        prior_set = PriorSet({"x": Uniform(0.0, 10.0)})
+        log_post = make_log_posterior(lambda p: (p["x"] - 5.0) ** 2, prior_set)
+        log_post_unit = reparameterize_log_posterior(log_post, prior_set)
+        # Unit-space params in [0, 1] should give finite log-posterior
+        result = log_post_unit({"x": jnp.array(0.5)})
+        assert jnp.isfinite(result)
+
+    def test_jacobian_correction(self):
+        prior_set = PriorSet({"x": Uniform(0.0, 10.0)})
+        log_post = make_log_posterior(lambda p: (p["x"] - 5.0) ** 2, prior_set)
+        log_post_unit = reparameterize_log_posterior(log_post, prior_set)
+        # Unit 0.5 maps to physical 5.0; Jacobian correction = log(10 - 0) = log(10)
+        lp_unit = float(log_post_unit({"x": jnp.array(0.5)}))
+        lp_phys = float(log_post({"x": jnp.array(5.0)}))
+        expected = lp_phys + float(jnp.log(jnp.array(10.0)))
+        assert lp_unit == pytest.approx(expected, abs=1e-5)

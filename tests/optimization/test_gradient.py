@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 import pytest
 
-from seapopym.optimization.gradient import SparseObservations
+from seapopym.optimization.gradient import GradientRunner, SparseObservations
 
 
 class TestSparseObservations:
@@ -236,3 +236,109 @@ class TestGradientComputation:
         # grad["rate"] should be negative (need to increase rate to decrease loss)
         assert grad["rate"] < 0, "Gradient should be negative (need to increase rate)"
         assert new_loss < initial_loss, "Loss should decrease after gradient step"
+
+
+class TestGradientRunner:
+    """Tests for GradientRunner methods."""
+
+    @staticmethod
+    def _make_runner():
+        """Create a GradientRunner with a simple compiled model."""
+        from seapopym.blueprint import Blueprint, Config, functional
+        from seapopym.compiler import compile_model
+
+        @functional(name="test:gr_step", units={"x": "g", "scale": "1/s", "return": "g/s"})
+        def gr_step(x, scale):
+            return x * scale
+
+        blueprint = Blueprint.from_dict(
+            {
+                "id": "test",
+                "version": "1.0",
+                "declarations": {
+                    "state": {"x": {"units": "g", "dims": []}},
+                    "parameters": {"scale": {"units": "1/s"}},
+                    "forcings": {},
+                },
+                "process": [
+                    {
+                        "func": "test:gr_step",
+                        "inputs": {"x": "state.x", "scale": "parameters.scale"},
+                        "outputs": {"return": "derived.x_flux"},
+                    }
+                ],
+                "tendencies": {"x": [{"source": "derived.x_flux"}]},
+            }
+        )
+
+        import xarray as xr
+
+        config = Config.from_dict(
+            {
+                "parameters": {"scale": {"value": 0.1}},
+                "forcings": {},
+                "initial_state": {"x": xr.DataArray(1.0)},
+                "execution": {"time_start": "2000-01-01", "time_end": "2000-01-02", "dt": "1d"},
+            }
+        )
+
+        model = compile_model(blueprint, config)
+        return GradientRunner(model)
+
+    def test_make_loss_fn_unknown_loss_type(self):
+        """make_loss_fn should raise ValueError for unknown loss_type."""
+        runner = self._make_runner()
+        obs = SparseObservations(
+            variable="x",
+            times=jnp.array([0]),
+            y=jnp.array([0]),
+            x=jnp.array([0]),
+            values=jnp.array([1.0]),
+        )
+        with pytest.raises(ValueError, match="Unknown loss_type"):
+            runner.make_loss_fn(obs, loss_type="unknown")  # type: ignore[arg-type]
+
+    def test_make_loss_fn_rmse_and_nrmse(self):
+        """All three loss types (mse, rmse, nrmse) should produce valid scalar losses."""
+        runner = self._make_runner()
+
+        obs = SparseObservations(
+            variable="x",
+            times=jnp.array([0, 1]),
+            y=jnp.array([0, 1]),
+            x=jnp.array([0, 1]),
+            values=jnp.array([1.0, 3.0]),
+        )
+
+        # Mock run_with_params to return 3D outputs matching obs structure
+        runner.run_with_params = lambda params, initial_state=None, forcings=None: (  # type: ignore[assignment]
+            {},
+            {"x": jnp.full((2, 3, 3), 2.0)},
+        )
+
+        params = {"scale": jnp.array(0.1)}
+        for loss_type in ("mse", "rmse", "nrmse"):
+            loss_fn = runner.make_loss_fn(obs, loss_type=loss_type)  # type: ignore[arg-type]
+            loss = loss_fn(params)
+            assert loss.shape == (), f"{loss_type} should return scalar"
+            assert jnp.isfinite(loss), f"{loss_type} should return finite value"
+            assert loss > 0, f"{loss_type} should be positive when pred != obs"
+
+    def test_compute_value_and_gradient(self):
+        """compute_value_and_gradient should return (value, grads) tuple."""
+        runner = self._make_runner()
+
+        def loss_fn(params):
+            return (params["scale"] - 1.0) ** 2
+
+        params = {"scale": jnp.array(0.5)}
+        value, grads = runner.compute_value_and_gradient(params, loss_fn)
+
+        assert value.shape == (), "Loss value should be scalar"
+        assert jnp.isfinite(value), "Loss value should be finite"
+        assert "scale" in grads, "Gradients should contain 'scale'"
+        assert jnp.isfinite(grads["scale"]), "Gradient should be finite"
+        # Loss = (0.5 - 1.0)^2 = 0.25
+        assert jnp.allclose(value, 0.25)
+        # Gradient = 2 * (0.5 - 1.0) = -1.0
+        assert jnp.allclose(grads["scale"], -1.0)

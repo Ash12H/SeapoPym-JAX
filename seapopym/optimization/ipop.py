@@ -12,15 +12,16 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
 
-logger = logging.getLogger(__name__)
-
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
 from seapopym.optimization.optimizer import OptimizeResult
 from seapopym.types import Array, Params
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,7 +71,7 @@ def run_ipop(
     loss_fn: Callable[[Params], Array],
     initial_params: Params,
     bounds: dict[str, tuple[float, float]],
-    strategy: str = "cma_es",
+    strategy: Literal["cma_es", "simple_ga"] = "cma_es",
     n_restarts: int = 5,
     initial_popsize: int = 32,
     n_generations: int = 100,
