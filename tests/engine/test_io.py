@@ -1,4 +1,4 @@
-"""Tests for async I/O functionality."""
+"""Tests for I/O functionality."""
 
 import numpy as np
 import pytest
@@ -175,26 +175,3 @@ class TestDiskWriter:
         writer.close()
 
 
-class TestDiskWriterConcurrency:
-    """Tests for concurrent write behavior."""
-
-    def test_parallel_writes(self, tmp_path):
-        """Test that multiple writes can proceed in parallel."""
-        output_path = tmp_path / "output"
-        writer = DiskWriter(output_path, max_workers=2)
-        writer.initialize({"Y": 10, "X": 10}, ["biomass"])
-
-        # Submit multiple writes quickly
-        for i in range(5):
-            data = {"biomass": np.random.rand(10, 10, 10)}
-            writer.append(data, chunk_index=i)
-
-        # Flush should wait for all
-        writer.finalize()
-        writer.close()
-
-        # Verify all data written
-        import zarr
-
-        store = zarr.open(str(output_path), mode="r")
-        assert store["biomass"].shape[0] == 50  # type: ignore[union-attr]  # 5 chunks * 10 timesteps

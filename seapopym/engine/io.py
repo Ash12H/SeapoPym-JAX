@@ -1,14 +1,11 @@
-"""Asynchronous I/O for streaming output.
+"""I/O for streaming output.
 
-Provides DiskWriter for writing simulation outputs in parallel with computation.
-Uses a single worker thread to overlap JAX compute (which releases the GIL) with I/O.
+Provides DiskWriter for writing simulation outputs synchronously to Zarr stores.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
-from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -66,35 +63,24 @@ class OutputWriter(Protocol):
 
 
 class DiskWriter:
-    """Asynchronous writer for simulation outputs.
-
-    Uses a single worker thread to overlap I/O with JAX computation.
-    The GIL is released during JAX execution, allowing true overlap.
+    """Synchronous writer for simulation outputs to a Zarr store.
 
     Example:
         >>> writer = DiskWriter(output_path="/results/sim/")
         >>> writer.append({"biomass": arr}, chunk_index=0)
         >>> writer.append({"biomass": arr}, chunk_index=1)
-        >>> writer.finalize()  # Wait for all writes to complete
+        >>> writer.finalize()
     """
 
-    def __init__(
-        self,
-        output_path: str | Path,
-        max_workers: int = 1,
-    ) -> None:
-        """Initialize async writer.
+    def __init__(self, output_path: str | Path) -> None:
+        """Initialize writer.
 
         Args:
             output_path: Base path for output files.
-            max_workers: Number of writer threads (kept for API compat, serialized by lock).
         """
         self.output_path = Path(output_path)
-        self.executor = ThreadPoolExecutor(max_workers=max_workers)
-        self.futures: list[Future[None]] = []
         self._initialized = False
         self.store: Any = None  # zarr.Group at runtime
-        self._write_lock = threading.Lock()  # Thread safety for zarr writes
 
     def initialize(
         self,
@@ -166,33 +152,18 @@ class DiskWriter:
         data: dict[str, Array],
         chunk_index: int,
     ) -> None:
-        """Submit a chunk for asynchronous writing.
+        """Write a chunk of data synchronously.
 
         Args:
             data: Dict mapping variable names to arrays.
-            chunk_index: Chunk index (for ordering).
+            chunk_index: Chunk index (for logging).
         """
         if not self._initialized:
             raise EngineIOError(str(self.output_path), "Writer not initialized")
 
-        # Convert JAX arrays to numpy before submitting
+        # Convert JAX arrays to numpy
         data_np = {k: np.asarray(v) for k, v in data.items()}
-
-        future = self.executor.submit(self._write_chunk, data_np, chunk_index)
-        self.futures.append(future)
-
-    def _write_chunk(self, data: dict[str, np.ndarray], chunk_id: int) -> None:
-        """Write a chunk to storage (runs in thread).
-
-        Args:
-            data: Dict mapping variable names to numpy arrays.
-            chunk_id: Chunk index.
-        """
-        try:
-            self._write_zarr_chunk(data)
-        except Exception as e:
-            logger.error(f"Failed to write chunk {chunk_id}: {e}")
-            raise EngineIOError(str(self.output_path), str(e)) from e
+        self._write_zarr_chunk(data_np)
 
     def _write_zarr_chunk(self, data: dict[str, np.ndarray]) -> None:
         """Write chunk to Zarr store."""
@@ -201,36 +172,18 @@ class DiskWriter:
         if self.store is None:
             raise EngineIOError(str(self.output_path), "Store not initialized")
 
-        # Use lock to ensure thread safety when resizing and writing
-        with self._write_lock:
-            for var_name, arr in data.items():
-                if var_name in self.store and isinstance(existing := self.store[var_name], zarr.Array):
-                    # Append along time axis
-                    new_shape = (existing.shape[0] + arr.shape[0],) + existing.shape[1:]
-                    existing.resize(new_shape)
-                    existing[-arr.shape[0] :] = arr
+        for var_name, arr in data.items():
+            if var_name in self.store and isinstance(existing := self.store[var_name], zarr.Array):
+                # Append along time axis
+                new_shape = (existing.shape[0] + arr.shape[0],) + existing.shape[1:]
+                existing.resize(new_shape)
+                existing[-arr.shape[0] :] = arr
 
     def finalize(self) -> None:
-        """Wait for all pending writes to complete."""
-        errors = []
-        for future in self.futures:
-            try:
-                future.result()
-            except Exception as e:
-                errors.append(e)
-
-        self.futures.clear()
-
-        if errors:
-            raise EngineIOError(
-                str(self.output_path),
-                f"{len(errors)} write(s) failed. First error: {errors[0]}",
-            )
+        """Finalize writing (no-op, kept for Protocol compatibility)."""
 
     def close(self) -> None:
-        """Close the writer and release resources."""
-        self.finalize()
-        self.executor.shutdown(wait=True)
+        """Close the writer (no-op, kept for Protocol compatibility)."""
 
     def __enter__(self) -> DiskWriter:
         """Context manager entry."""

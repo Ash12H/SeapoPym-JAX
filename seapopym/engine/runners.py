@@ -1,7 +1,7 @@
 """Runner implementations for model execution.
 
 Provides:
-- StreamingRunner: Production mode with chunking and async I/O
+- StreamingRunner: Production mode with chunking and disk I/O
 
 Note on forcings:
     Forcings can be dynamic (with time dimension) or static (spatial-only).
@@ -25,14 +25,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-from seapopym.types import Array, State
+from seapopym.types import State
 
 
 class StreamingRunner:
-    """Runner for production simulations with chunking and async I/O.
+    """Runner for production simulations with chunking and disk I/O.
 
     Processes the simulation in temporal chunks, writing each chunk
-    to disk asynchronously while computing the next one.
+    to disk while computing the next one.
 
     Example:
         >>> model = compile_model(blueprint, config)
@@ -44,7 +44,6 @@ class StreamingRunner:
         self,
         model: CompiledModel,
         chunk_size: int | None = None,
-        io_workers: int = 2,
     ) -> None:
         """Initialize streaming runner.
 
@@ -52,12 +51,10 @@ class StreamingRunner:
             model: Compiled model to execute.
             chunk_size: Number of timesteps per chunk. If None, uses model.chunk_size.
                 If both None, processes entire simulation in one chunk.
-            io_workers: Number of async I/O workers.
         """
         self.model = model
         # Priority: chunk_size (parameter) > model.chunk_size (config) > model.n_timesteps (all)
         self.chunk_size = chunk_size or getattr(model, "chunk_size", None) or model.n_timesteps
-        self.io_workers = io_workers
 
     def run(
         self,
@@ -119,7 +116,7 @@ class StreamingRunner:
         # Initialize Writer Strategy
         writer: OutputWriter
         writer = (
-            DiskWriter(output_path, max_workers=self.io_workers)
+            DiskWriter(output_path)
             if output_path is not None
             else MemoryWriter(self.model)
         )
@@ -151,7 +148,7 @@ class StreamingRunner:
             final_results = writer.finalize()
 
         finally:
-            # Ensure resources are released (e.g. thread pool)
+            # Ensure resources are released
             if hasattr(writer, "close"):
                 writer.close()
 
