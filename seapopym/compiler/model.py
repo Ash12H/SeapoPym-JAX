@@ -42,7 +42,6 @@ class CompiledModel:
         shapes: Resolved dimension sizes {"Y": 180, "X": 360, ...}.
         coords: Coordinate arrays for each dimension.
         dt: Timestep in seconds.
-        trainable_params: List of parameter names that can be optimized.
         time_grid: Temporal grid (start, end, n_timesteps, coords). None if not using calendar.
         chunk_size: Number of timesteps per temporal chunk. None = process all at once.
     """
@@ -64,9 +63,6 @@ class CompiledModel:
     shapes: dict[str, int] = field(default_factory=dict)
     coords: dict[str, Array] = field(default_factory=dict)
     dt: float = 86400.0  # Default: 1 day in seconds
-
-    # Configuration
-    trainable_params: list[str] = field(default_factory=list)
 
     # Temporal configuration
     time_grid: TimeGrid | None = None
@@ -153,7 +149,6 @@ class CompiledModel:
             shapes=self.shapes,
             coords={k: convert(v) for k, v in self.coords.items()},
             dt=self.dt,
-            trainable_params=self.trainable_params,
         )
 
 

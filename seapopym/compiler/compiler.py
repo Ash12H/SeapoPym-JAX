@@ -18,7 +18,6 @@ import logging
 from typing import Any
 
 import jax.numpy as jnp
-import numpy as np
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config, validate_blueprint, validate_config
@@ -190,17 +189,9 @@ def _prepare_state(
 
 def _prepare_parameters(
     config: Config,
-) -> tuple[dict[str, Array], list[str]]:
-    """Prepare parameter arrays and identify trainable params."""
-    parameters: dict[str, Array] = {}
-    trainable: list[str] = []
-
-    for name, pv in config.parameters.items():
-        if pv.trainable:
-            trainable.append(name)
-
-        parameters[name] = jnp.asarray(pv.value)
-    return parameters, trainable
+) -> dict[str, Array]:
+    """Prepare parameter arrays from config."""
+    return {name: jnp.asarray(pv.value) for name, pv in config.parameters.items()}
 
 
 def compile_model(
@@ -259,7 +250,7 @@ def compile_model(
     state = _prepare_state(config, dim_mapping, fill_nan)
 
     # Step 8: Prepare parameters
-    parameters, trainable = _prepare_parameters(config)
+    parameters = _prepare_parameters(config)
 
     # Step 9: Build CompiledModel
     return CompiledModel(
@@ -273,7 +264,6 @@ def compile_model(
         shapes=shapes,
         coords=coords,
         dt=time_grid.dt_seconds,
-        trainable_params=trainable,
         time_grid=time_grid,
         chunk_size=config.execution.chunk_size,
     )

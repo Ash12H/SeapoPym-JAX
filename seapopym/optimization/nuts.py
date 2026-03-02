@@ -80,9 +80,8 @@ def run_nuts(
 
     Example:
         >>> from seapopym.optimization.prior import Normal, PriorSet
-        >>> from seapopym.optimization.likelihood import make_log_posterior
         >>> prior_set = PriorSet({"x": Normal(0.0, 1.0)})
-        >>> log_post = make_log_posterior(lambda p: p["x"]**2, prior_set)
+        >>> log_post = lambda p: -(p["x"] ** 2) + prior_set.log_prob(p)
         >>> result = run_nuts(log_post, {"x": jnp.array(0.0)}, n_warmup=200, n_samples=500)
         >>> result.samples["x"].shape
         (500,)

@@ -36,25 +36,11 @@ class ParameterValue(BaseModel):
 
     Attributes:
         value: The parameter value (scalar or array).
-        trainable: Whether this parameter can be optimized (Phase 5).
-        bounds: Optional bounds for optimization [min, max].
     """
 
     model_config = ConfigDict(extra="forbid")
 
     value: float | int | list[float] | list[int]
-    trainable: bool = False
-    bounds: tuple[float, float] | None = None
-
-    @field_validator("bounds", mode="before")
-    @classmethod
-    def validate_bounds(cls, v: Any) -> tuple[float, float] | None:
-        """Convert list to tuple for bounds."""
-        if v is None:
-            return None
-        if isinstance(v, list | tuple) and len(v) == 2:
-            return (float(v[0]), float(v[1]))
-        raise ValueError("bounds must be a list/tuple of two numbers [min, max]")
 
 
 # === Process Definitions ===

@@ -47,19 +47,6 @@ class TestParameterValue:
         """Test creating a simple parameter value."""
         param = ParameterValue(value=0.1)
         assert param.value == 0.1
-        assert param.trainable is False
-        assert param.bounds is None
-
-    def test_trainable_with_bounds(self):
-        """Test creating a trainable parameter with bounds."""
-        param = ParameterValue(value=0.1, trainable=True, bounds=(0.01, 0.5))
-        assert param.trainable is True
-        assert param.bounds == (0.01, 0.5)
-
-    def test_bounds_validation(self):
-        """Test that invalid bounds raise error."""
-        with pytest.raises(ValueError):
-            ParameterValue(value=0.1, bounds=(1, 2, 3))  # type: ignore
 
 
 class TestProcessStep:
@@ -280,7 +267,7 @@ class TestConfig:
             {
                 "parameters": {
                     "simple": {"value": 0.1},
-                    "vector": {"value": [1.0, 2.0, 3.0], "trainable": True, "bounds": [0.0, 5.0]},
+                    "vector": {"value": [1.0, 2.0, 3.0]},
                 },
                 "forcings": {},
                 "initial_state": {},
@@ -293,7 +280,6 @@ class TestConfig:
 
         assert cfg.get_parameter_value("simple").value == 0.1
         assert cfg.get_parameter_value("vector").value == [1.0, 2.0, 3.0]
-        assert cfg.get_parameter_value("vector").trainable is True
         assert cfg.get_parameter_value("nonexistent") is None
 
 

@@ -169,11 +169,11 @@ class TestCompiler:
         # Check arrays are JAX arrays
         assert hasattr(compiled.state["biomass"], "device")
 
-    def test_compile_trainable_params(self, toy_blueprint):
-        """Test that trainable params are identified."""
+    def test_compile_parameters(self, toy_blueprint):
+        """Test that parameters are compiled as JAX arrays."""
         config = Config.from_dict(
             {
-                "parameters": {"growth_rate": {"value": 0.1, "trainable": True}},
+                "parameters": {"growth_rate": {"value": 0.1}},
                 "forcings": {
                     "temperature": xr.DataArray(np.random.rand(10, 5, 5), dims=["T", "Y", "X"]),
                     "mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
@@ -191,7 +191,7 @@ class TestCompiler:
 
         compiled = compile_model(toy_blueprint, config)
 
-        assert "growth_rate" in compiled.trainable_params
+        assert "growth_rate" in compiled.parameters
 
 
 class TestCompileModelFunction:

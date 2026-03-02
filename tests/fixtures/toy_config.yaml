@@ -4,7 +4,6 @@
 parameters:
   growth_rate:
     value: 0.1
-    trainable: false
 
 forcings:
   temperature: "/data/sst.nc"

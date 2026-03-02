@@ -1,17 +1,18 @@
-"""Optimization module for parameter estimation.
+"""Optimization module for model calibration.
 
-This module provides tools for optimizing model parameters by minimizing
-the difference between simulated outputs and observations.
+Provides two levels of API:
 
-Main components:
-- Loss functions (MSE, RMSE, NRMSE) for building loss functions
-- GradientOptimizer for gradient-based optimization (Optax)
-- EvolutionaryOptimizer for CMA-ES optimization (requires evosax)
-- HybridOptimizer for combined CMA-ES + gradient optimization (requires evosax)
-- make_log_posterior for Bayesian inference (NUTS)
+**High-level (orchestration)**:
+- :class:`Optimizer` — assembles loss from objectives, dispatches to strategy
+- :class:`Sampler` — builds log-posterior, runs NUTS (requires blackjax)
+- :class:`Objective` — observation data + extraction method
+- :class:`CalibrationRunner` — model execution for calibration
 
-Evolutionary optimizers require the optional evosax dependency:
-    pip install seapopym[optimization]
+**Low-level (building blocks)**:
+- Loss functions: :func:`mse`, :func:`rmse`, :func:`nrmse`
+- Prior distributions: :class:`Uniform`, :class:`Normal`, etc.
+- :class:`GradientOptimizer`, :class:`EvolutionaryOptimizer` (requires evosax)
+- :func:`run_nuts` (requires blackjax)
 """
 
 from __future__ import annotations
@@ -19,10 +20,11 @@ from __future__ import annotations
 from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.likelihood import (
     GaussianLikelihood,
-    make_log_posterior,
     reparameterize_log_posterior,
 )
 from seapopym.optimization.loss import mse, nrmse, rmse
+from seapopym.optimization.objective import Objective, PreparedObjective
+from seapopym.optimization.optimizer import Optimizer
 from seapopym.optimization.prior import (
     HalfNormal,
     LogNormal,
@@ -31,21 +33,30 @@ from seapopym.optimization.prior import (
     TruncatedNormal,
     Uniform,
 )
+from seapopym.optimization.runner import CalibrationRunner
 
 __all__ = [
+    # High-level
+    "Objective",
+    "PreparedObjective",
+    "CalibrationRunner",
+    "Optimizer",
+    # Loss functions
     "rmse",
     "nrmse",
     "mse",
+    # Low-level optimizers
     "GradientOptimizer",
     "OptimizeResult",
+    # Priors
     "Uniform",
     "Normal",
     "LogNormal",
     "HalfNormal",
     "TruncatedNormal",
     "PriorSet",
+    # Likelihood
     "GaussianLikelihood",
-    "make_log_posterior",
     "reparameterize_log_posterior",
 ]
 
@@ -63,8 +74,9 @@ except (ImportError, KeyError):
 # Optional imports (require blackjax)
 try:
     from seapopym.optimization.nuts import NUTSResult, run_nuts
+    from seapopym.optimization.sampler import Sampler
 
-    __all__ += ["NUTSResult", "run_nuts"]
+    __all__ += ["NUTSResult", "run_nuts", "Sampler"]
     _HAS_BLACKJAX = True
 except ImportError:
     _HAS_BLACKJAX = False
@@ -77,6 +89,6 @@ def __getattr__(name: str):
         and not _HAS_EVOSAX
     ):
         raise ImportError(f"{name} requires the evosax package. Install it with: pip install seapopym[optimization]")
-    if name in ("NUTSResult", "run_nuts") and not _HAS_BLACKJAX:
+    if name in ("NUTSResult", "run_nuts", "Sampler") and not _HAS_BLACKJAX:
         raise ImportError(f"{name} requires the blackjax package. Install it with: pip install seapopym[optimization]")
     raise AttributeError(f"module 'seapopym.optimization' has no attribute '{name}'")
