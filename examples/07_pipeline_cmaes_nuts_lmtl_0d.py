@@ -50,16 +50,13 @@ from matplotlib.patches import Patch
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine.step import build_step_fn
 from seapopym.models import LMTL_NO_TRANSPORT
 from seapopym.optimization.ipop import run_ipop_cmaes
-from seapopym.optimization.likelihood import (
-    GaussianLikelihood,
-    make_log_posterior,
-    reparameterize_log_posterior,
-)
-from seapopym.optimization.nuts import run_nuts
+from seapopym.optimization.likelihood import GaussianLikelihood
+from seapopym.optimization.objective import Objective
 from seapopym.optimization.prior import HalfNormal, LogNormal, PriorSet, Uniform
+from seapopym.optimization.runner import CalibrationRunner
+from seapopym.optimization.sampler import Sampler
 
 # Force CPU for 0D model (GPU overhead dominates for tiny workloads)
 jax.config.update("jax_default_device", jax.devices("cpu")[0])
@@ -212,48 +209,16 @@ config = Config.from_dict(
 
 print("Compiling model...")
 _model = compile_model(blueprint, config)
-_step_fn = build_step_fn(_model)
-_n_timesteps = _model.n_timesteps
-_initial_state = _model.state
-_forcings_stacked = _model.forcings.get_all()
+_runner = CalibrationRunner.standard()
 
-_spinup_steps = int(SPINUP_YEARS / total_years * _n_timesteps)
+_spinup_steps = int(SPINUP_YEARS / total_years * _model.n_timesteps)
 
 
-def run_simulation(params: dict) -> jnp.ndarray:
-    """Run full simulation, return biomass time series."""
-    full_params = {**params, **{k: jnp.array(v) for k, v in FIXED_PARAMS.items()}}
-    full_params["cohort_ages"] = _model.parameters["cohort_ages"]
-    full_params["day_layer"] = _model.parameters["day_layer"]
-    full_params["night_layer"] = _model.parameters["night_layer"]
-    full_params["latitude"] = _model.parameters["latitude"]
-
-    def scan_body(carry, t):
-        state, p = carry
-        forcings_t = {}
-        for name, arr in _forcings_stacked.items():
-            if arr.ndim > 0 and arr.shape[0] == _n_timesteps:
-                forcings_t[name] = arr[t]
-            else:
-                forcings_t[name] = arr
-        new_carry, outputs = _step_fn((state, p), forcings_t)
-        new_state, _ = new_carry
-        return (new_state, p), jnp.mean(outputs["biomass"])
-
-    _, biomass = jax.lax.scan(scan_body, (_initial_state, full_params), jnp.arange(_n_timesteps))
-    return biomass
-
-
-def make_predict_fn(fixed_params: dict, obs_indices: jnp.ndarray):
-    """Factory: build a predict_fn with tau_r_0/gamma_tau_r fixed from a CMA-ES mode."""
-
-    def predict_fn(params: dict) -> jnp.ndarray:
-        full = {**fixed_params}
-        for k in NUTS_SAMPLED_PARAMS:
-            full[k] = params[k]
-        return run_simulation(full)[obs_indices]
-
-    return predict_fn
+def _run_biomass(params: dict) -> jnp.ndarray:
+    """Run model and return mean biomass time series (T,)."""
+    outputs = _runner(_model, params)
+    bio = outputs["biomass"]
+    return jnp.mean(bio, axis=tuple(range(1, bio.ndim)))
 
 
 # =============================================================================
@@ -273,7 +238,7 @@ if __name__ == "__main__":
     print("\nGenerating observations with TRUE parameters...")
     t0 = time.time()
     true_params_jax = {k: jnp.array(TRUE_PARAMS[k]) for k in ALL_OPT_PARAMS}
-    true_biomass_full = run_simulation(true_params_jax)
+    true_biomass_full = _run_biomass(true_params_jax)
 
     true_biomass = true_biomass_full[_spinup_steps:]
     n_opt_steps = len(true_biomass)
@@ -301,7 +266,7 @@ if __name__ == "__main__":
     else:
 
         def loss_fn(params: dict) -> jnp.ndarray:
-            biomass_full = run_simulation(params)
+            biomass_full = _run_biomass(params)
             pred = biomass_full[obs_global_indices]
             rmse = jnp.sqrt(jnp.mean((pred - observations) ** 2))
             return rmse / obs_std
@@ -365,6 +330,11 @@ if __name__ == "__main__":
             }
         )
 
+        objective = Objective(
+            observations=observations,
+            transform=lambda o: jnp.mean(o["biomass"], axis=tuple(range(1, o["biomass"].ndim)))[obs_global_indices],
+        )
+
         # Run one chain per CMA-ES mode (shared warmup: chain 0 warms up, others reuse)
         chain_results: list = []
         nuts_elapsed_total = 0.0
@@ -376,7 +346,7 @@ if __name__ == "__main__":
                 f"(from CMA-ES mode #{chain_idx + 1}, loss={mode.loss:.4e}) ---"
             )
 
-            # Fixed params for this mode
+            # Fixed params for this mode — bake into model.parameters
             fixed_params = {
                 "tau_r_0": mode.params["tau_r_0"],
                 "gamma_tau_r": mode.params["gamma_tau_r"],
@@ -385,36 +355,32 @@ if __name__ == "__main__":
                 f"  Fixed: tau_r_0={float(fixed_params['tau_r_0']):.4g}, "
                 f"gamma_tau_r={float(fixed_params['gamma_tau_r']):.4g}"
             )
-
-            # Build predict_fn for this mode (tau_r_0/gamma_tau_r baked in)
-            predict_fn = make_predict_fn(fixed_params, obs_global_indices)
-
-            # Mode 2 log-posterior: Gaussian likelihood + σ free
-            # sigma_prior=None because σ is already in nuts_priors.log_prob() (no double counting)
-            log_posterior = make_log_posterior(
-                loss_fn=None,
-                prior_set=nuts_priors,
-                likelihood=GaussianLikelihood(),
-                sigma_prior=None,
-                observations_for_likelihood=(predict_fn, observations),
-            )
-            log_posterior_unit = reparameterize_log_posterior(log_posterior, nuts_priors)
+            for p in ALL_OPT_PARAMS:
+                _model.parameters[p] = mode.params[p]
 
             # Initialize at CMA-ES mode (sampled params) + estimated σ
-            cmaes_pred = run_simulation(mode.params)[obs_global_indices]
+            cmaes_pred = _run_biomass(mode.params)[obs_global_indices]
             init_sigma = max(float(jnp.std(cmaes_pred - observations)), 1e-6)
 
             init_phys = {k: mode.params[k] for k in NUTS_SAMPLED_PARAMS}
             init_phys["sigma"] = jnp.array(init_sigma)
-            init_unit = nuts_priors.to_unit(init_phys)
 
             for p in list(NUTS_SAMPLED_PARAMS) + ["sigma"]:
-                print(f"  {p:<14} = {float(init_phys[p]):>12.4g} [unit: {float(init_unit[p]):.4f}]")
+                unit_val = float(nuts_priors.to_unit(init_phys)[p])
+                print(f"  {p:<14} = {float(init_phys[p]):>12.4g} [unit: {unit_val:.4f}]")
+
+            sampler = Sampler(
+                runner=_runner,
+                priors=nuts_priors,
+                objectives=[objective],
+                likelihood=GaussianLikelihood(),  # sigma free
+                sigma_prior=None,  # sigma in PriorSet, no double counting
+            )
 
             t0 = time.time()
-            result = run_nuts(
-                log_posterior_fn=log_posterior_unit,
-                initial_params=init_unit,
+            result = sampler.run(
+                _model,
+                initial_params=init_phys,
                 n_warmup=N_WARMUP,
                 n_samples=N_SAMPLES,
                 seed=NUTS_SEED + chain_idx,
@@ -428,8 +394,6 @@ if __name__ == "__main__":
             if shared_kernel_params is None:
                 shared_kernel_params = result.kernel_params
 
-            # Convert back to physical space
-            result.samples = nuts_priors.from_unit(result.samples)
             elapsed = time.time() - t0
             nuts_elapsed_total += elapsed
 
@@ -561,7 +525,7 @@ if __name__ == "__main__":
         color = chain_colors[ci]
 
         # CMA-ES biomass for this mode
-        cmaes_bio = run_simulation(mode.params)[_spinup_steps:]
+        cmaes_bio = _run_biomass(mode.params)[_spinup_steps:]
         cmaes_bio_np = np.array(cmaes_bio)
 
         # Mean σ from NUTS posterior

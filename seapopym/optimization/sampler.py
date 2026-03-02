@@ -24,6 +24,8 @@ from seapopym.types import Array, Params
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
 
+_UNSET = object()
+
 
 class Sampler:
     """High-level Bayesian sampler for model calibration.
@@ -37,7 +39,10 @@ class Sampler:
         objectives: List of :class:`Objective` instances.
         likelihood: Likelihood model (default: Gaussian with free sigma).
         sigma_prior: Prior on observation noise sigma (when sigma is
-            free).  Ignored if ``likelihood.sigma`` is fixed.
+            free).  Defaults to ``HalfNormal(1.0)``.  Pass ``None``
+            explicitly to disable the sigma prior (e.g. when sigma is
+            already included in *priors*).
+            Ignored if ``likelihood.sigma`` is fixed.
         reparameterize: If ``True`` (default), sample in unit space
             ``[0, 1]^d`` for better conditioning.  Samples are
             converted back to physical space in the returned result.
@@ -59,7 +64,7 @@ class Sampler:
         priors: PriorSet,
         objectives: list[Objective],
         likelihood: GaussianLikelihood | None = None,
-        sigma_prior: HalfNormal | None = None,
+        sigma_prior: HalfNormal | None = _UNSET,  # type: ignore[assignment]
         *,
         reparameterize: bool = True,
     ) -> None:
@@ -67,14 +72,25 @@ class Sampler:
         self.priors = priors
         self.objectives = objectives
         self.likelihood = likelihood or GaussianLikelihood()
-        self.sigma_prior = sigma_prior or HalfNormal(scale=1.0)
+        # _UNSET → default HalfNormal; explicit None → no sigma prior
+        self.sigma_prior = HalfNormal(scale=1.0) if sigma_prior is _UNSET else sigma_prior
         self.reparameterize = reparameterize
+        # Whether sigma is handled by the PriorSet (reparameterized with other params)
+        self._sigma_in_priors = "sigma" in self.priors.priors
 
-    def run(self, model: CompiledModel, **run_kwargs: Any) -> NUTSResult:
+    def run(
+        self,
+        model: CompiledModel,
+        initial_params: Params | None = None,
+        **run_kwargs: Any,
+    ) -> NUTSResult:
         """Run NUTS sampling.
 
         Args:
             model: Compiled model to calibrate.
+            initial_params: Starting position for the sampler.  If
+                ``None`` (default), values are taken from
+                ``model.parameters`` (and sigma defaults to 1.0).
             run_kwargs: Forwarded to :func:`run_nuts` (e.g.
                 ``n_warmup``, ``n_samples``, ``seed``).
 
@@ -91,21 +107,23 @@ class Sampler:
         log_posterior_fn = self._build_log_posterior(model, prepared)
 
         # 3. Initial params for free parameters
-        initial_params = {k: model.parameters[k] for k in self.priors.priors}
-
-        # Add sigma to initial params if free
-        if self.likelihood.sigma is None:
-            initial_params["sigma"] = jnp.array(1.0)
+        if initial_params is not None:
+            init = dict(initial_params)
+        else:
+            init = {k: model.parameters[k] for k in self.priors.priors}
+            # Add sigma to initial params if free and not in PriorSet
+            if self.likelihood.sigma is None and not self._sigma_in_priors:
+                init["sigma"] = jnp.array(1.0)
 
         # 4. Reparameterize to unit space if requested
         if self.reparameterize:
             log_posterior_unit = reparameterize_log_posterior(
                 log_posterior_fn, self.priors
             )
-            initial_unit = self.priors.to_unit(initial_params)
-            # sigma is not part of priors, pass through as-is
-            if self.likelihood.sigma is None:
-                initial_unit["sigma"] = initial_params["sigma"]
+            initial_unit = self.priors.to_unit(init)
+            # If sigma is free but NOT in PriorSet, pass through as-is
+            if self.likelihood.sigma is None and not self._sigma_in_priors and "sigma" in init:
+                initial_unit["sigma"] = init["sigma"]
 
             result = run_nuts(log_posterior_unit, initial_unit, **run_kwargs)
 
@@ -114,7 +132,7 @@ class Sampler:
             return result
 
         # 5. Run in physical space
-        return run_nuts(log_posterior_fn, initial_params, **run_kwargs)
+        return run_nuts(log_posterior_fn, init, **run_kwargs)
 
     def _build_log_posterior(
         self,

@@ -60,6 +60,49 @@ class TestSamplerInit:
         )
         assert sampler.reparameterize is False
 
+    def test_sigma_prior_none_disables_default(self):
+        """Passing sigma_prior=None explicitly should not create a default HalfNormal."""
+        sampler = Sampler(
+            runner=CalibrationRunner.standard(),
+            priors=PriorSet({"x": Uniform(0.0, 1.0)}),
+            objectives=[Objective(observations=jnp.zeros(1), transform=lambda o: o["x"][:1])],
+            sigma_prior=None,
+        )
+        assert sampler.sigma_prior is None
+
+    def test_sigma_prior_unset_gives_default(self):
+        """Not passing sigma_prior at all should give HalfNormal(1.0)."""
+        sampler = Sampler(
+            runner=CalibrationRunner.standard(),
+            priors=PriorSet({"x": Uniform(0.0, 1.0)}),
+            objectives=[Objective(observations=jnp.zeros(1), transform=lambda o: o["x"][:1])],
+        )
+        assert isinstance(sampler.sigma_prior, HalfNormal)
+        assert sampler.sigma_prior.scale == 1.0
+
+    def test_sigma_in_priors_flag(self):
+        """When 'sigma' is in PriorSet, _sigma_in_priors should be True."""
+        priors_with_sigma = PriorSet({
+            "x": Uniform(0.0, 1.0),
+            "sigma": HalfNormal(scale=0.5),
+        })
+        sampler = Sampler(
+            runner=CalibrationRunner.standard(),
+            priors=priors_with_sigma,
+            objectives=[Objective(observations=jnp.zeros(1), transform=lambda o: o["x"][:1])],
+            sigma_prior=None,
+        )
+        assert sampler._sigma_in_priors is True
+
+    def test_sigma_not_in_priors_flag(self):
+        """When 'sigma' is NOT in PriorSet, _sigma_in_priors should be False."""
+        sampler = Sampler(
+            runner=CalibrationRunner.standard(),
+            priors=PriorSet({"x": Uniform(0.0, 1.0)}),
+            objectives=[Objective(observations=jnp.zeros(1), transform=lambda o: o["x"][:1])],
+        )
+        assert sampler._sigma_in_priors is False
+
 
 # ---------------------------------------------------------------------------
 # _build_log_posterior
@@ -169,6 +212,37 @@ class TestBuildLogPosterior:
         lp_bad = float(log_post_bad({"x": jnp.array(5.0)}))
 
         assert lp_good > lp_bad
+
+    def test_log_posterior_sigma_in_priors_no_double_counting(self):
+        """With sigma in PriorSet and sigma_prior=None, sigma prior is counted once."""
+        runner = CalibrationRunner.standard()
+        priors = PriorSet({
+            "x": Uniform(0.0, 10.0),
+            "sigma": HalfNormal(scale=1.0),
+        })
+        sampler = Sampler(
+            runner, priors,
+            objectives=[Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])],
+            likelihood=GaussianLikelihood(),  # sigma free
+            sigma_prior=None,  # no separate sigma prior — it's in PriorSet
+        )
+
+        model = _mock_model(
+            {"x": jnp.array(5.0), "sigma": jnp.array(1.0)},
+            {"out": jnp.array([0.0])},
+        )
+
+        prepared = [
+            PreparedObjective(
+                extract_fn=lambda o: o["out"],
+                obs_array=jnp.array([0.0]),
+            )
+        ]
+
+        log_post = sampler._build_log_posterior(model, prepared)
+        lp = log_post({"x": jnp.array(5.0), "sigma": jnp.array(0.5)})
+
+        assert jnp.isfinite(lp)
 
     def test_multiple_objectives_summed(self):
         """Log-likelihoods from multiple objectives are summed."""

@@ -22,9 +22,9 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine.step import build_step_fn
 from seapopym.models import LMTL_NO_TRANSPORT
-from seapopym.optimization import EvolutionaryOptimizer, Optimizer
+from seapopym.optimization import CalibrationRunner, Objective, Optimizer
+from seapopym.optimization.prior import PriorSet, Uniform
 
 # Force CPU for 0D model (GPU overhead dominates for tiny workloads)
 jax.config.update("jax_default_device", jax.devices("cpu")[0])
@@ -168,39 +168,17 @@ config = Config.from_dict(
 
 print("Compiling model...")
 _model = compile_model(blueprint, config)
-_step_fn = build_step_fn(_model)
-_n_timesteps = _model.n_timesteps
-_initial_state = _model.state
-_forcings_stacked = _model.forcings.get_all()
+_runner = CalibrationRunner.standard()
 
 # Spin-up / optimization split
-_spinup_steps = int(SPINUP_YEARS / total_years * _n_timesteps)
+_spinup_steps = int(SPINUP_YEARS / total_years * _model.n_timesteps)
 
 
-def run_simulation(params: dict) -> jnp.ndarray:
-    """Run full simulation (spin-up + opt period), return biomass time series."""
-    full_params = {**params, **{k: jnp.array(v) for k, v in FIXED_PARAMS.items()}}
-    full_params["cohort_ages"] = _model.parameters["cohort_ages"]
-    full_params["day_layer"] = _model.parameters["day_layer"]
-    full_params["night_layer"] = _model.parameters["night_layer"]
-    full_params["latitude"] = _model.parameters["latitude"]
-
-    def scan_body(carry, t):
-        state, p = carry
-        forcings_t = {}
-        for name, arr in _forcings_stacked.items():
-            if arr.ndim > 0 and arr.shape[0] == _n_timesteps:
-                forcings_t[name] = arr[t]
-            else:
-                forcings_t[name] = arr
-        new_carry, outputs = _step_fn((state, p), forcings_t)
-        new_state, _ = new_carry
-        biomass = jnp.mean(outputs["biomass"])
-        return (new_state, p), biomass
-
-    init_carry = (_initial_state, full_params)
-    _, biomass_history = jax.lax.scan(scan_body, init_carry, jnp.arange(_n_timesteps))
-    return biomass_history
+def _run_biomass(params: dict) -> jnp.ndarray:
+    """Run model and return mean biomass time series (T,)."""
+    outputs = _runner(_model, params)
+    bio = outputs["biomass"]
+    return jnp.mean(bio, axis=tuple(range(1, bio.ndim)))
 
 
 # =============================================================================
@@ -219,14 +197,14 @@ if __name__ == "__main__":
     print("\nGenerating observations with TRUE parameters...")
     t0 = time.time()
     true_params_jax = {k: jnp.array(TRUE_PARAMS[k]) for k in BOUNDS}
-    true_biomass_full = run_simulation(true_params_jax)
+    true_biomass_full = _run_biomass(true_params_jax)
 
     # Split: spin-up + optimization
     true_biomass = true_biomass_full[_spinup_steps:]
     n_opt_steps = len(true_biomass)
 
     print(
-        f"  Simulation: {time.time() - t0:.2f}s  ({_n_timesteps} total steps, "
+        f"  Simulation: {time.time() - t0:.2f}s  ({_model.n_timesteps} total steps, "
         f"{_spinup_steps} spin-up, {n_opt_steps} opt)"
     )
     print(f"  Biomass range: [{float(jnp.min(true_biomass)):.4f}, {float(jnp.max(true_biomass)):.4f}]")
@@ -241,21 +219,18 @@ if __name__ == "__main__":
 
     print(f"  {n_obs} observations ({100 * n_obs / n_opt_steps:.1f}%), std={obs_std:.6f}")
 
-    # ----- Loss function -----
-    def loss_fn(params: dict) -> jnp.ndarray:
-        """NRMSE-std loss computed on optimization period only."""
-        biomass_full = run_simulation(params)
-        pred = biomass_full[obs_global_indices]
-        rmse = jnp.sqrt(jnp.mean((pred - observations) ** 2))
-        return rmse / obs_std
-
     # Sanity check
-    true_loss = loss_fn(true_params_jax)
+    pred = true_biomass_full[obs_global_indices]
+    true_loss = jnp.sqrt(jnp.mean((pred - observations) ** 2)) / obs_std
     print(f"  Sanity: loss(true) = {float(true_loss):.6e}")
 
-    # Initial guess
-    initial_params = {k: jnp.array(INITIAL_GUESS_FACTOR * TRUE_PARAMS[k]) for k in BOUNDS}
-    initial_loss = loss_fn(initial_params)
+    # Initial guess — set model parameters so Optimizer starts from here
+    for k in BOUNDS:
+        _model.parameters[k] = jnp.array(INITIAL_GUESS_FACTOR * TRUE_PARAMS[k])
+
+    initial_biomass = _run_biomass({k: _model.parameters[k] for k in BOUNDS})
+    initial_pred = initial_biomass[obs_global_indices]
+    initial_loss = jnp.sqrt(jnp.mean((initial_pred - observations) ** 2)) / obs_std
     print(f"\nInitial guess ({INITIAL_GUESS_FACTOR}x true), loss = {float(initial_loss):.6f}")
 
     # =================================================================
@@ -265,30 +240,43 @@ if __name__ == "__main__":
     results = {}
     param_names = list(BOUNDS.keys())
 
+    priors = PriorSet({k: Uniform(*v) for k, v in BOUNDS.items()})
+    objective = Objective(
+        observations=observations,
+        transform=lambda o: jnp.mean(o["biomass"], axis=tuple(range(1, o["biomass"].ndim)))[obs_global_indices],
+    )
+
     # --- Gradient-based (Adam) ---
     print("\nRunning Gradient (Adam)...")
     t0 = time.time()
     grad_opt = Optimizer(
-        algorithm="adam",
+        runner=_runner,
+        priors=priors,
+        objectives=[(objective, "nrmse_std", 1.0)],
+        strategy="adam",
         learning_rate=GRAD_LR,
-        bounds=BOUNDS,
-        scaling="bounds",
     )
-    results["gradient"] = grad_opt.run(loss_fn, initial_params, n_steps=GRAD_N_STEPS, verbose=True)
+    results["gradient"] = grad_opt.run(_model, n_steps=GRAD_N_STEPS, verbose=True)
     grad_time = time.time() - t0
     print(f"  Time: {grad_time:.2f}s  |  Loss: {results['gradient'].loss:.6f}")
 
     # --- CMA-ES ---
+    # Reset initial guess for CMA-ES (Optimizer reads from model.parameters)
+    for k in BOUNDS:
+        _model.parameters[k] = jnp.array(INITIAL_GUESS_FACTOR * TRUE_PARAMS[k])
+
     print("\nRunning CMA-ES...")
     t0 = time.time()
-    evo_opt = EvolutionaryOptimizer(
+    evo_opt = Optimizer(
+        runner=_runner,
+        priors=priors,
+        objectives=[(objective, "nrmse_std", 1.0)],
+        strategy="cma_es",
         popsize=CMAES_POPSIZE,
-        bounds=BOUNDS,
         seed=SEED,
     )
     results["cma_es"] = evo_opt.run(
-        loss_fn,
-        initial_params,
+        _model,
         n_generations=500,
         patience=CMAES_PATIENCE,
         verbose=True,
@@ -359,7 +347,7 @@ if __name__ == "__main__":
     )
 
     for method, result in results.items():
-        pred_full = run_simulation(result.params)
+        pred_full = _run_biomass(result.params)
         pred = pred_full[_spinup_steps:]
         ax2.plot(time_days, pred, "--", label=method, alpha=0.7)
 
