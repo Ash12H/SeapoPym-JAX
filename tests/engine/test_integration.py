@@ -3,15 +3,12 @@
 Tests the complete pipeline: Blueprint → Compile → Run
 """
 
-import numpy as np
-import pytest
-
 import jax.numpy as jnp
+import numpy as np
 
 from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
 from seapopym.engine import StreamingRunner
-from seapopym.optimization.gradient import GradientRunner
 
 
 class TestE2EBasicSimulation:
@@ -86,8 +83,8 @@ class TestE2EBasicSimulation:
         assert "biomass" in final_state
         assert jnp.all(final_state["biomass"] >= 100.0)
 
-    def test_e2e_gradient(self):
-        """Test complete workflow: Blueprint → Compile → GradientRunner."""
+    def test_e2e_run_with_params(self):
+        """Test complete workflow: Blueprint → Compile → CompiledModel.run_with_params."""
         blueprint = Blueprint.from_dict(
             {
                 "id": "toy-growth",
@@ -127,7 +124,6 @@ class TestE2EBasicSimulation:
         def simple_growth(biomass, rate, temp):
             return biomass * rate * (temp / 20.0)
 
-        # Smaller grid for gradient runner (memory)
         n_days = 10
         ny, nx = 5, 5
 
@@ -150,8 +146,7 @@ class TestE2EBasicSimulation:
         )
 
         model = compile_model(blueprint, config)
-        runner = GradientRunner(model)
-        final_state, outputs = runner.run_with_params(dict(model.parameters))
+        final_state, outputs = model.run_with_params(dict(model.parameters))
 
         assert "biomass" in final_state
         assert jnp.all(final_state["biomass"] >= 100.0)

@@ -1,4 +1,4 @@
-"""Optimizer wrapper for gradient-based parameter optimization.
+"""GradientOptimizer wrapper for gradient-based parameter optimization.
 
 Provides a unified interface for different optimization algorithms
 from Optax (and optionally JAXopt for L-BFGS).
@@ -41,15 +41,15 @@ class OptimizeResult:
     message: str = ""
 
 
-class Optimizer:
+class GradientOptimizer:
     """Unified optimizer interface wrapping Optax algorithms.
 
     Supports gradient-based optimization with optional parameter bounds
     and automatic parameter scaling for better conditioning.
 
     Example:
-        >>> optimizer = Optimizer(algorithm="adam", learning_rate=0.01)
-        >>> optimizer = Optimizer(
+        >>> optimizer = GradientOptimizer(algorithm="adam", learning_rate=0.01)
+        >>> optimizer = GradientOptimizer(
         ...     algorithm="adam",
         ...     learning_rate=0.01,
         ...     bounds={"rate": (0.0, 1.0), "scale": (0.1, 10.0)},
@@ -322,7 +322,7 @@ class Optimizer:
             if progress_bar:
                 print_rate = max(1, n_steps // 20)
                 if i % print_rate == 0 or i == n_steps - 1:
-                    print(f"\r  [{i+1}/{n_steps}] loss={loss_val:.4e}", end="", flush=True)
+                    print(f"\r  [{i + 1}/{n_steps}] loss={loss_val:.4e}", end="", flush=True)
 
             prev_loss = loss_val
 

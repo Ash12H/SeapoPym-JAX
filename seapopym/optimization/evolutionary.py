@@ -1,6 +1,6 @@
 """Evolutionary optimization using evosax strategies (CMA-ES, GA, etc.).
 
-Provides a wrapper around evosax strategies with the same API as Optimizer,
+Provides a wrapper around evosax strategies with the same API as GradientOptimizer,
 enabling easy comparison between gradient-based and evolutionary methods.
 
 Population evaluation is JIT-compiled and vmapped for GPU acceleration.

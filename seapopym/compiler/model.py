@@ -10,18 +10,18 @@ The CompiledModel contains all data structures ready for JAX execution:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
     from seapopym.blueprint import Blueprint
     from seapopym.blueprint.schema import TendencySource
-    from seapopym.compiler.time_grid import TimeGrid
     from seapopym.compiler.forcing import ForcingStore
+    from seapopym.compiler.time_grid import TimeGrid
 
 from seapopym.blueprint.nodes import ComputeNode, DataNode
-from seapopym.types import Array
+from seapopym.types import Array, Params
 
 
 @dataclass
@@ -87,6 +87,39 @@ class CompiledModel:
         if var_name not in self.state:
             raise KeyError(f"State variable '{var_name}' not found")
         return self.state[var_name].shape
+
+    def run_with_params(
+        self,
+        params: Params,
+        initial_state: dict[str, Array] | None = None,
+        forcings: dict[str, Array] | None = None,
+    ) -> tuple[dict[str, Array], dict[str, Array]]:
+        """Run the model with specified parameters.
+
+        Args:
+            params: Parameter values to use for this run.
+            initial_state: Initial state. If None, uses model's initial state.
+            forcings: Forcing data. If None, uses model's forcings.
+
+        Returns:
+            Tuple of (final_state, outputs) where outputs contains all
+            timesteps stacked along axis 0.
+        """
+        import jax.lax as lax
+
+        from seapopym.engine.step import build_step_fn
+
+        step_fn = build_step_fn(self)
+
+        if initial_state is None:
+            initial_state = self.state
+        if forcings is None:
+            forcings = self.forcings.get_all()
+
+        init_carry = (initial_state, params)
+        (final_state, _), outputs = lax.scan(step_fn, init_carry, forcings)
+
+        return final_state, outputs
 
     def to_numpy(self) -> CompiledModel:
         """Convert all arrays to NumPy (useful for debugging)."""

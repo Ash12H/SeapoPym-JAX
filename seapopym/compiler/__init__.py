@@ -19,16 +19,19 @@ Example:
     >>> compiled.shapes  # {"Y": 180, "X": 360, ...}
 """
 
+from seapopym.blueprint.units import UnitValidator, validate_units
+
 from .compiler import compile_model
+from .coords import coords_to_indices
 from .exceptions import CompilerError, GridAlignmentError, ShapeInferenceError, TransposeError
 from .forcing import ForcingStore
 from .inference import infer_shapes
 from .model import CompiledModel
 from .time_grid import TimeGrid
-from seapopym.blueprint.units import UnitValidator, validate_units
 
 __all__ = [
     "compile_model",
+    "coords_to_indices",
     "CompiledModel",
     "ForcingStore",
     "TimeGrid",

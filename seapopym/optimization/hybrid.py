@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
-from seapopym.optimization.optimizer import Optimizer, OptimizeResult
+from seapopym.optimization.optimizer import GradientOptimizer, OptimizeResult
 from seapopym.types import Array, Params
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ class HybridOptimizer:
         logger.info("=== Phase 2: Gradient Refinement (top %d) ===", self.top_k)
 
         # Phase 2: Gradient refinement
-        grad_opt = Optimizer(
+        grad_opt = GradientOptimizer(
             algorithm="adam",
             learning_rate=self.gradient_lr,
             bounds=self.bounds,
@@ -189,7 +189,7 @@ class HybridOptimizer:
             if progress_bar:
                 print_rate = max(1, n_generations // 20)
                 if gen % print_rate == 0 or gen == n_generations - 1:
-                    print(f"\r  [{gen+1}/{n_generations}] loss={min_fitness:.4e}", end="", flush=True)
+                    print(f"\r  [{gen + 1}/{n_generations}] loss={min_fitness:.4e}", end="", flush=True)
                 if gen == n_generations - 1:
                     print()
 
@@ -216,7 +216,7 @@ class HybridOptimizer:
 
     def _refine_candidates(
         self,
-        grad_opt: Optimizer,
+        grad_opt: GradientOptimizer,
         loss_fn: Callable[[Params], Array],
         candidates: list[tuple[Params, list[float], float]],
     ) -> list[OptimizeResult]:

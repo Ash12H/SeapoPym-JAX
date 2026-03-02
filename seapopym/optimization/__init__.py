@@ -4,11 +4,11 @@ This module provides tools for optimizing model parameters by minimizing
 the difference between simulated outputs and observations.
 
 Main components:
-- Loss functions (RMSE, NRMSE) with support for sparse observations
-- Optimizer wrapper for Optax algorithms (gradient-based)
-- GradientRunner for differentiable model execution
+- Loss functions (MSE, RMSE, NRMSE) for building loss functions
+- GradientOptimizer for gradient-based optimization (Optax)
 - EvolutionaryOptimizer for CMA-ES optimization (requires evosax)
 - HybridOptimizer for combined CMA-ES + gradient optimization (requires evosax)
+- make_log_posterior for Bayesian inference (NUTS)
 
 Evolutionary optimizers require the optional evosax dependency:
     pip install seapopym[optimization]
@@ -16,14 +16,13 @@ Evolutionary optimizers require the optional evosax dependency:
 
 from __future__ import annotations
 
-from seapopym.optimization.gradient import GradientRunner, SparseObservations
 from seapopym.optimization.likelihood import (
     GaussianLikelihood,
     make_log_posterior,
     reparameterize_log_posterior,
 )
 from seapopym.optimization.loss import mse, nrmse, rmse
-from seapopym.optimization.optimizer import Optimizer, OptimizeResult
+from seapopym.optimization.optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.prior import (
     HalfNormal,
     LogNormal,
@@ -37,10 +36,8 @@ __all__ = [
     "rmse",
     "nrmse",
     "mse",
-    "Optimizer",
+    "GradientOptimizer",
     "OptimizeResult",
-    "GradientRunner",
-    "SparseObservations",
     "Uniform",
     "Normal",
     "LogNormal",
@@ -75,7 +72,10 @@ except ImportError:
 
 def __getattr__(name: str):
     """Provide helpful error message for optional dependencies."""
-    if name in ("EvolutionaryOptimizer", "HybridOptimizer", "IPOPResult", "run_ipop", "run_ipop_cmaes") and not _HAS_EVOSAX:
+    if (
+        name in ("EvolutionaryOptimizer", "HybridOptimizer", "IPOPResult", "run_ipop", "run_ipop_cmaes")
+        and not _HAS_EVOSAX
+    ):
         raise ImportError(f"{name} requires the evosax package. Install it with: pip install seapopym[optimization]")
     if name in ("NUTSResult", "run_nuts") and not _HAS_BLACKJAX:
         raise ImportError(f"{name} requires the blackjax package. Install it with: pip install seapopym[optimization]")
