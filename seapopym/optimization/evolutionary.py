@@ -19,7 +19,7 @@ import jax.numpy as jnp
 import optax
 from evosax.algorithms import CMA_ES, SimpleGA
 
-from seapopym.optimization.optimizer import OptimizeResult
+from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.types import Array, Params
 
 logger = logging.getLogger(__name__)

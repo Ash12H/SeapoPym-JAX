@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 import pytest
 
-from seapopym.optimization.optimizer import GradientOptimizer, OptimizeResult
+from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 
 
 class TestGradientOptimizerInit:

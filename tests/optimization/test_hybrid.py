@@ -3,8 +3,8 @@
 import jax.numpy as jnp
 import pytest
 
+from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.optimization.hybrid import HybridOptimizer
-from seapopym.optimization.optimizer import OptimizeResult
 
 
 class TestHybridOptimizerInit:

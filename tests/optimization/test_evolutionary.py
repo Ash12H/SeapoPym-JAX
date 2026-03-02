@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import pytest
 
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
-from seapopym.optimization.optimizer import OptimizeResult
+from seapopym.optimization.gradient_optimizer import OptimizeResult
 
 
 class TestEvolutionaryOptimizerInit:

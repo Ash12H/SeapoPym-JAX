@@ -16,13 +16,13 @@ Evolutionary optimizers require the optional evosax dependency:
 
 from __future__ import annotations
 
+from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.likelihood import (
     GaussianLikelihood,
     make_log_posterior,
     reparameterize_log_posterior,
 )
 from seapopym.optimization.loss import mse, nrmse, rmse
-from seapopym.optimization.optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.prior import (
     HalfNormal,
     LogNormal,

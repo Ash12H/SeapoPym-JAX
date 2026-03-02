@@ -18,7 +18,7 @@ import jax
 import jax.numpy as jnp
 
 from seapopym.optimization.evolutionary import EvolutionaryOptimizer
-from seapopym.optimization.optimizer import OptimizeResult
+from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.types import Array, Params
 
 logger = logging.getLogger(__name__)
