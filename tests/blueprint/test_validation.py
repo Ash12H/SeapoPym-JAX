@@ -7,18 +7,19 @@ from seapopym.blueprint import (
     BlueprintValidationError,
     Config,
     ConfigValidationError,
-    clear_registry,
     functional,
     validate_blueprint,
     validate_config,
 )
+from seapopym.blueprint.registry import REGISTRY
 from seapopym.blueprint.validation import BlueprintValidator
 
 
 @pytest.fixture(autouse=True)
 def setup_registry():
-    """Setup test functions in registry."""
-    clear_registry()
+    """Save registry, register test functions, restore after."""
+    saved = dict(REGISTRY)
+    REGISTRY.clear()
 
     @functional(name="test:simple")
     def simple(x):
@@ -51,7 +52,8 @@ def setup_registry():
         return temp
 
     yield
-    clear_registry()
+    REGISTRY.clear()
+    REGISTRY.update(saved)
 
 
 class TestValidateBlueprint:

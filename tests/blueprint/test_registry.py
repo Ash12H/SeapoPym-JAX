@@ -4,19 +4,21 @@ import pytest
 
 from seapopym.blueprint import (
     FunctionNotFoundError,
-    clear_registry,
     functional,
     get_function,
     list_functions,
 )
+from seapopym.blueprint.registry import REGISTRY
 
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    """Clear registry before and after each test."""
-    clear_registry()
+    """Save registry, clear for test, restore after."""
+    saved = dict(REGISTRY)
+    REGISTRY.clear()
     yield
-    clear_registry()
+    REGISTRY.clear()
+    REGISTRY.update(saved)
 
 
 class TestFunctionalDecorator:

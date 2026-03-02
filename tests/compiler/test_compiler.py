@@ -4,15 +4,17 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, clear_registry, functional
+from seapopym.blueprint import Blueprint, Config, functional
+from seapopym.blueprint.registry import REGISTRY
 from seapopym.compiler import CompiledModel, compile_model
 from seapopym.dims import CANONICAL_DIMS
 
 
 @pytest.fixture(autouse=True)
 def setup_registry():
-    """Register test functions before each test."""
-    clear_registry()
+    """Save registry, register test functions, restore after."""
+    saved = dict(REGISTRY)
+    REGISTRY.clear()
 
     @functional(name="test:simple_growth")
     def simple_growth(biomass, rate, temp):
@@ -20,7 +22,8 @@ def setup_registry():
         return biomass * rate * (temp / 20.0)
 
     yield
-    clear_registry()
+    REGISTRY.clear()
+    REGISTRY.update(saved)
 
 
 class TestCompiler:
