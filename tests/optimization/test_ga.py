@@ -24,11 +24,11 @@ class TestGAOptimizerInit:
         assert opt.crossover_rate == 0.5
         assert opt.mutation_std == 0.1
 
-    def test_default_priors_from_bounds(self):
+    def test_no_default_priors(self):
         runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GAOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
-        assert "x" in opt.priors.priors
+        assert opt.priors is None
 
     def test_custom_priors(self):
         runner = _FakeRunner()

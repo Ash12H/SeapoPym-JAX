@@ -145,7 +145,7 @@ class DiskWriter:
         if coords is not None:
             for dim_name, coord_arr in coords.items():
                 coord_np = np.asarray(coord_arr)
-                ds = self.store.create_dataset(
+                ds = self.store.create_array(
                     dim_name,
                     shape=coord_np.shape,
                     dtype=coord_np.dtype,
@@ -166,7 +166,7 @@ class DiskWriter:
             var_shape = (0,) + tuple(shapes.get(d, 1) for d in spatial_dims)
             chunks = (1,) + var_shape[1:]
 
-            ds = self.store.create_dataset(
+            ds = self.store.create_array(
                 var_name,
                 shape=var_shape,
                 chunks=chunks,

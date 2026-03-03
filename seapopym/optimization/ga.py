@@ -16,7 +16,6 @@ from evosax.algorithms import SimpleGA
 
 from seapopym.optimization._common import (
     build_bounds_arrays,
-    build_default_priors,
     build_loss_fn,
     denormalize,
     flatten_params,
@@ -77,7 +76,7 @@ class GAOptimizer:
         self.runner = runner
         self.objectives = objectives
         self.bounds = bounds
-        self.priors = priors if priors is not None else build_default_priors(bounds)
+        self.priors = priors
         self.popsize = popsize
         self.crossover_rate = crossover_rate
         self.mutation_std = mutation_std

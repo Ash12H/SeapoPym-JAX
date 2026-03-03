@@ -43,12 +43,11 @@ class TestCMAESOptimizerInit:
         opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=31)
         assert opt.popsize == 32
 
-    def test_default_priors_from_bounds(self):
+    def test_no_default_priors(self):
         runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
-        assert "x" in opt.priors.priors
-        assert opt.priors.priors["x"].bounds == (0.0, 10.0)
+        assert opt.priors is None
 
     def test_custom_priors(self):
         runner = _FakeRunner()

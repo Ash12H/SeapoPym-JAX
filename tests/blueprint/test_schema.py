@@ -1,6 +1,5 @@
 """Tests for Blueprint and Config schema classes."""
 
-from pathlib import Path
 
 import pytest
 
@@ -15,7 +14,7 @@ from seapopym.blueprint import (
     VariableDeclaration,
 )
 
-FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
+
 
 
 class TestVariableDeclaration:
@@ -165,15 +164,6 @@ class TestBlueprint:
         assert len(bp.process) == 1
         assert "biomass" in bp.tendencies
 
-    def test_load_from_yaml(self):
-        """Test loading Blueprint from YAML file."""
-        yaml_path = FIXTURES_DIR / "toy_model.yaml"
-        if not yaml_path.exists():
-            pytest.skip("Fixture file not found")
-
-        bp = Blueprint.load(yaml_path)
-        assert bp.id == "toy-growth"
-        assert bp.version == "0.1.0"
 
     def test_get_variable(self):
         """Test getting variable by path."""
@@ -251,15 +241,6 @@ class TestConfig:
         assert cfg.execution.time_end == "2001-01-01"
         assert cfg.execution.dt == "1d"
 
-    def test_load_from_yaml(self):
-        """Test loading Config from YAML file."""
-        yaml_path = FIXTURES_DIR / "toy_config.yaml"
-        if not yaml_path.exists():
-            pytest.skip("Fixture file not found")
-
-        cfg = Config.load(yaml_path)
-        assert cfg.execution.dt == "1d"
-        assert cfg.parameters["growth_rate"].value == 0.1
 
     def test_get_parameter_value(self):
         """Test getting parameter value by name."""

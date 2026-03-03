@@ -252,7 +252,8 @@ class TestCompileTimeGrid:
                     "temp": xr.DataArray(
                         np.zeros((10, 1, 1)),
                         dims=["T", "Y", "X"],
-                        coords={"T": pd.date_range("2000-01-05", periods=10, freq="1d")},
+
+                        coords={"T": pd.date_range("2000-01-05", periods=10, freq="1D")},
                     )
                 },
                 "execution": {"time_start": "2000-01-01", "time_end": "2000-01-10", "dt": "1d"},
@@ -304,7 +305,7 @@ class TestCompileTimeGrid:
         """Test that forcings are sliced to simulation temporal range before interpolation."""
         forcing_start = "2001-01-01"
         forcing_end = "2021-01-01"
-        forcing_dates = pd.date_range(forcing_start, forcing_end, freq="1d", inclusive="left")
+        forcing_dates = pd.date_range(forcing_start, forcing_end, freq="1D", inclusive="left")
 
         # Create a forcing with a clear pattern: value = day_of_year
         forcing_values = np.array([d.dayofyear for d in forcing_dates], dtype=float)

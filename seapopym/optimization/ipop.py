@@ -17,7 +17,6 @@ import jax
 import jax.numpy as jnp
 
 from seapopym.optimization._common import (
-    build_default_priors,
     build_loss_fn,
     setup_objectives,
 )
@@ -128,7 +127,7 @@ class IPOPCMAESOptimizer:
         self.runner = runner
         self.objectives = objectives
         self.bounds = bounds
-        self.priors = priors if priors is not None else build_default_priors(bounds)
+        self.priors = priors
         self.n_restarts = n_restarts
         self.initial_popsize = initial_popsize
         self.n_generations = n_generations
