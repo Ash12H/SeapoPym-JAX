@@ -1,7 +1,7 @@
 """Benchmark LMTL: GPU execution time vs temporal chunk size.
 
 Fixes a spatial grid and total simulation length, then varies the number
-of timesteps processed per jax.lax.scan call (chunk size) using StreamingRunner.
+of timesteps processed per jax.lax.scan call (chunk size) using Runner.
 
 Outputs:
 - examples/images/04_benchmark_time_chunking.png
@@ -19,7 +19,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine.runners import StreamingRunner
+from seapopym.engine.runner import Runner
 from seapopym.models import LMTL_NO_TRANSPORT
 
 # =============================================================================
@@ -116,7 +116,6 @@ config = Config.from_dict(
             "time_end": end_date,
             "dt": DT,
             "forcing_interpolation": "linear",
-            "chunk_size": 1000,
         },
     }
 )
@@ -181,7 +180,7 @@ print()
 
 
 def benchmark_chunk(chunk_size: int, device_name: str, n_repeats: int = 1) -> tuple[float, float]:
-    """Benchmark the full simulation via StreamingRunner on a given device.
+    """Benchmark the full simulation via Runner on a given device.
 
     Returns (mean_time, std_time) in seconds.
     """
@@ -189,9 +188,9 @@ def benchmark_chunk(chunk_size: int, device_name: str, n_repeats: int = 1) -> tu
     times = []
     for i in range(n_repeats + 1):
         with jax.default_device(dev):
-            runner = StreamingRunner(model, chunk_size=chunk_size)
+            runner = Runner.simulation(chunk_size=chunk_size)
             t0 = time.time()
-            runner.run()
+            runner.run(model)
             elapsed = time.time() - t0
 
         if i > 0:  # skip first run (warmup / JIT)

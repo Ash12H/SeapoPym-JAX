@@ -24,19 +24,18 @@ Le Runner encapsule la stratégie d'exécution **et** le mode de sortie (disque 
 
 ## Calibration
 
-Couvre l'optimisation (point estimate) et l'échantillonnage bayésien (distributions).
+Optimisation évolutionnaire (point estimate).
 
 ```
 Blueprint + Config → compile_model() → CompiledModel (même pivot)
 
                     Runner + PriorSet + Objectives
                                   │
-                    ┌─────────────┴─────────────┐
-                    ▼                           ▼
-          Optimizer(strategy)          Sampler(algorithm)
-           + metrics/weights            + likelihood
-                    │                           │
-          OptimizationResult               NUTSResult
+                                  ▼
+                      Optimizer(strategy)
+                       + metrics/weights
+                                  │
+                        OptimizationResult
 ```
 
 ### Séparation des responsabilités
@@ -48,7 +47,6 @@ Blueprint + Config → compile_model() → CompiledModel (même pivot)
 | Runner    | Exécute le modèle (reçoit params fixes du model + params libres proposés, merge, exécute)|
 | Objective | Données d'observation + comment extraire les prédictions (target ou transform)           |
 | Optimizer | Orchestre la recherche : propose des params, évalue via le Runner, décide du pas suivant |
-| Sampler   | Échantillonne la postérieure : explore l'espace des params via MCMC                      |
 
 ### Paramètres : fixes vs libres
 
@@ -56,7 +54,7 @@ La Config contient **tous** les paramètres. La distinction fixe/libre est une p
 
 - Un paramètre est **libre** s'il a un prior dans la PriorSet.
 - Pas de prior = **fixe** (valeur de la Config utilisée telle quelle).
-- Le Runner reçoit les params fixes du CompiledModel et les params libres proposés par l'Optimizer/Sampler. Il merge les deux et exécute le modèle.
+- Le Runner reçoit les params fixes du CompiledModel et les params libres proposés par l'Optimizer. Il merge les deux et exécute le modèle.
 
 ### Frontière données utilisateur / JAX
 
@@ -73,7 +71,7 @@ L'utilisateur travaille avec ses formats habituels (xarray, pandas). Le système
 
 ### Objective — brique d'observation
 
-Un `Objective` regroupe : observations + comment extraire les prédictions correspondantes. Pas de métrique ni de likelihood — c'est le consommateur (Optimizer ou Sampler) qui décide **comment** comparer.
+Un `Objective` regroupe : observations + comment extraire les prédictions correspondantes. Pas de métrique — c'est l'Optimizer qui décide **comment** comparer.
 
 #### Formats d'observations supportés
 
@@ -107,7 +105,7 @@ Objective(
 )
 ```
 
-En interne, au setup (Optimizer ou Sampler) :
+En interne, au setup de l'Optimizer :
 
 1. Extrait les coordonnées des observations (T, Y, X) — depuis les dims xarray ou les colonnes DataFrame
 2. Appelle `coords_to_indices(model.coords, T=..., Y=..., X=...)` automatiquement
@@ -157,54 +155,32 @@ optimizer = Optimizer(
 result: OptimizationResult = optimizer.run(model)
 ```
 
-### Sampler — échantillonnage bayésien
-
-Le Sampler partage le même setup (Runner, PriorSet, Objectives) mais construit un `log_posterior` au lieu d'une `loss`. La **likelihood** remplace la metric :
-
-```python
-sampler = Sampler(
-    runner=Runner.optimization(),
-    priors=PriorSet.load("priors.yaml"),
-    objectives=[
-        Objective(observations=obs_biomass_xr, target="biomass"),
-    ],
-    likelihood="gaussian",
-    algorithm="nuts",
-)
-result: NUTSResult = sampler.run(model, n_samples=1000)
-```
-
 ### Chaîne d'évaluation
 
-Le début est commun, la fin diverge :
-
 ```
-free_params (Optimizer/Sampler) ──┐
-                                  ▼
-              runner(model, free_params) → merge fixed+free → outputs
-                              │
-                    ┌─────────┼─────────┐
-                    ▼         ▼         ▼
-              objective_1  objective_2  ...
-              transform    transform
-              pred_1       pred_2
-                    │         │
-            ┌──────┴──┐  ┌───┴──────┐
-            ▼         ▼  ▼         ▼
-        Optimizer:              Sampler:
-        metric(pred, obs)       log_lik(pred, obs, σ)
-        scalar_1  scalar_2      ll_1      ll_2
-            │         │            │         │
-            ▼         ▼            ▼         ▼
-        loss = Σ(w_i × s_i)    log_post = Σ(ll_i)
-             + prior_reg            + log_prior
+free_params (Optimizer) ──┐
+                          ▼
+      runner(model, free_params) → merge fixed+free → outputs
+                          │
+                ┌─────────┼─────────┐
+                ▼         ▼         ▼
+          objective_1  objective_2  ...
+          transform    transform
+          pred_1       pred_2
+                │         │
+                ▼         ▼
+          metric(pred, obs)
+          scalar_1  scalar_2
+                │         │
+                ▼         ▼
+          loss = Σ(w_i × s_i)
+               + penalty
 ```
 
 - **Runner** : reçoit params fixes (model) + libres (proposés), merge, exécute une seule fois
 - **Transform** : extrait/agrège les prédictions (auto-générée pour `target`, manuelle pour `transform`)
 - **Optimizer** : compare via metric (RMSE, NRMSE...) → loss à minimiser
-- **Sampler** : compare via likelihood (Gaussienne...) → log-postérieure à échantillonner
-- **PriorSet** : régularisation (Optimizer) ou log-prior (Sampler)
+- **PriorSet** : fournit les bounds (penalty si violation) ou log-prior (futur bayésien)
 
 Cette composition est faite une seule fois au setup. La boucle interne est du JAX pur, JIT-compilé.
 
@@ -222,16 +198,16 @@ La `transform` est le maillon faible pour l'auto-diff. `jax.grad` doit différen
 
 Conséquence : **le choix de la transform contraint les stratégies disponibles**.
 
-| Transform          | Gradient (Adam, L-BFGS) | Évolutionnaire (CMA-ES) | Bayésien (NUTS) |
-| ------------------ | ----------------------- | ----------------------- | --------------- |
-| Differentiable     | oui                     | oui                     | oui             |
-| Non-differentiable | **non**                 | oui                     | **non**         |
+| Transform          | Gradient (Adam, L-BFGS) | Évolutionnaire (CMA-ES) |
+| ------------------ | ----------------------- | ----------------------- |
+| Differentiable     | oui                     | oui                     |
+| Non-differentiable | **non**                 | oui                     |
 
 L'Optimizer devrait vérifier la compatibilité transform/stratégie au `.run()` ou au minimum avertir l'utilisateur. Les objectives avec `target` (sans transform custom) sont toujours differentiables.
 
-### Composition Runner + Optimizer/Sampler
+### Composition Runner + Optimizer
 
-Le Runner est **injecté** dans l'Optimizer/Sampler, pas possédé. Plusieurs types de Runners sont nécessaires et la composition permet de les interchanger.
+Le Runner est **injecté** dans l'Optimizer, pas possédé. Plusieurs types de Runners sont nécessaires et la composition permet de les interchanger.
 
 ## Runner — Architecture composable
 
@@ -298,6 +274,4 @@ Un nouveau mode d'exécution (online/streaming, adjoint, etc.) = un nouveau pres
 
 ## Points d'attention
 
-- `ParameterValue` (schema.py) contient `trainable` et `bounds` — vestiges d'un couplage simulation/optimisation. À retirer, la PriorSet remplit ce rôle.
-- `chunk_size` vit sur CompiledModel mais c'est une préoccupation de Runner. À déplacer.
-- `run_with_params` vit sur CompiledModel mais c'est une préoccupation de Runner. À déplacer.
+- `chunk_size` est un paramètre de `Runner.simulation()`, pas du modèle compilé.

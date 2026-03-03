@@ -125,7 +125,6 @@ config_1x1 = Config.from_dict(
             "time_end": end_date,
             "dt": DT,
             "forcing_interpolation": "linear",
-            "chunk_size": 1000,
         },
     }
 )
@@ -235,7 +234,6 @@ def build_grid_model(ny: int, nx: int):
                 "time_end": end_date,
                 "dt": DT,
                 "forcing_interpolation": "linear",
-                "chunk_size": 1000,
             },
         }
     )

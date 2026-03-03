@@ -8,14 +8,14 @@ import numpy as np
 
 from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 
 
 class TestE2EBasicSimulation:
     """End-to-end tests for basic simulation workflow."""
 
     def test_e2e_streaming(self, tmp_path):
-        """Test complete workflow: Blueprint → Compile → StreamingRunner."""
+        """Test complete workflow: Blueprint → Compile → Runner.simulation()."""
         blueprint = Blueprint.from_dict(
             {
                 "id": "toy-growth",
@@ -77,14 +77,15 @@ class TestE2EBasicSimulation:
         )
 
         model = compile_model(blueprint, config)
-        runner = StreamingRunner(model, chunk_size=10)
-        final_state, _ = runner.run(str(tmp_path / "output"))
+        runner = Runner.simulation(chunk_size=10)
+        final_state, _ = runner.run(model, output_path=str(tmp_path / "output"))
 
         assert "biomass" in final_state
         assert jnp.all(final_state["biomass"] >= 100.0)
 
-    def test_e2e_run_with_params(self):
-        """Test complete workflow: Blueprint → Compile → CompiledModel.run_with_params."""
+    def test_e2e_optimization_runner(self):
+        """Test complete workflow: Blueprint → Compile → Runner.optimization()."""
+
         blueprint = Blueprint.from_dict(
             {
                 "id": "toy-growth",
@@ -146,10 +147,12 @@ class TestE2EBasicSimulation:
         )
 
         model = compile_model(blueprint, config)
-        final_state, outputs = model.run_with_params(dict(model.parameters))
+        runner = Runner.optimization()
+        outputs = runner(model, dict(model.parameters))
 
-        assert "biomass" in final_state
-        assert jnp.all(final_state["biomass"] >= 100.0)
+        assert "biomass" in outputs
+        # Biomass should have grown (output is per-timestep)
+        assert jnp.all(outputs["biomass"][-1] >= 100.0)
 
 
 class TestE2EMaskBehavior:
@@ -219,8 +222,8 @@ class TestE2EMaskBehavior:
         )
 
         model = compile_model(blueprint, config)
-        runner = StreamingRunner(model, chunk_size=10)
-        final_state, _ = runner.run(str(tmp_path / "output"))
+        runner = Runner.simulation(chunk_size=10)
+        final_state, _ = runner.run(model, output_path=str(tmp_path / "output"))
 
         # Masked regions should be zero
         np.testing.assert_array_equal(np.asarray(final_state["biomass"][:3, :]), 0.0)
@@ -312,8 +315,8 @@ class TestE2EMultiProcess:
         )
 
         model = compile_model(blueprint, config)
-        runner = StreamingRunner(model, chunk_size=15)
-        final_state, _ = runner.run(str(tmp_path / "output"))
+        runner = Runner.simulation(chunk_size=15)
+        final_state, _ = runner.run(model, output_path=str(tmp_path / "output"))
 
         # Net growth rate is positive (0.0002 - 0.0001 = 0.0001)
         # So biomass should increase

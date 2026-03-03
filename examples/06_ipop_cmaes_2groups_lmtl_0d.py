@@ -33,7 +33,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine.step import build_step_fn
+from seapopym.engine import Runner
 from seapopym.models import LMTL_NO_TRANSPORT
 from seapopym.optimization.ipop import run_ipop_cmaes
 
@@ -174,7 +174,6 @@ config = Config.from_dict(
             "time_end": end_date,
             "dt": DT,
             "forcing_interpolation": "linear",
-            "chunk_size": 1000,
         },
     }
 )
@@ -185,37 +184,18 @@ config = Config.from_dict(
 
 print("Compiling model...")
 _model = compile_model(blueprint, config)
-_step_fn = build_step_fn(_model)
+_runner = Runner.optimization()
 _n_timesteps = _model.n_timesteps
-_initial_state = _model.state
-_forcings_stacked = _model.forcings.get_all()
 _spinup_steps = int(SPINUP_YEARS / total_years * _n_timesteps)
 
 
 def run_simulation(params: dict) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Run full simulation, return per-group biomass time series (T,) each."""
-    full_params = {**params, **{k: jnp.array(v) for k, v in FIXED_PARAMS.items()}}
-    full_params["cohort_ages"] = _model.parameters["cohort_ages"]
-    full_params["day_layer"] = _model.parameters["day_layer"]
-    full_params["night_layer"] = _model.parameters["night_layer"]
-
-    def scan_body(carry, t):
-        state, p = carry
-        forcings_t = {}
-        for name, arr in _forcings_stacked.items():
-            if arr.ndim > 0 and arr.shape[0] == _n_timesteps:
-                forcings_t[name] = arr[t]
-            else:
-                forcings_t[name] = arr
-        new_carry, outputs = _step_fn((state, p), forcings_t)
-        new_state, _ = new_carry
-        # biomass shape: (F, Y, X) — extract per-group mean
-        biomass = outputs["biomass"]
-        bio_g0 = jnp.mean(biomass[0])
-        bio_g1 = jnp.mean(biomass[1])
-        return (new_state, p), (bio_g0, bio_g1)
-
-    _, (bio_g0, bio_g1) = jax.lax.scan(scan_body, (_initial_state, full_params), jnp.arange(_n_timesteps))
+    outputs = _runner(_model, params)
+    # outputs["biomass"] has shape (T, F, Y, X) — extract per-group spatial mean
+    biomass = outputs["biomass"]
+    bio_g0 = jnp.mean(biomass[:, 0], axis=tuple(range(1, biomass.ndim - 1)))
+    bio_g1 = jnp.mean(biomass[:, 1], axis=tuple(range(1, biomass.ndim - 1)))
     return bio_g0, bio_g1
 
 

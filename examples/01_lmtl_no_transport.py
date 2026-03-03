@@ -28,7 +28,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 from seapopym.models import LMTL_NO_TRANSPORT
 
 # =============================================================================
@@ -133,7 +133,6 @@ config = Config.from_dict(
             "time_end": end_date,
             "dt": dt,
             "forcing_interpolation": "linear",
-            "chunk_size": 800,
         },
     }
 )
@@ -147,10 +146,10 @@ if __name__ == "__main__":
     print(f"Compiling model ({blueprint.id})...")
     model = compile_model(blueprint, config)
 
-    runner = StreamingRunner(model)
+    runner = Runner.simulation(chunk_size=800)
     print(f"Running simulation on {grid_size} grid for {len(dates)} days...")
     t_start = time.time()
-    state, outputs = runner.run(export_variables=["biomass"])
+    state, outputs = runner.run(model, export_variables=["biomass"])
     t_end = time.time()
     print(f"Simulation completed in {t_end - t_start:.2f} seconds.")
 

@@ -238,19 +238,6 @@ class ExecutionParams(BaseModel):
         time_start: Simulation start time (ISO format, e.g., "2000-01-01").
         time_end: Simulation end time (ISO format, e.g., "2020-12-31").
         dt: Timestep duration (e.g., "1d", "0.05d", "6h", "30min").
-        chunk_size: Number of timesteps per temporal chunk.
-            - None (default): Process entire time range in one chunk.
-            - int > 0: Split execution into chunks of this size.
-
-            Purpose:
-            - Memory optimization: Limits output accumulation in RAM.
-            - Async I/O: Enables progressive writing while computing.
-            - Future: Will enable lazy loading of forcings from disk.
-
-            Recommendation:
-            - Small models (0D, notebooks): Use None for simplicity.
-            - Large models (2D/3D, long simulations): Use 1000-10000.
-
         forcing_interpolation: Method for temporal interpolation of forcings.
             - "constant": Broadcast static forcings (default).
             - "nearest": Nearest neighbor for under-sampled forcings.
@@ -267,7 +254,6 @@ class ExecutionParams(BaseModel):
     time_start: str
     time_end: str
     dt: str = "1d"
-    chunk_size: int | None = None
     forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
     output_path: str | None = None
 
@@ -310,23 +296,6 @@ class ExecutionParams(BaseModel):
         except Exception as e:
             raise ValueError(f"Invalid datetime format: {v}. Use ISO format (e.g., '2000-01-01').") from e
 
-    @field_validator("chunk_size")
-    @classmethod
-    def validate_chunk_size(cls, v: int | None) -> int | None:
-        """Validate that chunk_size is positive if provided.
-
-        Args:
-            v: Chunk size to validate.
-
-        Returns:
-            The validated chunk size.
-
-        Raises:
-            ValueError: If chunk_size is not positive.
-        """
-        if v is not None and v <= 0:
-            raise ValueError(f"chunk_size must be positive, got {v}")
-        return v
 
     @model_validator(mode="after")
     def validate_time_range(self) -> Self:

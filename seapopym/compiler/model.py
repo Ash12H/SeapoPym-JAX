@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from seapopym.compiler.time_grid import TimeGrid
 
 from seapopym.blueprint.nodes import ComputeNode, DataNode
-from seapopym.types import Array, Params
+from seapopym.types import Array
 
 
 @dataclass
@@ -43,7 +43,6 @@ class CompiledModel:
         coords: Coordinate arrays for each dimension.
         dt: Timestep in seconds.
         time_grid: Temporal grid (start, end, n_timesteps, coords). None if not using calendar.
-        chunk_size: Number of timesteps per temporal chunk. None = process all at once.
     """
 
     # Source
@@ -66,7 +65,6 @@ class CompiledModel:
 
     # Temporal configuration
     time_grid: TimeGrid | None = None
-    chunk_size: int | None = None
 
     @property
     def mask(self) -> Array | None:
@@ -83,39 +81,6 @@ class CompiledModel:
         if var_name not in self.state:
             raise KeyError(f"State variable '{var_name}' not found")
         return self.state[var_name].shape
-
-    def run_with_params(
-        self,
-        params: Params,
-        initial_state: dict[str, Array] | None = None,
-        forcings: dict[str, Array] | None = None,
-    ) -> tuple[dict[str, Array], dict[str, Array]]:
-        """Run the model with specified parameters.
-
-        Args:
-            params: Parameter values to use for this run.
-            initial_state: Initial state. If None, uses model's initial state.
-            forcings: Forcing data. If None, uses model's forcings.
-
-        Returns:
-            Tuple of (final_state, outputs) where outputs contains all
-            timesteps stacked along axis 0.
-        """
-        import jax.lax as lax
-
-        from seapopym.engine.step import build_step_fn
-
-        step_fn = build_step_fn(self)
-
-        if initial_state is None:
-            initial_state = self.state
-        if forcings is None:
-            forcings = self.forcings.get_all()
-
-        init_carry = (initial_state, params)
-        (final_state, _), outputs = lax.scan(step_fn, init_carry, forcings)
-
-        return final_state, outputs
 
     def to_numpy(self) -> CompiledModel:
         """Convert all arrays to NumPy (useful for debugging)."""

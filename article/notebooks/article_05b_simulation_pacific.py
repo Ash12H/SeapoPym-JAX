@@ -2,7 +2,7 @@
 """Simulation SeapoPym - Pacifique (Transport vs No-Transport).
 
 Version JAX utilisant:
-- Blueprint/Config/compile_model/StreamingRunner architecture
+- Blueprint/Config/compile_model/Runner architecture
 - seapopym.functions.lmtl pour la biologie
 - seapopym.functions.transport pour l'advection/diffusion
 
@@ -23,7 +23,7 @@ import seapopym.functions.lmtl  # noqa: F401
 import seapopym.functions.transport  # noqa: F401
 from seapopym.blueprint import Blueprint, Config
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 
 # =============================================================================
 # CONFIGURATION
@@ -514,10 +514,10 @@ if __name__ == "__main__":
     print("Compiling model (no transport)...")
     model_no = compile_model(blueprint_no, config_no_transport)
 
-    runner_no = StreamingRunner(model_no)
+    runner_no = Runner.simulation()
     print(f"Running simulation ({START_DATE} to {END_DATE}, dt={DT})...")
     t0 = time.perf_counter()
-    state_no, outputs_no = runner_no.run(export_variables=["biomass"])
+    state_no, outputs_no = runner_no.run(model_no, export_variables=["biomass"])
     t_no = time.perf_counter() - t0
     print(f"Simulation completed in {t_no:.1f}s")
 
@@ -534,10 +534,10 @@ if __name__ == "__main__":
     print("Compiling model (with transport)...")
     model_tr = compile_model(blueprint_tr, config_transport)
 
-    runner_tr = StreamingRunner(model_tr)
+    runner_tr = Runner.simulation()
     print(f"Running simulation ({START_DATE} to {END_DATE}, dt={DT})...")
     t0 = time.perf_counter()
-    state_tr, outputs_tr = runner_tr.run(export_variables=["biomass"])
+    state_tr, outputs_tr = runner_tr.run(model_tr, export_variables=["biomass"])
     t_tr = time.perf_counter() - t0
     print(f"Simulation completed in {t_tr:.1f}s")
 

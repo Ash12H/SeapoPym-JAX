@@ -20,7 +20,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Blueprint, Config
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 
 # =============================================================================
 # CONFIGURATION
@@ -321,8 +321,8 @@ model = compile_model(blueprint, config)
 print(f"  Timesteps: {model.n_timesteps}")
 
 print("\nExécution de la simulation...")
-runner = StreamingRunner(model, chunk_size=365)
-state, outputs = runner.run(export_variables=["biomass"])
+runner = Runner.simulation(chunk_size=365)
+state, outputs = runner.run(model, export_variables=["biomass"])
 
 # Extract results
 results_jax = outputs["biomass"].rename("biomass_jax")

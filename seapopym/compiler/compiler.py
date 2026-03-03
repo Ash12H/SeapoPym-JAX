@@ -265,5 +265,4 @@ def compile_model(
         coords=coords,
         dt=time_grid.dt_seconds,
         time_grid=time_grid,
-        chunk_size=config.execution.chunk_size,
     )

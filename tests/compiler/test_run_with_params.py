@@ -1,4 +1,4 @@
-"""Tests for CompiledModel.run_with_params."""
+"""Tests for Runner.optimization() replacing CompiledModel.run_with_params."""
 
 import jax.numpy as jnp
 import numpy as np
@@ -7,6 +7,7 @@ import pytest
 from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.blueprint.registry import REGISTRY
 from seapopym.compiler import compile_model
+from seapopym.engine.runner import Runner
 
 _TEST_FUNC_NAME = "test:growth_rwp"
 
@@ -71,80 +72,45 @@ def _build_toy_model(n_days=10, ny=3, nx=3, growth_rate=0.0001):
     return compile_model(blueprint, config)
 
 
-class TestRunWithParamsNominal:
-    """Tests for basic run_with_params behavior."""
+class TestOptimizationRunnerNominal:
+    """Tests for basic Runner.optimization() behavior."""
 
-    def test_returns_final_state_and_outputs(self):
-        """run_with_params should return (final_state, outputs) tuple."""
+    def test_returns_outputs_dict(self):
+        """Runner.optimization() should return outputs dict."""
         model = _build_toy_model()
-        result = model.run_with_params(dict(model.parameters))
+        runner = Runner.optimization()
+        outputs = runner(model, dict(model.parameters))
 
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-        final_state, outputs = result
-        assert isinstance(final_state, dict)
         assert isinstance(outputs, dict)
-
-    def test_final_state_contains_variables(self):
-        """Final state should contain declared state variables."""
-        model = _build_toy_model()
-        final_state, _ = model.run_with_params(dict(model.parameters))
-
-        assert "biomass" in final_state
+        assert len(outputs) > 0
 
     def test_outputs_contain_variables(self):
         """Outputs should contain output arrays."""
         model = _build_toy_model()
-        _, outputs = model.run_with_params(dict(model.parameters))
+        runner = Runner.optimization()
+        outputs = runner(model, dict(model.parameters))
 
         assert len(outputs) > 0
 
     def test_biomass_grows_with_positive_rate(self):
         """Biomass should increase with positive growth rate."""
         model = _build_toy_model(growth_rate=0.001)
-        final_state, _ = model.run_with_params(dict(model.parameters))
+        runner = Runner.optimization()
+        outputs = runner(model, dict(model.parameters))
 
-        assert jnp.all(final_state["biomass"] > 100.0)
+        # Last timestep biomass should be > initial (100.0)
+        assert jnp.all(outputs["biomass"][-1] > 100.0)
 
     def test_different_params_give_different_results(self):
         """Different parameter values should produce different outputs."""
         model = _build_toy_model()
+        runner = Runner.optimization()
 
         params_low = {"growth_rate": jnp.array(0.0001)}
         params_high = {"growth_rate": jnp.array(0.01)}
 
-        state_low, _ = model.run_with_params(params_low)
-        state_high, _ = model.run_with_params(params_high)
+        outputs_low = runner(model, params_low)
+        outputs_high = runner(model, params_high)
 
         # Higher growth rate should give higher biomass
-        assert jnp.mean(state_high["biomass"]) > jnp.mean(state_low["biomass"])
-
-
-class TestRunWithParamsOverrides:
-    """Tests for state and forcings overrides."""
-
-    def test_custom_initial_state(self):
-        """Custom initial state should be used instead of default."""
-        model = _build_toy_model(n_days=5, ny=2, nx=2)
-
-        custom_state = {"biomass": jnp.ones((2, 2)) * 500.0}
-        final_state, _ = model.run_with_params(
-            dict(model.parameters),
-            initial_state=custom_state,
-        )
-
-        # Should start from 500, not 100
-        assert jnp.all(final_state["biomass"] > 100.0)
-
-    def test_default_state_when_none(self):
-        """None initial_state should use model's default state."""
-        model = _build_toy_model(n_days=5, ny=2, nx=2)
-
-        result_default = model.run_with_params(dict(model.parameters))
-        result_none = model.run_with_params(dict(model.parameters), initial_state=None)
-
-        np.testing.assert_array_equal(
-            np.asarray(result_default[0]["biomass"]),
-            np.asarray(result_none[0]["biomass"]),
-        )
+        assert jnp.mean(outputs_high["biomass"][-1]) > jnp.mean(outputs_low["biomass"][-1])

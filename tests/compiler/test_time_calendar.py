@@ -109,14 +109,12 @@ class TestExecutionParams:
             time_start="2000-01-01",
             time_end="2020-12-31",
             dt="1d",
-            chunk_size=1000,
             forcing_interpolation="linear",
         )
 
         assert params.time_start == "2000-01-01"
         assert params.time_end == "2020-12-31"
         assert params.dt == "1d"
-        assert params.chunk_size == 1000
         assert params.forcing_interpolation == "linear"
 
     def test_minimal_params(self):
@@ -124,7 +122,6 @@ class TestExecutionParams:
         params = ExecutionParams(time_start="2000-01-01", time_end="2000-12-31")
 
         assert params.dt == "1d"  # default
-        assert params.chunk_size is None  # default
         assert params.forcing_interpolation == "constant"  # default
 
     def test_missing_time_start_error(self):
@@ -156,16 +153,6 @@ class TestExecutionParams:
         """Test error with invalid datetime format for time_end."""
         with pytest.raises(ValueError, match="Invalid datetime format"):
             ExecutionParams(time_start="2000-01-01", time_end="not-a-date")
-
-    def test_negative_chunk_size_error(self):
-        """Test error when chunk_size is negative."""
-        with pytest.raises(ValueError, match="must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", chunk_size=-100)
-
-    def test_zero_chunk_size_error(self):
-        """Test error when chunk_size is zero."""
-        with pytest.raises(ValueError, match="must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", chunk_size=0)
 
     def test_invalid_forcing_interpolation(self):
         """Test error with invalid forcing_interpolation method."""

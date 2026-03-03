@@ -1,16 +1,16 @@
 """Engine package for execution of compiled models.
 
 This package provides:
-- Runners: StreamingRunner (production, with chunking and disk I/O)
+- Runner: Composable runner with presets for simulation and optimization
 - Step function builder for time-stepping logic
 
 Example:
     >>> from seapopym.compiler import compile_model
-    >>> from seapopym.engine import StreamingRunner
+    >>> from seapopym.engine import Runner
     >>>
     >>> model = compile_model(blueprint, config)
-    >>> runner = StreamingRunner(model, chunk_size=365)
-    >>> final_state = runner.run(output_path="/results/sim_001/")
+    >>> runner = Runner.simulation(chunk_size=365)
+    >>> final_state, outputs = runner.run(model, output_path="/results/sim_001/")
 """
 
 from .exceptions import (
@@ -19,12 +19,13 @@ from .exceptions import (
     EngineIOError,
 )
 from .io import DiskWriter
-from .runners import StreamingRunner
+from .runner import Runner, RunnerConfig
 from .step import build_step_fn
 
 __all__ = [
     # Runners
-    "StreamingRunner",
+    "Runner",
+    "RunnerConfig",
     # Step
     "build_step_fn",
     # I/O

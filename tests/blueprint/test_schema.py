@@ -290,7 +290,6 @@ class TestExecutionParams:
         """Test default values for optional fields."""
         params = ExecutionParams(time_start="2000-01-01", time_end="2001-01-01")
         assert params.dt == "1d"
-        assert params.chunk_size is None
         assert params.forcing_interpolation == "constant"
 
     def test_time_fields(self):
@@ -315,12 +314,6 @@ class TestExecutionParams:
         """Test that unparseable datetime raises ValueError."""
         with pytest.raises(ValueError, match="Invalid datetime format"):
             ExecutionParams(time_start="not-a-date", time_end="2001-01-01")
-
-    @pytest.mark.parametrize("chunk_size", [0, -1])
-    def test_non_positive_chunk_size_rejected(self, chunk_size):
-        """Test that non-positive chunk_size raises ValueError."""
-        with pytest.raises(ValueError, match="chunk_size must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", chunk_size=chunk_size)
 
     def test_inverted_time_range_rejected(self):
         """Test that time_end < time_start raises ValueError."""

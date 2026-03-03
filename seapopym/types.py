@@ -14,4 +14,3 @@ Outputs = dict[str, Array]
 # Callable contracts for optimization
 LossFn = Callable[[Params], Array]  # params -> scalar to minimize
 PredictFn = Callable[[Params], Array]  # params -> prediction array
-LogPosteriorFn = Callable[[Params], Array]  # params -> scalar to maximize

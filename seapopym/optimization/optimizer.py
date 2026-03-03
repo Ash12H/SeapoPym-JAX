@@ -2,7 +2,7 @@
 
 Orchestrates the calibration pipeline: assembles a ``loss_fn`` from
 Runner + PriorSet + Objectives, then dispatches to the appropriate
-low-level optimizer (gradient, evolutionary, or hybrid).
+low-level optimizer (gradient or evolutionary).
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 
+from seapopym.engine.runner import Runner
 from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.loss import mse, nrmse, rmse
 from seapopym.optimization.objective import Objective, PreparedObjective
 from seapopym.optimization.prior import PriorSet
-from seapopym.optimization.runner import CalibrationRunner
 from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
@@ -54,14 +54,14 @@ class Optimizer:
     then dispatches to a low-level optimizer based on ``strategy``.
 
     Args:
-        runner: Execution strategy (from :class:`CalibrationRunner`).
+        runner: Execution strategy (from :class:`Runner`).
         priors: Defines which parameters are free and their constraints.
         objectives: List of ``(Objective, metric, weight)`` tuples.
-            *metric* can be a string name (``"rmse"``, ``"nrmse_std"``, …)
-            or a callable ``(predictions, observations) → scalar``.
+            *metric* can be a string name (``"rmse"``, ``"nrmse_std"``, ...)
+            or a callable ``(predictions, observations) -> scalar``.
         strategy: Optimization algorithm.  Gradient-based: ``"adam"``,
             ``"sgd"``, ``"rmsprop"``, ``"adagrad"``.  Evolutionary:
-            ``"cma_es"``, ``"simple_ga"``.  Hybrid: ``"hybrid"``.
+            ``"cma_es"``, ``"simple_ga"``.
         strategy_kwargs: Extra keyword arguments forwarded to the
             low-level optimizer constructor (e.g. ``learning_rate``,
             ``popsize``).
@@ -69,26 +69,25 @@ class Optimizer:
     Example::
 
         optimizer = Optimizer(
-            runner=CalibrationRunner.standard(),
+            runner=Runner.optimization(),
             priors=PriorSet(priors={"growth_rate": Uniform(0.01, 1.0)}),
             objectives=[
                 (Objective(observations=obs_xr, target="biomass"), "nrmse_std", 1.0),
             ],
-            strategy="adam",
-            learning_rate=0.1,
+            strategy="cma_es",
         )
-        result = optimizer.run(model, n_steps=200)
+        result = optimizer.run(model, n_generations=100)
     """
 
     def __init__(
         self,
-        runner: CalibrationRunner,
+        runner: Runner,
         priors: PriorSet,
         objectives: list[tuple[Objective, str | Callable, float]],
-        strategy: str = "adam",
+        strategy: str = "cma_es",
         **strategy_kwargs: Any,
     ) -> None:
-        all_strategies = GRADIENT_STRATEGIES | EVOLUTIONARY_STRATEGIES | {"hybrid"}
+        all_strategies = GRADIENT_STRATEGIES | EVOLUTIONARY_STRATEGIES
         if strategy not in all_strategies:
             msg = f"Unknown strategy '{strategy}'. Available: {sorted(all_strategies)}"
             raise ValueError(msg)
@@ -131,7 +130,7 @@ class Optimizer:
         model: CompiledModel,
         prepared: list[tuple[PreparedObjective, Callable, float]],
     ) -> Callable[[Params], Array]:
-        """Build the composite loss: Σ(w_i × metric_i) - log_prior."""
+        """Build the composite loss: sum(w_i * metric_i) + prior_penalty."""
         runner = self.runner
         priors = self.priors
 
@@ -143,8 +142,9 @@ class Optimizer:
                 pred = p.extract_fn(outputs)
                 total = total + weight * metric_fn(pred, p.obs_array)
 
-            # Prior regularization: -log_prob penalizes unlikely params
-            total = total - priors.log_prob(free_params)
+            # Prior penalty: -log_prob penalizes unlikely params
+            penalty = -priors.log_prob(free_params)
+            total = total + penalty
             return total
 
         return loss_fn
@@ -176,15 +176,6 @@ class Optimizer:
                 **self.strategy_kwargs,
             )
             return opt_evo.run(loss_fn, initial_params, **run_kwargs)
-
-        if self.strategy == "hybrid":
-            from seapopym.optimization.hybrid import HybridOptimizer
-
-            opt_hybrid = HybridOptimizer(
-                bounds=bounds,
-                **self.strategy_kwargs,
-            )
-            return opt_hybrid.run(loss_fn, initial_params, **run_kwargs)
 
         msg = f"Unknown strategy '{self.strategy}'"
         raise ValueError(msg)
