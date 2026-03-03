@@ -280,7 +280,7 @@ config = Config.from_dict(
             "gamma_tau_r": {"value": LMTL_GAMMA_TAU_R},
             "t_ref": {"value": LMTL_T_REF},
             "efficiency": {"value": LMTL_E},
-            "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+            "cohort_ages": {"value": cohort_ages_sec.tolist()},
             "day_layer": {"value": LMTL_DAY_LAYER},
             "night_layer": {"value": LMTL_NIGHT_LAYER},
         },

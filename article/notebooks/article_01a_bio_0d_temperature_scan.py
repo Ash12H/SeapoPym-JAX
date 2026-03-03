@@ -323,7 +323,7 @@ for i, T in enumerate(TEMPERATURES):
                 "gamma_tau_r": {"value": params_dict["gamma_tau_r"]},
                 "t_ref": {"value": params_dict["t_ref"]},
                 "efficiency": {"value": LMTL_E},
-                "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+                "cohort_ages": {"value": cohort_ages_sec.tolist()},
             },
             "forcings": {"temperature": temp_da, "primary_production": npp_da},
             "initial_state": {

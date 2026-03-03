@@ -148,9 +148,9 @@ config = Config.from_dict(
             "gamma_tau_r": {"value": TRUE_PARAMS["gamma_tau_r"]},
             "t_ref": {"value": TRUE_PARAMS["t_ref"]},
             "efficiency": {"value": TRUE_PARAMS["efficiency"]},
-            "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
-            "day_layer": xr.DataArray([0], dims=["F"]),
-            "night_layer": xr.DataArray([0], dims=["F"]),
+            "cohort_ages": {"value": cohort_ages_sec.tolist()},
+            "day_layer": {"value": [0]},
+            "night_layer": {"value": [0]},
             "latitude": {"value": LATITUDE},
         },
         "forcings": {
