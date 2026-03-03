@@ -1,15 +1,33 @@
-"""Benchmark: Zalesak Slotted Disk Test with JAX Transport.
+# %% [markdown]
+# # Zalesak Slotted Disk Test — JAX Transport
+#
+# Classical benchmark for advection schemes (Zalesak, 1979). A **slotted disk**
+# (binary 0/1 field with a rectangular slot cut out) is placed off-center in the
+# domain and advected by a **solid-body rotation** field centered at the domain
+# midpoint.
+#
+# Because solid-body rotation has a uniform angular velocity everywhere, every
+# point in the field rotates at the same rate — the disk undergoes **no
+# deformation**. After exactly one full revolution (`T = 2pi/omega`), the
+# analytical solution is identical to the initial condition. Any difference
+# measured at `t = T` is therefore purely **numerical error** from the transport
+# scheme (diffusion, dispersion, mass loss).
+#
+# **Convergence study**: the time step `dt` is derived from a fixed CFL number
+# (`dt = CFL * dx / v_max`), so refining the grid also refines `dt` while
+# keeping the CFL constant across resolutions. This is standard practice for
+# advection schemes whose spatial and temporal errors are coupled through the
+# CFL number — it ensures the scheme operates in the same regime at every
+# resolution. A final adjustment rounds `dt` so that `n_steps * dt` lands
+# exactly at `t = T` (one full revolution).
+#
+# This test validates:
+# 1. Mass conservation
+# 2. Numerical diffusion (profile spreading)
+# 3. Shape preservation
+# 4. JAX differentiability
 
-Compares the new JAX transport implementation against the reference Numba version
-using the classical Zalesak (1979) rotating slotted disk test.
-
-This test validates:
-- Mass conservation
-- Numerical diffusion (profile spreading)
-- Shape preservation
-- JAX differentiability
-"""
-
+# %%
 import time
 from pathlib import Path
 
@@ -24,10 +42,10 @@ from seapopym.functions.transport import BoundaryType, transport_tendency
 # Enable 64-bit precision for fair comparison with Numba (float64)
 jax.config.update("jax_enable_x64", True)
 
+# %% [markdown]
+# ## Configuration — Zalesak (1979) Slotted Disk
 
-# =============================================================================
-# CONFIGURATION - Zalesak (1979) Slotted Disk
-# =============================================================================
+# %%
 DOMAIN_SIZE = 1.0  # Normalized domain [0, 1]
 GRID_RESOLUTIONS = [32, 64, 128, 256, 512, 1024]  # Test resolutions
 
@@ -51,12 +69,10 @@ D_DIFFUSION = 0.0  # No physical diffusion
 
 omega = 2 * np.pi / ROTATION_PERIOD
 
+# %% [markdown]
+# ## Helper Functions
 
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
-
+# %%
 def create_slotted_disk(nx, ny):
     """Create a slotted disk (Zalesak test case)."""
     x = (jnp.arange(nx) + 0.5) / nx
@@ -178,132 +194,139 @@ def run_simulation_jax(n_cells, use_jit=True):
         "state_final": np.array(state),
     }
 
+# %% [markdown]
+# ## Run Simulations
 
-# =============================================================================
-# MAIN
-# =============================================================================
+# %%
+print("=" * 80)
+print("ZALESAK SLOTTED DISK TEST - JAX TRANSPORT")
+print("=" * 80)
 
-if __name__ == "__main__":
-    print("=" * 80)
-    print("ZALESAK SLOTTED DISK TEST - JAX TRANSPORT")
-    print("=" * 80)
+results = []
 
-    results = []
+for n_cells in GRID_RESOLUTIONS:
+    print(f"\n--- Resolution: {n_cells}x{n_cells} ---")
+    res = run_simulation_jax(n_cells, use_jit=True)
+    results.append(res)
 
-    for n_cells in GRID_RESOLUTIONS:
-        print(f"\n--- Resolution: {n_cells}x{n_cells} ---")
-        res = run_simulation_jax(n_cells, use_jit=True)
-        results.append(res)
+    print(f"  Steps: {res['n_steps']}, Time: {res['elapsed_s']:.2f}s")
+    print(f"  Mass error: {res['mass_error_pct']:.2e}%")
+    print(f"  NRMSE: {res['nrmse']:.4f}")
+    print(f"  Max preservation: {res['max_preservation']:.4f}")
 
-        print(f"  Steps: {res['n_steps']}, Time: {res['elapsed_s']:.2f}s")
-        print(f"  Mass error: {res['mass_error_pct']:.2e}%")
-        print(f"  NRMSE: {res['nrmse']:.4f}")
-        print(f"  Max preservation: {res['max_preservation']:.4f}")
+# %% [markdown]
+# ## Summary & Convergence
 
-    # Summary table
-    print("\n" + "=" * 80)
-    print("SUMMARY")
-    print("=" * 80)
-    print(f"{'Resolution':<12} {'Steps':<8} {'Time [s]':<10} {'Mass Err %':<12} {'NRMSE':<10} {'Max Pres':<10}")
-    print("-" * 80)
-    for r in results:
-        print(
-            f"{r['n_cells']}x{r['n_cells']:<6} {r['n_steps']:<8} {r['elapsed_s']:<10.2f} "
-            f"{r['mass_error_pct']:<12.2e} {r['nrmse']:<10.4f} {r['max_preservation']:<10.4f}"
-        )
+# %%
+print("\n" + "=" * 80)
+print("SUMMARY")
+print("=" * 80)
+print(f"{'Resolution':<12} {'Steps':<8} {'Time [s]':<10} {'Mass Err %':<12} {'NRMSE':<10} {'Max Pres':<10}")
+print("-" * 80)
+for r in results:
+    print(
+        f"{r['n_cells']}x{r['n_cells']:<6} {r['n_steps']:<8} {r['elapsed_s']:<10.2f} "
+        f"{r['mass_error_pct']:<12.2e} {r['nrmse']:<10.4f} {r['max_preservation']:<10.4f}"
+    )
 
-    # Convergence analysis
-    dx_values = np.array([DOMAIN_SIZE / r["n_cells"] for r in results])
-    nrmse_values = np.array([r["nrmse"] for r in results])
+# Convergence analysis
+dx_values = np.array([DOMAIN_SIZE / r["n_cells"] for r in results])
+nrmse_values = np.array([r["nrmse"] for r in results])
 
-    log_dx = np.log10(dx_values)
-    log_nrmse = np.log10(nrmse_values)
-    slope, intercept = np.polyfit(log_dx, log_nrmse, 1)
+log_dx = np.log10(dx_values)
+log_nrmse = np.log10(nrmse_values)
+slope, intercept = np.polyfit(log_dx, log_nrmse, 1)
 
-    print(f"\nConvergence order (slope): {slope:.2f}")
+print(f"\nConvergence order (slope): {slope:.2f}")
 
-    # Test differentiability
-    print("\n--- Testing JAX Differentiability ---")
-    n_test = 32
-    state = create_slotted_disk(n_test, n_test)
-    u, v = create_rotation_velocity(n_test, n_test)
-    dx = dy = DOMAIN_SIZE / n_test
-    dx_arr = jnp.full((n_test, n_test), dx)
-    dy_arr = jnp.full((n_test, n_test), dy)
-    D_arr = jnp.zeros((n_test, n_test))
-    mask = jnp.ones((n_test, n_test))
-    cell_area = dx_arr * dy_arr
+# %% [markdown]
+# ## Differentiability Test
 
-    def loss_fn(state):
-        """Compute sum of squared transport tendencies for gradient testing."""
-        adv, diff = transport_tendency(
-            state,
-            u,
-            v,
-            D_arr,
-            dx_arr,
-            dy_arr,
-            dy_arr,
-            dx_arr,
-            cell_area,
-            mask,
-            bc_north=0,
-            bc_south=0,
-            bc_east=0,
-            bc_west=0,
-        )
-        return jnp.sum((adv + diff) ** 2)
+# %%
+print("\n--- Testing JAX Differentiability ---")
+n_test = 32
+state = create_slotted_disk(n_test, n_test)
+u, v = create_rotation_velocity(n_test, n_test)
+dx = dy = DOMAIN_SIZE / n_test
+dx_arr = jnp.full((n_test, n_test), dx)
+dy_arr = jnp.full((n_test, n_test), dy)
+D_arr = jnp.zeros((n_test, n_test))
+mask = jnp.ones((n_test, n_test))
+cell_area = dx_arr * dy_arr
 
-    grad = jax.grad(loss_fn)(state)
-    print(f"  Gradient shape: {grad.shape}")
-    print(f"  Gradient has NaN: {bool(jnp.any(jnp.isnan(grad)))}")
-    print(f"  Gradient non-zero: {bool(jnp.any(grad != 0))}")
-    print("  ✅ Differentiability OK")
+def loss_fn(state):
+    """Compute sum of squared transport tendencies for gradient testing."""
+    adv, diff = transport_tendency(
+        state,
+        u,
+        v,
+        D_arr,
+        dx_arr,
+        dy_arr,
+        dy_arr,
+        dx_arr,
+        cell_area,
+        mask,
+        bc_north=0,
+        bc_south=0,
+        bc_east=0,
+        bc_west=0,
+    )
+    return jnp.sum((adv + diff) ** 2)
 
-    # Plot comparison (3 columns x 4 rows: 6 pairs initial/final)
-    print("\n--- Generating Figure ---")
-    n_cols = 3
-    n_rows = 4
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+grad = jax.grad(loss_fn)(state)
+print(f"  Gradient shape: {grad.shape}")
+print(f"  Gradient has NaN: {bool(jnp.any(jnp.isnan(grad)))}")
+print(f"  Gradient non-zero: {bool(jnp.any(grad != 0))}")
 
-    for i, r in enumerate(results):
-        col = i % n_cols
-        row_init = (i // n_cols) * 2
-        row_final = row_init + 1
+# %% [markdown]
+# ## Visualization
 
-        axes[row_init, col].imshow(r["state_init"], origin="lower", cmap="viridis", vmin=0, vmax=1)
-        axes[row_init, col].set_title(f"Initial {r['n_cells']}x{r['n_cells']}")
-        axes[row_init, col].axis("off")
+# %%
+# Plot comparison (3 columns x 4 rows: 6 pairs initial/final)
+print("\n--- Generating Figure ---")
+n_cols = 3
+n_rows = 4
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
 
-        axes[row_final, col].imshow(r["state_final"], origin="lower", cmap="viridis", vmin=0, vmax=1)
-        axes[row_final, col].set_title(f"Final (NRMSE={r['nrmse']:.3f})")
-        axes[row_final, col].axis("off")
+for i, r in enumerate(results):
+    col = i % n_cols
+    row_init = (i // n_cols) * 2
+    row_final = row_init + 1
 
-    plt.suptitle("Zalesak Test - JAX Transport (1 revolution)", fontsize=14)
-    plt.tight_layout()
-    Path("examples/images").mkdir(parents=True, exist_ok=True)
-    fields_file = "examples/images/02_transport_zalesak_jax_fields.png"
-    plt.savefig(fields_file, dpi=150)
-    print(f"  ✅ Saved: {fields_file}")
+    axes[row_init, col].imshow(r["state_init"], origin="lower", cmap="viridis", vmin=0, vmax=1)
+    axes[row_init, col].set_title(f"Initial {r['n_cells']}x{r['n_cells']}")
+    axes[row_init, col].axis("off")
 
-    # Convergence plot (NRMSE vs resolution)
-    fig, ax = plt.subplots(figsize=(6, 4))
-    resolutions = np.array([r["n_cells"] for r in results])
-    nrmse_values = np.array([r["nrmse"] for r in results])
+    axes[row_final, col].imshow(r["state_final"], origin="lower", cmap="viridis", vmin=0, vmax=1)
+    axes[row_final, col].set_title(f"Final (NRMSE={r['nrmse']:.3f})")
+    axes[row_final, col].axis("off")
 
-    ax.loglog(resolutions, nrmse_values, "o-", color="tab:blue", linewidth=2, markersize=7)
-    ax.loglog(resolutions, nrmse_values[0] * (resolutions[0] / resolutions), "--",
-              color="gray", alpha=0.5, label=f"Order 1 (slope={slope:.2f})")
-    for i, r in enumerate(results):
-        ax.annotate(f"{r['nrmse']:.3f}", (resolutions[i], nrmse_values[i]),
-                    textcoords="offset points", xytext=(5, 8), fontsize=8)
-    ax.set_xlabel("Grid resolution (N)")
-    ax.set_ylabel("NRMSE")
-    ax.set_title(f"Convergence (slope={slope:.2f})")
-    ax.legend()
-    ax.grid(True, alpha=0.3, which="both")
-    fig.tight_layout()
-    convergence_file = "examples/images/02_transport_zalesak_jax_convergence.png"
-    plt.savefig(convergence_file, dpi=150)
-    print(f"  ✅ Saved: {convergence_file}")
-    plt.show()
+plt.suptitle("Zalesak Test - JAX Transport (1 revolution)", fontsize=14)
+plt.tight_layout()
+Path("examples/images").mkdir(parents=True, exist_ok=True)
+fields_file = "examples/images/02_transport_zalesak_jax_fields.png"
+plt.savefig(fields_file, dpi=150)
+print(f"  Saved: {fields_file}")
+
+# %%
+# Convergence plot (NRMSE vs resolution)
+fig, ax = plt.subplots(figsize=(6, 4))
+resolutions = np.array([r["n_cells"] for r in results])
+nrmse_values = np.array([r["nrmse"] for r in results])
+
+ax.loglog(resolutions, nrmse_values, "o-", color="tab:blue", linewidth=2, markersize=7)
+ax.loglog(resolutions, nrmse_values[0] * (resolutions[0] / resolutions), "--",
+          color="gray", alpha=0.5, label=f"Order 1 (slope={slope:.2f})")
+for i, r in enumerate(results):
+    ax.annotate(f"{r['nrmse']:.3f}", (resolutions[i], nrmse_values[i]),
+                textcoords="offset points", xytext=(5, 8), fontsize=8)
+ax.set_xlabel("Grid resolution (N)")
+ax.set_ylabel("NRMSE")
+ax.set_title(f"Convergence (slope={slope:.2f})")
+ax.legend()
+ax.grid(True, alpha=0.3, which="both")
+fig.tight_layout()
+convergence_file = "examples/images/02_transport_zalesak_jax_convergence.png"
+plt.savefig(convergence_file, dpi=150)
+print(f"  Saved: {convergence_file}")

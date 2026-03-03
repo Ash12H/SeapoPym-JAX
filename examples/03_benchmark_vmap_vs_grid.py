@@ -1,14 +1,15 @@
-"""Benchmark LMTL: GPU speedup — vmap parallelism vs spatial grid scaling.
+# %% [markdown]
+# # Benchmark LMTL: GPU speedup — vmap parallelism vs spatial grid scaling
+#
+# Compares two sources of parallelism at equivalent operation counts:
+# - **vmap**: N independent simulations on a 1x1 grid
+# - **grid**: 1 simulation on a NxN grid (N² cells)
+#
+# Outputs:
+# - `examples/images/03_benchmark_vmap_vs_grid_time.png` (execution times)
+# - `examples/images/03_benchmark_vmap_vs_grid_speedup.png` (GPU speedup comparison)
 
-Compares two sources of parallelism at equivalent operation counts:
-- vmap: N independent simulations on a 1x1 grid
-- grid: 1 simulation on a NxN grid (N² cells)
-
-Outputs:
-- examples/images/03_benchmark_vmap_vs_grid_time.png     (execution times)
-- examples/images/03_benchmark_vmap_vs_grid_speedup.png  (GPU speedup comparison)
-"""
-
+# %%
 import time
 from pathlib import Path
 
@@ -25,10 +26,10 @@ from seapopym.compiler import compile_model
 from seapopym.engine.step import build_step_fn
 from seapopym.models import LMTL_NO_TRANSPORT
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
+# %% [markdown]
+# ## Configuration
 
+# %%
 TRUE_PARAMS = {
     "lambda_0": 1 / 150 / 86400,
     "gamma_lambda": 0.15,
@@ -44,7 +45,7 @@ LATITUDE = 30.0
 
 # Parallel operation counts to benchmark
 N_OPS = [1, 100, 10000, 1000000]
-# For grid: closest square side → actual cells
+# For grid: closest square side -> actual cells
 GRID_SIDES = {n: int(np.round(np.sqrt(n))) for n in N_OPS}
 
 SIM_DAYS = 30
@@ -53,10 +54,10 @@ N_REPEATS = 10
 
 IMAGE_DIR = Path("examples/images")
 
-# =============================================================================
-# COMMON SETUP
-# =============================================================================
+# %% [markdown]
+# ## Common Setup
 
+# %%
 blueprint = LMTL_NO_TRANSPORT
 
 max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
@@ -71,10 +72,10 @@ n_days = (end_pd - start_pd).days + 5
 dates = pd.date_range(start=start_pd, periods=n_days, freq="D")
 day_of_year = dates.dayofyear.values
 
-# =============================================================================
-# VMAP BENCHMARK (1x1 grid, N parallel simulations)
-# =============================================================================
+# %% [markdown]
+# ## Vmap Benchmark (1x1 grid, N parallel simulations)
 
+# %%
 # Build 1x1 model once for vmap
 ny_1, nx_1 = 1, 1
 lat_1, lon_1 = np.arange(ny_1), np.arange(nx_1)
@@ -182,12 +183,10 @@ def benchmark_vmap(n_sims: int, device_name: str, n_repeats: int = 1) -> tuple[f
 
         return float(np.mean(times)), float(np.std(times))
 
+# %% [markdown]
+# ## Grid Benchmark (single simulation, NxN grid)
 
-# =============================================================================
-# GRID BENCHMARK (single simulation, NxN grid)
-# =============================================================================
-
-
+# %%
 def build_grid_model(ny: int, nx: int):
     """Compile model for a given grid size."""
     lat = np.arange(ny)
@@ -286,197 +285,196 @@ def benchmark_grid(ny: int, nx: int, device_name: str, n_repeats: int = 1) -> tu
 
         return float(np.mean(times)), float(np.std(times))
 
+# %% [markdown]
+# ## Run Benchmark
 
-# =============================================================================
-# MAIN
-# =============================================================================
+# %%
+print("=" * 70)
+print("BENCHMARK: LMTL — vmap parallelism vs spatial grid scaling")
+print("=" * 70)
+print(f"JAX version: {jax.__version__}")
+print(f"Available devices: {jax.devices()}")
+print(f"Simulation: {SIM_DAYS} days, dt={DT}, repeats={N_REPEATS}")
+print(f"Parallel ops: {N_OPS}")
+print()
 
-if __name__ == "__main__":
-    print("=" * 70)
-    print("BENCHMARK: LMTL — vmap parallelism vs spatial grid scaling")
-    print("=" * 70)
-    print(f"JAX version: {jax.__version__}")
-    print(f"Available devices: {jax.devices()}")
-    print(f"Simulation: {SIM_DAYS} days, dt={DT}, repeats={N_REPEATS}")
-    print(f"Parallel ops: {N_OPS}")
-    print()
+# Detect GPU
+try:
+    gpu_devices = jax.devices("gpu")
+    has_gpu = len(gpu_devices) > 0
+    if has_gpu:
+        print(f"GPU detected: {gpu_devices[0]}")
+except RuntimeError:
+    has_gpu = False
+    print("No GPU detected — CPU-only benchmark")
 
-    # Detect GPU
+if not has_gpu:
+    print("This benchmark requires a GPU to compare speedups. Exiting.")
+    exit(0)
+
+# Results: {n_ops: (mean, std)}
+vmap_cpu: dict[int, tuple[float, float]] = {}
+vmap_gpu: dict[int, tuple[float, float]] = {}
+grid_cpu: dict[int, tuple[float, float]] = {}
+grid_gpu: dict[int, tuple[float, float]] = {}
+
+for n in N_OPS:
+    side = GRID_SIDES[n]
+    actual_cells = side * side
+    print(f"\n{'='*50}")
+    print(f"N = {n:,} parallel ops")
+    print(f"{'='*50}")
+
+    # --- VMAP ---
+    print(f"\n  [vmap] {n} simulations on 1x1 grid")
+    print(f"    CPU...", end=" ", flush=True)
     try:
-        gpu_devices = jax.devices("gpu")
-        has_gpu = len(gpu_devices) > 0
-        if has_gpu:
-            print(f"GPU detected: {gpu_devices[0]}")
-    except RuntimeError:
-        has_gpu = False
-        print("No GPU detected — CPU-only benchmark")
+        mean, std = benchmark_vmap(n, "cpu", N_REPEATS)
+        vmap_cpu[n] = (mean, std)
+        print(f"{mean:.4f}s ± {std:.4f}s")
+    except Exception as e:
+        print(f"FAILED: {e}")
 
-    if not has_gpu:
-        print("This benchmark requires a GPU to compare speedups. Exiting.")
-        exit(0)
+    print(f"    GPU...", end=" ", flush=True)
+    try:
+        mean, std = benchmark_vmap(n, "gpu", N_REPEATS)
+        vmap_gpu[n] = (mean, std)
+        speedup = vmap_cpu[n][0] / mean if n in vmap_cpu and mean > 0 else 0
+        print(f"{mean:.4f}s ± {std:.4f}s  (speedup: {speedup:.1f}x)")
+    except Exception as e:
+        print(f"FAILED: {e}")
 
-    # Results: {n_ops: (mean, std)}
-    vmap_cpu: dict[int, tuple[float, float]] = {}
-    vmap_gpu: dict[int, tuple[float, float]] = {}
-    grid_cpu: dict[int, tuple[float, float]] = {}
-    grid_gpu: dict[int, tuple[float, float]] = {}
+    # --- GRID ---
+    print(f"\n  [grid] 1 simulation on {side}x{side} grid ({actual_cells:,} cells)")
+    print(f"    CPU...", end=" ", flush=True)
+    try:
+        mean, std = benchmark_grid(side, side, "cpu", N_REPEATS)
+        grid_cpu[n] = (mean, std)
+        print(f"{mean:.4f}s ± {std:.4f}s")
+    except Exception as e:
+        print(f"FAILED: {e}")
 
-    for n in N_OPS:
-        side = GRID_SIDES[n]
-        actual_cells = side * side
-        print(f"\n{'='*50}")
-        print(f"N = {n:,} parallel ops")
-        print(f"{'='*50}")
+    print(f"    GPU...", end=" ", flush=True)
+    try:
+        mean, std = benchmark_grid(side, side, "gpu", N_REPEATS)
+        grid_gpu[n] = (mean, std)
+        speedup = grid_cpu[n][0] / mean if n in grid_cpu and mean > 0 else 0
+        print(f"{mean:.4f}s ± {std:.4f}s  (speedup: {speedup:.1f}x)")
+    except Exception as e:
+        print(f"FAILED: {e}")
 
-        # --- VMAP ---
-        print(f"\n  [vmap] {n} simulations on 1x1 grid")
-        print(f"    CPU...", end=" ", flush=True)
-        try:
-            mean, std = benchmark_vmap(n, "cpu", N_REPEATS)
-            vmap_cpu[n] = (mean, std)
-            print(f"{mean:.4f}s ± {std:.4f}s")
-        except Exception as e:
-            print(f"FAILED: {e}")
+# %% [markdown]
+# ## Summary
 
-        print(f"    GPU...", end=" ", flush=True)
-        try:
-            mean, std = benchmark_vmap(n, "gpu", N_REPEATS)
-            vmap_gpu[n] = (mean, std)
-            speedup = vmap_cpu[n][0] / mean if n in vmap_cpu and mean > 0 else 0
-            print(f"{mean:.4f}s ± {std:.4f}s  (speedup: {speedup:.1f}x)")
-        except Exception as e:
-            print(f"FAILED: {e}")
+# %%
+print(f"\n{'='*70}")
+print(f"SUMMARY  (mean ± std over {N_REPEATS} runs)")
+print(f"{'='*70}")
 
-        # --- GRID ---
-        print(f"\n  [grid] 1 simulation on {side}x{side} grid ({actual_cells:,} cells)")
-        print(f"    CPU...", end=" ", flush=True)
-        try:
-            mean, std = benchmark_grid(side, side, "cpu", N_REPEATS)
-            grid_cpu[n] = (mean, std)
-            print(f"{mean:.4f}s ± {std:.4f}s")
-        except Exception as e:
-            print(f"FAILED: {e}")
+print(f"\n{'N ops':>10}  {'Mode':>6}  {'CPU (s)':>18}  {'GPU (s)':>18}  {'Speedup':>8}")
+print("-" * 70)
 
-        print(f"    GPU...", end=" ", flush=True)
-        try:
-            mean, std = benchmark_grid(side, side, "gpu", N_REPEATS)
-            grid_gpu[n] = (mean, std)
-            speedup = grid_cpu[n][0] / mean if n in grid_cpu and mean > 0 else 0
-            print(f"{mean:.4f}s ± {std:.4f}s  (speedup: {speedup:.1f}x)")
-        except Exception as e:
-            print(f"FAILED: {e}")
-
-    # =========================================================================
-    # SUMMARY
-    # =========================================================================
-
-    print(f"\n{'='*70}")
-    print(f"SUMMARY  (mean ± std over {N_REPEATS} runs)")
-    print(f"{'='*70}")
-
-    print(f"\n{'N ops':>10}  {'Mode':>6}  {'CPU (s)':>18}  {'GPU (s)':>18}  {'Speedup':>8}")
-    print("-" * 70)
-
-    for n in N_OPS:
-        side = GRID_SIDES[n]
-        # vmap row
-        row = f"{n:>10,}  {'vmap':>6}"
+for n in N_OPS:
+    side = GRID_SIDES[n]
+    # vmap row
+    row = f"{n:>10,}  {'vmap':>6}"
+    if n in vmap_cpu:
+        m, s = vmap_cpu[n]
+        row += f"  {m:>8.4f} ± {s:.4f}"
+    else:
+        row += f"  {'—':>18}"
+    if n in vmap_gpu:
+        m, s = vmap_gpu[n]
+        row += f"  {m:>8.4f} ± {s:.4f}"
         if n in vmap_cpu:
-            m, s = vmap_cpu[n]
-            row += f"  {m:>8.4f} ± {s:.4f}"
-        else:
-            row += f"  {'—':>18}"
-        if n in vmap_gpu:
-            m, s = vmap_gpu[n]
-            row += f"  {m:>8.4f} ± {s:.4f}"
-            if n in vmap_cpu:
-                row += f"  {vmap_cpu[n][0] / m:>8.1f}x"
-        else:
-            row += f"  {'—':>18}  {'—':>8}"
-        print(row)
+            row += f"  {vmap_cpu[n][0] / m:>8.1f}x"
+    else:
+        row += f"  {'—':>18}  {'—':>8}"
+    print(row)
 
-        # grid row
-        actual_cells = side * side
-        row = f"{'':>10}  {f'{side}²':>6}"
+    # grid row
+    actual_cells = side * side
+    row = f"{'':>10}  {f'{side}²':>6}"
+    if n in grid_cpu:
+        m, s = grid_cpu[n]
+        row += f"  {m:>8.4f} ± {s:.4f}"
+    else:
+        row += f"  {'—':>18}"
+    if n in grid_gpu:
+        m, s = grid_gpu[n]
+        row += f"  {m:>8.4f} ± {s:.4f}"
         if n in grid_cpu:
-            m, s = grid_cpu[n]
-            row += f"  {m:>8.4f} ± {s:.4f}"
-        else:
-            row += f"  {'—':>18}"
-        if n in grid_gpu:
-            m, s = grid_gpu[n]
-            row += f"  {m:>8.4f} ± {s:.4f}"
-            if n in grid_cpu:
-                row += f"  {grid_cpu[n][0] / m:>8.1f}x"
-        else:
-            row += f"  {'—':>18}  {'—':>8}"
-        print(row)
+            row += f"  {grid_cpu[n][0] / m:>8.1f}x"
+    else:
+        row += f"  {'—':>18}  {'—':>8}"
+    print(row)
 
-    # =========================================================================
-    # PLOTS
-    # =========================================================================
+# %% [markdown]
+# ## Visualization
 
-    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+# %%
+IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # --- Plot 1: Execution times (4 curves) ---
-    fig, ax = plt.subplots(figsize=(9, 5))
+# --- Plot 1: Execution times (4 curves) ---
+fig, ax = plt.subplots(figsize=(9, 5))
 
-    common_vmap = sorted(set(vmap_cpu.keys()) & set(vmap_gpu.keys()))
-    common_grid = sorted(set(grid_cpu.keys()) & set(grid_gpu.keys()))
+common_vmap = sorted(set(vmap_cpu.keys()) & set(vmap_gpu.keys()))
+common_grid = sorted(set(grid_cpu.keys()) & set(grid_gpu.keys()))
 
-    if vmap_cpu:
-        ns = sorted(vmap_cpu.keys())
-        ax.errorbar(ns, [vmap_cpu[n][0] for n in ns], yerr=[vmap_cpu[n][1] for n in ns],
-                     fmt="o--", label="vmap · CPU", color="tab:blue", linewidth=1.5, capsize=3, alpha=0.7)
-    if vmap_gpu:
-        ns = sorted(vmap_gpu.keys())
-        ax.errorbar(ns, [vmap_gpu[n][0] for n in ns], yerr=[vmap_gpu[n][1] for n in ns],
-                     fmt="o-", label="vmap · GPU", color="tab:blue", linewidth=2, capsize=3)
-    if grid_cpu:
-        ns = sorted(grid_cpu.keys())
-        ax.errorbar(ns, [grid_cpu[n][0] for n in ns], yerr=[grid_cpu[n][1] for n in ns],
-                     fmt="s--", label="grid · CPU", color="tab:red", linewidth=1.5, capsize=3, alpha=0.7)
-    if grid_gpu:
-        ns = sorted(grid_gpu.keys())
-        ax.errorbar(ns, [grid_gpu[n][0] for n in ns], yerr=[grid_gpu[n][1] for n in ns],
-                     fmt="s-", label="grid · GPU", color="tab:red", linewidth=2, capsize=3)
+if vmap_cpu:
+    ns = sorted(vmap_cpu.keys())
+    ax.errorbar(ns, [vmap_cpu[n][0] for n in ns], yerr=[vmap_cpu[n][1] for n in ns],
+                 fmt="o--", label="vmap · CPU", color="tab:blue", linewidth=1.5, capsize=3, alpha=0.7)
+if vmap_gpu:
+    ns = sorted(vmap_gpu.keys())
+    ax.errorbar(ns, [vmap_gpu[n][0] for n in ns], yerr=[vmap_gpu[n][1] for n in ns],
+                 fmt="o-", label="vmap · GPU", color="tab:blue", linewidth=2, capsize=3)
+if grid_cpu:
+    ns = sorted(grid_cpu.keys())
+    ax.errorbar(ns, [grid_cpu[n][0] for n in ns], yerr=[grid_cpu[n][1] for n in ns],
+                 fmt="s--", label="grid · CPU", color="tab:red", linewidth=1.5, capsize=3, alpha=0.7)
+if grid_gpu:
+    ns = sorted(grid_gpu.keys())
+    ax.errorbar(ns, [grid_gpu[n][0] for n in ns], yerr=[grid_gpu[n][1] for n in ns],
+                 fmt="s-", label="grid · GPU", color="tab:red", linewidth=2, capsize=3)
 
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("Parallel operations")
-    ax.set_ylabel("Execution time (s)")
-    ax.set_title(f"LMTL — Execution time: vmap vs grid (n={N_REPEATS})")
-    ax.legend()
-    ax.grid(True, alpha=0.3, which="both")
-    fig.tight_layout()
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlabel("Parallel operations")
+ax.set_ylabel("Execution time (s)")
+ax.set_title(f"LMTL — Execution time: vmap vs grid (n={N_REPEATS})")
+ax.legend()
+ax.grid(True, alpha=0.3, which="both")
+fig.tight_layout()
 
-    time_path = IMAGE_DIR / "03_benchmark_vmap_vs_grid_time.png"
-    plt.savefig(str(time_path), dpi=150)
-    print(f"\nPlot saved: {time_path}")
-    plt.close(fig)
+time_path = IMAGE_DIR / "03_benchmark_vmap_vs_grid_time.png"
+plt.savefig(str(time_path), dpi=150)
+print(f"\nPlot saved: {time_path}")
+plt.close(fig)
 
-    # --- Plot 2: Speedup comparison ---
-    fig, ax = plt.subplots(figsize=(9, 5))
+# %%
+# --- Plot 2: Speedup comparison ---
+fig, ax = plt.subplots(figsize=(9, 5))
 
-    if common_vmap:
-        speedups_vmap = [vmap_cpu[n][0] / vmap_gpu[n][0] for n in common_vmap]
-        ax.semilogx(common_vmap, speedups_vmap, "o-", label="vmap (N sims, 1x1)",
-                     color="tab:blue", linewidth=2, markersize=8)
+if common_vmap:
+    speedups_vmap = [vmap_cpu[n][0] / vmap_gpu[n][0] for n in common_vmap]
+    ax.semilogx(common_vmap, speedups_vmap, "o-", label="vmap (N sims, 1x1)",
+                 color="tab:blue", linewidth=2, markersize=8)
 
-    if common_grid:
-        speedups_grid = [grid_cpu[n][0] / grid_gpu[n][0] for n in common_grid]
-        ax.semilogx(common_grid, speedups_grid, "s-", label="grid (1 sim, NxN)",
-                     color="tab:red", linewidth=2, markersize=8)
+if common_grid:
+    speedups_grid = [grid_cpu[n][0] / grid_gpu[n][0] for n in common_grid]
+    ax.semilogx(common_grid, speedups_grid, "s-", label="grid (1 sim, NxN)",
+                 color="tab:red", linewidth=2, markersize=8)
 
-    ax.axhline(y=1, color="gray", linestyle="--", alpha=0.5)
-    ax.set_xlabel("Parallel operations")
-    ax.set_ylabel("GPU speedup (CPU time / GPU time)")
-    ax.set_title(f"LMTL — GPU speedup: vmap vs grid (n={N_REPEATS})")
-    ax.legend()
-    ax.grid(True, alpha=0.3, which="both")
-    fig.tight_layout()
+ax.axhline(y=1, color="gray", linestyle="--", alpha=0.5)
+ax.set_xlabel("Parallel operations")
+ax.set_ylabel("GPU speedup (CPU time / GPU time)")
+ax.set_title(f"LMTL — GPU speedup: vmap vs grid (n={N_REPEATS})")
+ax.legend()
+ax.grid(True, alpha=0.3, which="both")
+fig.tight_layout()
 
-    speedup_path = IMAGE_DIR / "03_benchmark_vmap_vs_grid_speedup.png"
-    plt.savefig(str(speedup_path), dpi=150)
-    print(f"Plot saved: {speedup_path}")
-    plt.close(fig)
+speedup_path = IMAGE_DIR / "03_benchmark_vmap_vs_grid_speedup.png"
+plt.savefig(str(speedup_path), dpi=150)
+print(f"Plot saved: {speedup_path}")
+plt.close(fig)

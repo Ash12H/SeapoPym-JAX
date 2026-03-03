@@ -1,12 +1,12 @@
-"""Benchmark LMTL: GPU execution time vs temporal chunk size.
+# %% [markdown]
+# # Benchmark LMTL: GPU execution time vs temporal chunk size
+#
+# Fixes a spatial grid and total simulation length, then varies the number
+# of timesteps processed per `jax.lax.scan` call (chunk size) using Runner.
+#
+# Output: `examples/images/04_benchmark_time_chunking.png`
 
-Fixes a spatial grid and total simulation length, then varies the number
-of timesteps processed per jax.lax.scan call (chunk size) using Runner.
-
-Outputs:
-- examples/images/04_benchmark_time_chunking.png
-"""
-
+# %%
 import time
 from pathlib import Path
 
@@ -22,10 +22,10 @@ from seapopym.compiler import compile_model
 from seapopym.engine.runner import Runner
 from seapopym.models import LMTL_NO_TRANSPORT
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
+# %% [markdown]
+# ## Configuration
 
+# %%
 TRUE_PARAMS = {
     "lambda_0": 1 / 150 / 86400,
     "gamma_lambda": 0.15,
@@ -51,10 +51,10 @@ N_REPEATS = 1
 
 IMAGE_DIR = Path("examples/images")
 
-# =============================================================================
-# BUILD MODEL
-# =============================================================================
+# %% [markdown]
+# ## Build Model
 
+# %%
 blueprint = LMTL_NO_TRANSPORT
 
 max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
@@ -125,12 +125,10 @@ model = compile_model(blueprint, config)
 n_timesteps = model.n_timesteps
 print(f"Model compiled: {n_timesteps} timesteps, {n_cohorts} cohorts")
 
+# %% [markdown]
+# ## Data Sizes
 
-# =============================================================================
-# DATA SIZES
-# =============================================================================
-
-
+# %%
 def _fmt_size(nbytes: int) -> str:
     if nbytes < 1024:
         return f"{nbytes} B"
@@ -173,12 +171,10 @@ print(f"\n  {'TOTAL':>22s}  {'':>25s}  {_fmt_size(total_bytes)}")
 print(f"  {'Forcings/chunk(C)':>22s}  {'':>25s}  C × {_fmt_size(forcings_per_step)}")
 print()
 
+# %% [markdown]
+# ## Benchmark
 
-# =============================================================================
-# BENCHMARK
-# =============================================================================
-
-
+# %%
 def benchmark_chunk(chunk_size: int, device_name: str, n_repeats: int = 1) -> tuple[float, float]:
     """Benchmark the full simulation via Runner on a given device.
 
@@ -198,103 +194,104 @@ def benchmark_chunk(chunk_size: int, device_name: str, n_repeats: int = 1) -> tu
 
     return float(np.mean(times)), float(np.std(times))
 
+# %% [markdown]
+# ## Run Benchmark
 
-# =============================================================================
-# MAIN
-# =============================================================================
+# %%
+print("=" * 70)
+print("BENCHMARK: LMTL — execution time vs temporal chunk size")
+print("=" * 70)
+print(f"JAX version: {jax.__version__}")
+print(f"Available devices: {jax.devices()}")
+print(f"Grid: {ny}x{nx} ({ny * nx:,} cells), {SIM_DAYS} days, repeats={N_REPEATS}")
+print(f"Chunk sizes: {CHUNK_SIZES}")
+print()
 
-if __name__ == "__main__":
-    print("=" * 70)
-    print("BENCHMARK: LMTL — execution time vs temporal chunk size")
-    print("=" * 70)
-    print(f"JAX version: {jax.__version__}")
-    print(f"Available devices: {jax.devices()}")
-    print(f"Grid: {ny}x{nx} ({ny * nx:,} cells), {SIM_DAYS} days, repeats={N_REPEATS}")
-    print(f"Chunk sizes: {CHUNK_SIZES}")
-    print()
+# Detect devices
+devices = ["cpu"]
+try:
+    gpu_devices = jax.devices("gpu")
+    if gpu_devices:
+        devices.append("gpu")
+        print(f"GPU: {gpu_devices[0]}")
+except RuntimeError:
+    print("No GPU detected — CPU-only benchmark")
 
-    # Detect devices
-    devices = ["cpu"]
-    try:
-        gpu_devices = jax.devices("gpu")
-        if gpu_devices:
-            devices.append("gpu")
-            print(f"GPU: {gpu_devices[0]}")
-    except RuntimeError:
-        print("No GPU detected — CPU-only benchmark")
+# Results: {device: {chunk_size: (mean, std)}}
+results: dict[str, dict[int, tuple[float, float]]] = {d: {} for d in devices}
 
-    # Results: {device: {chunk_size: (mean, std)}}
-    results: dict[str, dict[int, tuple[float, float]]] = {d: {} for d in devices}
+for cs in CHUNK_SIZES:
+    n_chunks = n_timesteps // cs
+    remainder = n_timesteps % cs
+    total_chunks = n_chunks + (1 if remainder else 0)
+    print(f"\n--- chunk_size={cs} ({total_chunks} chunks) ---")
 
-    for cs in CHUNK_SIZES:
-        n_chunks = n_timesteps // cs
-        remainder = n_timesteps % cs
-        total_chunks = n_chunks + (1 if remainder else 0)
-        print(f"\n--- chunk_size={cs} ({total_chunks} chunks) ---")
-
-        for dev_name in devices:
-            label = dev_name.upper()
-            print(f"  {label}...", end=" ", flush=True)
-            try:
-                mean, std = benchmark_chunk(cs, dev_name, N_REPEATS)
-                results[dev_name][cs] = (mean, std)
-                print(f"{mean:.4f}s ± {std:.4f}s")
-            except Exception as e:
-                print(f"FAILED: {e}")
-
-    # Summary
-    print(f"\n{'='*70}")
-    print(f"SUMMARY  (mean ± std over {N_REPEATS} runs)")
-    print(f"{'='*70}")
-
-    header = f"{'Chunk':>6} {'Chunks':>6}"
     for dev_name in devices:
-        header += f"  {dev_name.upper() + ' (s)':>18}"
-    print(header)
-    print("-" * len(header))
+        label = dev_name.upper()
+        print(f"  {label}...", end=" ", flush=True)
+        try:
+            mean, std = benchmark_chunk(cs, dev_name, N_REPEATS)
+            results[dev_name][cs] = (mean, std)
+            print(f"{mean:.4f}s ± {std:.4f}s")
+        except Exception as e:
+            print(f"FAILED: {e}")
 
-    for cs in CHUNK_SIZES:
-        n_chunks = n_timesteps // cs
-        remainder = n_timesteps % cs
-        total_chunks = n_chunks + (1 if remainder else 0)
-        row = f"{cs:>6} {total_chunks:>6}"
-        for dev_name in devices:
-            if cs in results[dev_name]:
-                m, s = results[dev_name][cs]
-                row += f"  {m:>8.4f} ± {s:.4f}"
-            else:
-                row += f"  {'—':>18}"
-        print(row)
+# %% [markdown]
+# ## Summary
 
-    # =========================================================================
-    # PLOT
-    # =========================================================================
+# %%
+print(f"\n{'='*70}")
+print(f"SUMMARY  (mean ± std over {N_REPEATS} runs)")
+print(f"{'='*70}")
 
-    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+header = f"{'Chunk':>6} {'Chunks':>6}"
+for dev_name in devices:
+    header += f"  {dev_name.upper() + ' (s)':>18}"
+print(header)
+print("-" * len(header))
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-
-    styles = {"cpu": ("o-", "tab:blue"), "gpu": ("s-", "tab:red")}
+for cs in CHUNK_SIZES:
+    n_chunks = n_timesteps // cs
+    remainder = n_timesteps % cs
+    total_chunks = n_chunks + (1 if remainder else 0)
+    row = f"{cs:>6} {total_chunks:>6}"
     for dev_name in devices:
-        if results[dev_name]:
-            fmt, color = styles[dev_name]
-            cs_list = sorted(results[dev_name].keys())
-            means = [results[dev_name][cs][0] for cs in cs_list]
-            stds = [results[dev_name][cs][1] for cs in cs_list]
-            ax.errorbar(cs_list, means, yerr=stds, fmt=fmt, label=dev_name.upper(),
-                         color=color, linewidth=2, capsize=3, markersize=8)
+        if cs in results[dev_name]:
+            m, s = results[dev_name][cs]
+            row += f"  {m:>8.4f} ± {s:.4f}"
+        else:
+            row += f"  {'—':>18}"
+    print(row)
 
-    ax.set_xscale("log", base=2)
-    ax.set_xlabel("Chunk size (timesteps per lax.scan call)")
-    ax.set_ylabel("Execution time (s)")
-    ax.set_title(f"LMTL — Chunk size vs execution time ({ny}x{nx} grid, {SIM_DAYS} days, n={N_REPEATS})")
-    ax.set_xticks(CHUNK_SIZES)
-    ax.set_xticklabels([str(cs) for cs in CHUNK_SIZES])
-    ax.legend()
-    ax.grid(True, alpha=0.3, which="both")
-    fig.tight_layout()
+# %% [markdown]
+# ## Visualization
 
-    plot_path = IMAGE_DIR / "04_benchmark_time_chunking.png"
-    plt.savefig(str(plot_path), dpi=150)
-    print(f"\nPlot saved: {plot_path}")
-    plt.close(fig)
+# %%
+IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+styles = {"cpu": ("o-", "tab:blue"), "gpu": ("s-", "tab:red")}
+for dev_name in devices:
+    if results[dev_name]:
+        fmt, color = styles[dev_name]
+        cs_list = sorted(results[dev_name].keys())
+        means = [results[dev_name][cs][0] for cs in cs_list]
+        stds = [results[dev_name][cs][1] for cs in cs_list]
+        ax.errorbar(cs_list, means, yerr=stds, fmt=fmt, label=dev_name.upper(),
+                     color=color, linewidth=2, capsize=3, markersize=8)
+
+ax.set_xscale("log", base=2)
+ax.set_xlabel("Chunk size (timesteps per lax.scan call)")
+ax.set_ylabel("Execution time (s)")
+ax.set_title(f"LMTL — Chunk size vs execution time ({ny}x{nx} grid, {SIM_DAYS} days, n={N_REPEATS})")
+ax.set_xticks(CHUNK_SIZES)
+ax.set_xticklabels([str(cs) for cs in CHUNK_SIZES])
+ax.legend()
+ax.grid(True, alpha=0.3, which="both")
+fig.tight_layout()
+
+plot_path = IMAGE_DIR / "04_benchmark_time_chunking.png"
+plt.savefig(str(plot_path), dpi=150)
+print(f"\nPlot saved: {plot_path}")
+plt.close(fig)
