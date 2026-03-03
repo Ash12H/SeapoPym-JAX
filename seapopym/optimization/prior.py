@@ -225,7 +225,7 @@ class PriorSet:
         """Extract bounds for all parameters.
 
         Returns:
-            Dict of {param_name: (lower, upper)} suitable for GradientOptimizer/EvolutionaryOptimizer.
+            Dict of {param_name: (lower, upper)} suitable for optimizers.
         """
         return {name: prior.bounds for name, prior in self.priors.items()}
 

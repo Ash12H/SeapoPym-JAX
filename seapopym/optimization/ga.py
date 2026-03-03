@@ -1,0 +1,216 @@
+"""Simple Genetic Algorithm optimizer wrapping evosax SimpleGA.
+
+Single-run GA with typed arguments matching the underlying library.
+Handles Objective setup, loss building, normalization, and optimization.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+import jax
+import jax.numpy as jnp
+import optax
+from evosax.algorithms import SimpleGA
+
+from seapopym.optimization._common import (
+    build_bounds_arrays,
+    build_default_priors,
+    build_loss_fn,
+    denormalize,
+    flatten_params,
+    normalize,
+    setup_objectives,
+    unflatten_params,
+)
+from seapopym.optimization.gradient_optimizer import OptimizeResult
+from seapopym.optimization.objective import Objective
+from seapopym.optimization.prior import PriorSet
+from seapopym.types import Array, Params
+
+if TYPE_CHECKING:
+    from seapopym.compiler.model import CompiledModel
+    from seapopym.engine.runner import Runner
+
+logger = logging.getLogger(__name__)
+
+
+class GAOptimizer:
+    """Simple Genetic Algorithm optimizer for model calibration.
+
+    Wraps evosax ``SimpleGA`` with a high-level interface that handles
+    objective setup, loss building, and parameter normalization.
+
+    Args:
+        runner: Execution strategy (from :class:`Runner`).
+        objectives: List of ``(Objective, metric, weight)`` tuples.
+        bounds: Parameter bounds as ``{name: (min, max)}``.
+        priors: Optional prior distributions. When ``None``, defaults to
+            ``Uniform`` from bounds (no penalty).
+        popsize: Population size.
+        crossover_rate: Crossover rate for SimpleGA.
+        mutation_std: Mutation standard deviation for SimpleGA.
+        seed: Random seed for reproducibility.
+
+    Example::
+
+        optimizer = GAOptimizer(
+            runner=Runner.optimization(),
+            objectives=[(Objective(observations=obs, transform=fn), "nrmse", 1.0)],
+            bounds={"x": (0.0, 10.0)},
+            popsize=64,
+        )
+        result = optimizer.run(model, n_generations=100)
+    """
+
+    def __init__(
+        self,
+        runner: Runner,
+        objectives: list[tuple[Objective, str | Callable, float]],
+        bounds: dict[str, tuple[float, float]],
+        priors: PriorSet | None = None,
+        popsize: int = 32,
+        crossover_rate: float = 0.5,
+        mutation_std: float = 0.1,
+        seed: int = 0,
+    ) -> None:
+        self.runner = runner
+        self.objectives = objectives
+        self.bounds = bounds
+        self.priors = priors if priors is not None else build_default_priors(bounds)
+        self.popsize = popsize
+        self.crossover_rate = crossover_rate
+        self.mutation_std = mutation_std
+        self.seed = seed
+
+    def run(
+        self,
+        model: CompiledModel,
+        n_generations: int = 100,
+        tol_fun: float = 1e-9,
+        patience: int = 50,
+        progress_bar: bool = False,
+    ) -> OptimizeResult:
+        """Run SimpleGA optimization.
+
+        Args:
+            model: Compiled model to calibrate.
+            n_generations: Maximum number of generations.
+            tol_fun: Relative improvement threshold for early stopping.
+            patience: Generations without improvement before stopping.
+            progress_bar: If True, display inline progress indicator.
+
+        Returns:
+            OptimizeResult with optimized parameters and diagnostics.
+        """
+        prepared = setup_objectives(self.objectives, model.coords)
+        loss_fn = build_loss_fn(self.runner, model, prepared, self.priors)
+        initial_params = {k: model.parameters[k] for k in self.bounds}
+
+        return self._run_loss_fn(loss_fn, initial_params, n_generations, tol_fun, patience, progress_bar)
+
+    def _run_loss_fn(
+        self,
+        loss_fn: Callable[[Params], Array],
+        initial_params: Params,
+        n_generations: int = 100,
+        tol_fun: float = 1e-9,
+        patience: int = 50,
+        progress_bar: bool = False,
+    ) -> OptimizeResult:
+        """Run SimpleGA on a raw loss function."""
+        keys, x0 = flatten_params(initial_params)
+        shapes = {k: jnp.atleast_1d(initial_params[k]).shape for k in keys}
+        lower, upper = build_bounds_arrays(keys, initial_params, self.bounds)
+
+        x0_norm = normalize(x0, lower, upper)
+
+        def eval_one(flat_norm: Array) -> Array:
+            flat_orig = denormalize(flat_norm, lower, upper)
+            params = unflatten_params(keys, flat_orig, shapes, initial_params)
+            return jnp.squeeze(loss_fn(params))
+
+        eval_population = jax.jit(jax.vmap(eval_one))
+
+        strategy = SimpleGA(
+            population_size=self.popsize,
+            solution=x0_norm,
+            std_schedule=optax.constant_schedule(self.mutation_std),
+        )
+        es_params = strategy.default_params.replace(crossover_rate=self.crossover_rate)
+
+        key = jax.random.key(self.seed)
+        key, init_key = jax.random.split(key)
+
+        # SimpleGA needs initial population + fitness
+        pop = jax.random.uniform(init_key, shape=(self.popsize, x0_norm.shape[0]))
+        fitness = eval_population(pop)
+        state = strategy.init(init_key, pop, fitness, es_params)
+
+        norm_lower = jnp.zeros_like(x0_norm)
+        norm_upper = jnp.ones_like(x0_norm)
+
+        loss_history: list[float] = []
+        best_loss = float("inf")
+        best_flat_norm = x0_norm
+        stall_count = 0
+        converged = False
+
+        for gen in range(n_generations):
+            key, ask_key, tell_key = jax.random.split(key, 3)
+
+            population, state = strategy.ask(ask_key, state, es_params)
+            population = jnp.clip(population, norm_lower, norm_upper)
+            fitness = eval_population(population)
+            state, _metrics = strategy.tell(tell_key, population, fitness, state, es_params)
+
+            min_fitness = float(jnp.min(fitness))
+            loss_history.append(min_fitness)
+
+            if min_fitness < best_loss * (1 - tol_fun):
+                best_loss = min_fitness
+                best_idx = jnp.argmin(fitness)
+                best_flat_norm = population[best_idx]
+                stall_count = 0
+            else:
+                stall_count += 1
+
+            if stall_count >= patience:
+                converged = True
+                logger.info(
+                    "Converged at generation %d: no improvement over %d generations (best_loss=%.6e)",
+                    gen, patience, best_loss,
+                )
+                break
+
+            if gen % 50 == 0:
+                logger.info(
+                    "gen %d/%d: best_loss=%.6e, stall=%d/%d",
+                    gen, n_generations, best_loss, stall_count, patience,
+                )
+
+            if progress_bar:
+                print_rate = max(1, n_generations // 20)
+                if gen % print_rate == 0 or gen == n_generations - 1:
+                    print(f"\r  [{gen+1}/{n_generations}] loss={best_loss:.4e}", end="", flush=True)
+                if gen == n_generations - 1:
+                    print()
+
+        if progress_bar:
+            print()
+
+        best_flat_orig = denormalize(best_flat_norm, lower, upper)
+        best_params = unflatten_params(keys, best_flat_orig, shapes, initial_params)
+
+        return OptimizeResult(
+            params=best_params,
+            loss=best_loss,
+            loss_history=loss_history,
+            n_iterations=len(loss_history),
+            converged=converged,
+            message=f"Converged after {len(loss_history)} generations"
+            if converged
+            else f"Reached max iterations ({n_generations})",
+        )

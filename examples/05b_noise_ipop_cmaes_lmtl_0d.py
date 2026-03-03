@@ -1,16 +1,17 @@
-"""IPOP-CMA-ES on LMTL 0D Model (Twin Experiment, Noisy Observations).
+# %% [markdown]
+# # IPOP-CMA-ES on LMTL 0D Model (Twin Experiment, Noisy Observations)
+#
+# Demonstrates multi-restart CMA-ES with increasing population (IPOP strategy,
+# Auger & Hansen 2005) on a 0D LMTL ecosystem model with 15% Gaussian noise
+# added to observations.
+#
+# Steps:
+# 1. Spin-up: simulate SPINUP_YEARS to stabilize the system
+# 2. Optimization year: generate synthetic observations on OPT_YEARS + add noise
+# 3. Run IPOP-CMA-ES to recover the parameters
+# 4. Visualize modes found, convergence, and parameter recovery
 
-Demonstrates multi-restart CMA-ES with increasing population (IPOP strategy,
-Auger & Hansen 2005) on a 0D LMTL ecosystem model with 30% Gaussian noise
-added to observations.
-
-Steps:
-1. Spin-up: simulate SPINUP_YEARS to stabilize the system
-2. Optimization year: generate synthetic observations on OPT_YEARS + add noise
-3. Run IPOP-CMA-ES to recover the parameters
-4. Visualize modes found, convergence, and parameter recovery
-"""
-
+# %%
 import logging
 import math
 import time
@@ -25,55 +26,45 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-# Register LMTL functions (already defined in seapopym.functions.lmtl)
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine import Runner
 from seapopym.models import LMTL_NO_TRANSPORT
-from seapopym.optimization.ipop import run_ipop_cmaes
+from seapopym.optimization import IPOPCMAESOptimizer, Objective
 
-# Use GPU if available, fall back to CPU
 print(f"JAX devices: {jax.devices()}")
 
-# =============================================================================
-# CONFIGURATION — modify these to tune the experiment
-# =============================================================================
+# %% [markdown]
+# ## Configuration
 
-# Number of optimized parameters (used for Hansen defaults below)
+# %%
 N_PARAMS = 5
 
 # IPOP-CMA-ES — Hansen defaults (pycma, Auger & Hansen 2005)
-#   popsize:  4 + floor(3 * ln(n))
-#   maxiter:  100 + 150 * (n+3)^2 / sqrt(popsize)
-#   restarts: 9 (Auger & Hansen 2005 benchmark)
 INITIAL_POPSIZE = 4 + int(3 * math.log(N_PARAMS))  # 8 for n=5
 N_GENERATIONS = int(100 + 150 * (N_PARAMS + 3) ** 2 / math.sqrt(INITIAL_POPSIZE))
 N_RESTARTS = 8
 DISTANCE_THRESHOLD = 0.1
 SEED = 42
 
-# Simulation
-SPINUP_YEARS = 1  # Stabilize the system before optimization
-OPT_YEARS = 2  # Period on which observations are sampled
+SPINUP_YEARS = 1
+OPT_YEARS = 2
 DT = "1d"
-LATITUDE = 30.0  # degrees N
+LATITUDE = 30.0
 
-# Twin experiment
-OBS_FRACTION = 0.1  # Fraction of year-2 timesteps sampled as observations
-INITIAL_GUESS_FACTOR = 1.5  # Initial guess = factor × true values
+OBS_FRACTION = 0.1
+INITIAL_GUESS_FACTOR = 1.5
 
-# True biological parameters (to be recovered)
 TRUE_PARAMS = {
-    "lambda_0": 1 / 150 / 86400,  # 1/s — base mortality rate
-    "gamma_lambda": 0.15,  # 1/degC — mortality temperature sensitivity
-    "tau_r_0": 10.38 * 86400,  # s — base recruitment age
-    "gamma_tau_r": 0.11,  # 1/degC — recruitment temperature sensitivity
-    "efficiency": 0.1668,  # dimensionless — NPP-to-biomass efficiency
-    "t_ref": 0.0,  # degC — reference temperature (fixed, not optimized)
+    "lambda_0": 1 / 150 / 86400,
+    "gamma_lambda": 0.15,
+    "tau_r_0": 10.38 * 86400,
+    "gamma_tau_r": 0.11,
+    "efficiency": 0.1668,
+    "t_ref": 0.0,
 }
 
-# Bounds for optimized parameters
 BOUNDS = {
     "lambda_0": (1e-10, 5 * TRUE_PARAMS["lambda_0"]),
     "gamma_lambda": (0.01, 5 * TRUE_PARAMS["gamma_lambda"]),
@@ -82,27 +73,22 @@ BOUNDS = {
     "efficiency": (0.01, 5 * TRUE_PARAMS["efficiency"]),
 }
 
-# Fixed parameters (not optimized)
 FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
 
-NOISE_LEVEL = 0.15  # 30% Gaussian noise on observations
+NOISE_LEVEL = 0.15
 
 PLOT_FILE = "examples/images/05b_noise_ipop_cmaes_lmtl_0d.png"
 
-# =============================================================================
-# BLUEPRINT (0D LMTL from catalogue)
-# =============================================================================
+# %% [markdown]
+# ## Forcings & Model Setup
 
+# %%
 blueprint = LMTL_NO_TRANSPORT
 
 max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
 cohort_ages_days = np.arange(0, max_age_days + 1)
 cohort_ages_sec = cohort_ages_days * 86400.0
 n_cohorts = len(cohort_ages_sec)
-
-# =============================================================================
-# FORCINGS & CONFIG (spin-up + optimization period)
-# =============================================================================
 
 total_years = SPINUP_YEARS + OPT_YEARS
 start_date = "2000-01-01"
@@ -113,18 +99,15 @@ end_pd = pd.to_datetime(end_date)
 n_days = (end_pd - start_pd).days + 5
 dates = pd.date_range(start=start_pd, periods=n_days, freq="D")
 
-# Grid 1x1 (0D)
 ny, nx = 1, 1
 lat = np.arange(ny)
 lon = np.arange(nx)
 
-# Day of year forcing (T, Y, X)
 day_of_year = dates.dayofyear.values
 doy_float = day_of_year.astype(float)
 doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny, nx))
 doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
-# Forcing: Temperature (seasonal, T, Z=1, Y, X)
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny, nx))
 temp_da = xr.DataArray(
@@ -133,7 +116,6 @@ temp_da = xr.DataArray(
     coords={"T": dates, "Z": np.arange(1), "Y": lat, "X": lon},
 )
 
-# Forcing: NPP (seasonal, 1 +/- 0.5 g/m^2/day)
 npp_day = 1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)
 npp_sec = npp_day / 86400.0
 npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
@@ -173,187 +155,175 @@ config = Config.from_dict(
     }
 )
 
-# =============================================================================
-# COMPILE & BUILD SIMULATION
-# =============================================================================
-
 print("Compiling model...")
-_model = compile_model(blueprint, config)
-_runner = Runner.optimization()
-_n_timesteps = _model.n_timesteps
+model = compile_model(blueprint, config)
+runner = Runner.optimization()
+n_timesteps = model.n_timesteps
+spinup_steps = int(SPINUP_YEARS / total_years * n_timesteps)
 
-# Spin-up / optimization split
-_spinup_steps = int(SPINUP_YEARS / total_years * _n_timesteps)
+# %% [markdown]
+# ## Generate Synthetic Observations (with noise)
 
+# %%
+print("=" * 60)
+print("IPOP-CMA-ES on LMTL 0D (Twin Experiment, Noisy Observations)")
+print(f"  Spin-up: {SPINUP_YEARS} year(s)  |  Optimization: {OPT_YEARS} year(s)")
+print(
+    f"  IPOP: {N_RESTARTS} restarts, pop {INITIAL_POPSIZE}->{INITIAL_POPSIZE * 2 ** (N_RESTARTS - 1)}, "
+    f"{N_GENERATIONS} gen"
+)
+print("=" * 60)
 
-def run_simulation(params: dict) -> jnp.ndarray:
-    """Run full simulation (spin-up + opt period), return biomass time series."""
-    outputs = _runner(_model, params)
-    # outputs["biomass"] has shape (T, ...) — average over spatial dims
+print("\nGenerating observations with TRUE parameters...")
+t0 = time.time()
+true_params_jax = {k: jnp.array(TRUE_PARAMS[k]) for k in BOUNDS}
+outputs_true = runner(model, true_params_jax)
+
+biomass_true = outputs_true["biomass"]
+true_biomass_full = jnp.mean(biomass_true, axis=tuple(range(1, biomass_true.ndim)))
+true_biomass = true_biomass_full[spinup_steps:]
+n_opt_steps = len(true_biomass)
+
+print(
+    f"  Simulation: {time.time() - t0:.2f}s  ({n_timesteps} total steps, "
+    f"{spinup_steps} spin-up, {n_opt_steps} opt)"
+)
+print(f"  Year 2 biomass range: [{float(jnp.min(true_biomass)):.4f}, {float(jnp.max(true_biomass)):.4f}]")
+
+n_obs = max(1, int(OBS_FRACTION * n_opt_steps))
+rng = np.random.default_rng(SEED)
+obs_local_indices = np.sort(rng.choice(n_opt_steps, size=n_obs, replace=False))
+obs_global_indices = obs_local_indices + spinup_steps
+obs_values = true_biomass[obs_local_indices]
+noise = jnp.array(rng.normal(0, NOISE_LEVEL * np.array(obs_values), size=obs_values.shape))
+obs_values = obs_values + noise
+print(f"  {n_obs} observations ({100 * n_obs / n_opt_steps:.1f}%), std={float(jnp.std(obs_values)):.6f}")
+
+# %% [markdown]
+# ## Objective & Optimizer
+
+# %%
+def extract_predictions(outputs):
     biomass = outputs["biomass"]
-    return jnp.mean(biomass, axis=tuple(range(1, biomass.ndim)))
+    ts = jnp.mean(biomass, axis=tuple(range(1, biomass.ndim)))
+    return ts[obs_global_indices]
 
+objective = Objective(observations=obs_values, transform=extract_predictions)
 
-# =============================================================================
-# MAIN
-# =============================================================================
+optimizer = IPOPCMAESOptimizer(
+    runner=runner,
+    objectives=[(objective, "nrmse", 1.0)],
+    bounds=BOUNDS,
+    n_restarts=N_RESTARTS,
+    initial_popsize=INITIAL_POPSIZE,
+    n_generations=N_GENERATIONS,
+    distance_threshold=DISTANCE_THRESHOLD,
+    seed=SEED,
+)
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("IPOP-CMA-ES on LMTL 0D (Twin Experiment)")
-    print(f"  Spin-up: {SPINUP_YEARS} year(s)  |  Optimization: {OPT_YEARS} year(s)")
-    print(
-        f"  IPOP: {N_RESTARTS} restarts, pop {INITIAL_POPSIZE}→{INITIAL_POPSIZE * 2 ** (N_RESTARTS - 1)}, "
-        f"{N_GENERATIONS} gen"
-    )
-    print("=" * 60)
+# %% [markdown]
+# ## IPOP-CMA-ES
 
-    # ----- Generate observations with TRUE parameters (year 2 only) -----
-    print("\nGenerating observations with TRUE parameters...")
-    t0 = time.time()
-    true_params_jax = {k: jnp.array(TRUE_PARAMS[k]) for k in BOUNDS}
-    true_biomass_full = run_simulation(true_params_jax)
+# %%
+print("\nRunning IPOP-CMA-ES...")
+t0 = time.time()
 
-    # Split: year 1 = spin-up, year 2 = optimization
-    true_biomass = true_biomass_full[_spinup_steps:]
-    n_opt_steps = len(true_biomass)
+result = optimizer.run(model, progress_bar=True)
 
-    print(
-        f"  Simulation: {time.time() - t0:.2f}s  ({_n_timesteps} total steps, "
-        f"{_spinup_steps} spin-up, {n_opt_steps} opt)"
-    )
-    print(f"  Year 2 biomass range: [{float(jnp.min(true_biomass)):.4f}, {float(jnp.max(true_biomass)):.4f}]")
+elapsed = time.time() - t0
+print(f"\nCompleted in {elapsed:.1f}s")
+print(f"Found {len(result.modes)} distinct mode(s) across {result.n_restarts} restarts")
 
-    # Sample observations on year 2
-    n_obs = max(1, int(OBS_FRACTION * n_opt_steps))
-    rng = np.random.default_rng(SEED)
-    obs_local_indices = np.sort(rng.choice(n_opt_steps, size=n_obs, replace=False))
-    obs_global_indices = obs_local_indices + _spinup_steps  # indices in full simulation
-    observations = true_biomass[obs_local_indices]
-    noise = jnp.array(rng.normal(0, NOISE_LEVEL * np.array(observations), size=observations.shape))
-    observations = observations + noise
-    obs_std = float(jnp.std(observations))
-    print(f"  {n_obs} observations ({100 * n_obs / n_opt_steps:.1f}%), std={obs_std:.6f}")
+# %% [markdown]
+# ## Results
 
-    # ----- Loss function (NRMSE-std, year 2 only) -----
-    def loss_fn(params: dict) -> jnp.ndarray:
-        """NRMSE-std loss computed on year 2 only."""
-        biomass_full = run_simulation(params)
-        pred = biomass_full[obs_global_indices]
-        rmse = jnp.sqrt(jnp.mean((pred - observations) ** 2))
-        return rmse / obs_std
+# %%
+param_names = list(BOUNDS.keys())
 
-    # Sanity check: true params should give loss ≈ 0
-    true_loss = loss_fn(true_params_jax)
-    print(f"  Sanity check: loss(true_params) = {float(true_loss):.6e}")
+print("\n" + "=" * 60)
+print("Modes found (sorted by loss)")
+print("=" * 60)
 
-    # Initial guess
-    initial_params = {k: jnp.array(INITIAL_GUESS_FACTOR * TRUE_PARAMS[k]) for k in BOUNDS}
-    initial_loss = loss_fn(initial_params)
-    print(f"\nInitial guess ({INITIAL_GUESS_FACTOR}x true), loss = {float(initial_loss):.6f}")
+header = f"{'Mode':<6} {'Loss':>10}"
+for p in param_names:
+    header += f" {p[:8]:>10}"
+print(header)
+print("-" * len(header))
 
-    # ----- IPOP-CMA-ES -----
-    print("\nRunning IPOP-CMA-ES...")
-    t0 = time.time()
+row = f"{'True':<6} {0.0:>10.6f}"
+for p in param_names:
+    row += f" {TRUE_PARAMS[p]:>10.4g}"
+print(row)
 
-    result = run_ipop_cmaes(
-        loss_fn=loss_fn,
-        initial_params=initial_params,
-        bounds=BOUNDS,
-        n_restarts=N_RESTARTS,
-        initial_popsize=INITIAL_POPSIZE,
-        n_generations=N_GENERATIONS,
-        distance_threshold=DISTANCE_THRESHOLD,
-        seed=SEED,
-        progress_bar=True,
-    )
-
-    elapsed = time.time() - t0
-    print(f"\nCompleted in {elapsed:.1f}s")
-    print(f"Found {len(result.modes)} distinct mode(s) across {result.n_restarts} restarts")
-
-    # ----- Results -----
-    param_names = list(BOUNDS.keys())
-
-    print("\n" + "=" * 60)
-    print("Modes found (sorted by loss)")
-    print("=" * 60)
-
-    header = f"{'Mode':<6} {'Loss':>10}"
+for i, mode in enumerate(result.modes):
+    row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
     for p in param_names:
-        header += f" {p[:8]:>10}"
-    print(header)
-    print("-" * len(header))
-
-    row = f"{'True':<6} {0.0:>10.6f}"
-    for p in param_names:
-        row += f" {TRUE_PARAMS[p]:>10.4g}"
+        row += f" {float(mode.params[p]):>10.4g}"
     print(row)
 
-    for i, mode in enumerate(result.modes):
-        row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
-        for p in param_names:
-            row += f" {float(mode.params[p]):>10.4g}"
-        print(row)
+# %% [markdown]
+# ## Visualization
 
-    # ----- Visualization -----
-    n_modes = len(result.modes)
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+# %%
+n_modes = len(result.modes)
+fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 
-    # Plot 1: Loss per restart
-    ax1 = axes[0]
-    restart_losses = [float(r.loss) for r in result.all_results]
-    mode_indices = [i for i, r in enumerate(result.all_results) if any(m.loss == r.loss for m in result.modes)]
-    ax1.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
-    ax1.bar(mode_indices, [restart_losses[i] for i in mode_indices], color="orangered", alpha=0.9)
-    ax1.set_xlabel("Restart")
-    ax1.set_ylabel("Loss (NRMSE-std)")
-    ax1.set_title("Loss per restart")
-    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
-    ax1.set_xticks(range(len(restart_losses)))
-    ax1.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
+# Plot 1: Loss per restart
+ax1 = axes[0]
+restart_losses = [float(r.loss) for r in result.all_results]
+mode_indices = [i for i, r in enumerate(result.all_results) if any(m.loss == r.loss for m in result.modes)]
+ax1.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
+ax1.bar(mode_indices, [restart_losses[i] for i in mode_indices], color="orangered", alpha=0.9)
+ax1.set_xlabel("Restart")
+ax1.set_ylabel("Loss (NRMSE-std)")
+ax1.set_title("Loss per restart")
+popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
+ax1.set_xticks(range(len(restart_losses)))
+ax1.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
 
-    # Plot 2: Biomass trajectories (year 2 only)
-    ax2 = axes[1]
-    dt_seconds = _model.dt
-    time_days = np.arange(n_opt_steps) * dt_seconds / 86400.0
-    ax2.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
-    ax2.scatter(obs_local_indices * dt_seconds / 86400.0, observations, c="red", s=20, zorder=5, label="Observations")
+# Plot 2: Biomass trajectories (year 2 only)
+ax2 = axes[1]
+dt_seconds = model.dt
+time_days = np.arange(n_opt_steps) * dt_seconds / 86400.0
+ax2.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
+ax2.scatter(obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations")
 
-    colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
-    for i, mode in enumerate(result.modes):
-        pred_full = run_simulation(mode.params)
-        pred = pred_full[_spinup_steps:]
-        ax2.plot(time_days, pred, "--", color=colors[i], linewidth=1.5, label=f"Mode #{i + 1}")
+colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
+for i, mode in enumerate(result.modes):
+    outputs_mode = runner(model, mode.params)
+    biomass_mode = outputs_mode["biomass"]
+    pred_full = jnp.mean(biomass_mode, axis=tuple(range(1, biomass_mode.ndim)))
+    pred = pred_full[spinup_steps:]
+    ax2.plot(time_days, pred, "--", color=colors[i], linewidth=1.5, label=f"Mode #{i + 1}")
 
-    ax2.set_xlabel("Day (year 2)")
-    ax2.set_ylabel("Biomass (g/m²)")
-    ax2.set_title("Biomass trajectories (year 2)")
-    ax2.legend(fontsize=8)
-    ax2.grid(True, alpha=0.3)
+ax2.set_xlabel("Day (year 2)")
+ax2.set_ylabel("Biomass (g/m²)")
+ax2.set_title("Biomass trajectories (year 2)")
+ax2.legend(fontsize=8)
+ax2.grid(True, alpha=0.3)
 
-    # Plot 3: Parameter recovery
-    ax3 = axes[2]
-    x = np.arange(len(param_names))
-    width = 0.8 / (n_modes + 1)
+# Plot 3: Parameter recovery
+ax3 = axes[2]
+x = np.arange(len(param_names))
+width = 0.8 / (n_modes + 1)
 
-    ax3.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", color="black", alpha=0.3)
-    true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
+ax3.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", color="black", alpha=0.3)
+true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
 
-    for i, mode in enumerate(result.modes):
-        pred_vals = np.array([float(mode.params[p]) for p in param_names])
-        ratios = pred_vals / true_vals
-        ax3.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
+for i, mode in enumerate(result.modes):
+    pred_vals = np.array([float(mode.params[p]) for p in param_names])
+    ratios = pred_vals / true_vals
+    ax3.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
 
-    ax3.set_xticks(x)
-    ax3.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
-    ax3.set_ylabel("Ratio to true value")
-    ax3.set_title("Parameter recovery")
-    ax3.axhline(y=1, color="k", linestyle="--", alpha=0.5)
-    ax3.legend(fontsize=8)
-    ax3.grid(True, alpha=0.3, axis="y")
+ax3.set_xticks(x)
+ax3.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
+ax3.set_ylabel("Ratio to true value")
+ax3.set_title("Parameter recovery")
+ax3.axhline(y=1, color="k", linestyle="--", alpha=0.5)
+ax3.legend(fontsize=8)
+ax3.grid(True, alpha=0.3, axis="y")
 
-    plt.tight_layout()
-    Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(PLOT_FILE, dpi=150)
-    print(f"\nPlot saved to {PLOT_FILE}")
+plt.tight_layout()
+Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
+plt.savefig(PLOT_FILE, dpi=150)
+print(f"\nPlot saved to {PLOT_FILE}")

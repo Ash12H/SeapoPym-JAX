@@ -1,13 +1,15 @@
 """Optimization module for model calibration.
 
-**High-level (orchestration)**:
-- :class:`Optimizer` — assembles loss from objectives, dispatches to strategy
-- :class:`Objective` — observation data + extraction method
+**Optimizer classes** (1 algorithm = 1 class):
+- :class:`GradientOptimizer` — Optax (adam/sgd/rmsprop/adagrad)
+- :class:`CMAESOptimizer` — evosax CMA-ES (requires evosax)
+- :class:`GAOptimizer` — evosax SimpleGA (requires evosax)
+- :class:`IPOPCMAESOptimizer` — IPOP multi-restart CMA-ES (requires evosax)
 
-**Low-level (building blocks)**:
+**Building blocks**:
+- :class:`Objective` / :class:`PreparedObjective` — observation data + extraction
 - Loss functions: :func:`mse`, :func:`rmse`, :func:`nrmse`
 - Prior distributions: :class:`Uniform`, :class:`Normal`, etc.
-- :class:`GradientOptimizer`, :class:`EvolutionaryOptimizer` (requires evosax)
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ from __future__ import annotations
 from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.loss import mse, nrmse, rmse
 from seapopym.optimization.objective import Objective, PreparedObjective
-from seapopym.optimization.optimizer import Optimizer
 from seapopym.optimization.prior import (
     HalfNormal,
     LogNormal,
@@ -26,17 +27,16 @@ from seapopym.optimization.prior import (
 )
 
 __all__ = [
-    # High-level
+    # Optimizers (always available)
+    "GradientOptimizer",
+    "OptimizeResult",
+    # Objectives
     "Objective",
     "PreparedObjective",
-    "Optimizer",
     # Loss functions
     "rmse",
     "nrmse",
     "mse",
-    # Low-level optimizers
-    "GradientOptimizer",
-    "OptimizeResult",
     # Priors
     "Uniform",
     "Normal",
@@ -48,10 +48,11 @@ __all__ = [
 
 # Optional imports (require evosax)
 try:
-    from seapopym.optimization.evolutionary import EvolutionaryOptimizer
-    from seapopym.optimization.ipop import IPOPResult, run_ipop, run_ipop_cmaes
+    from seapopym.optimization.cmaes import CMAESOptimizer
+    from seapopym.optimization.ga import GAOptimizer
+    from seapopym.optimization.ipop import IPOPCMAESOptimizer, IPOPResult
 
-    __all__ += ["EvolutionaryOptimizer", "IPOPResult", "run_ipop", "run_ipop_cmaes"]
+    __all__ += ["CMAESOptimizer", "GAOptimizer", "IPOPCMAESOptimizer", "IPOPResult"]
     _HAS_EVOSAX = True
 except (ImportError, KeyError):
     _HAS_EVOSAX = False
@@ -60,7 +61,7 @@ except (ImportError, KeyError):
 def __getattr__(name: str):
     """Provide helpful error message for optional dependencies."""
     if (
-        name in ("EvolutionaryOptimizer", "IPOPResult", "run_ipop", "run_ipop_cmaes")
+        name in ("CMAESOptimizer", "GAOptimizer", "IPOPCMAESOptimizer", "IPOPResult")
         and not _HAS_EVOSAX
     ):
         raise ImportError(
