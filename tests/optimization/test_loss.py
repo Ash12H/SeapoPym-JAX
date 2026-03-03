@@ -148,6 +148,32 @@ class TestNRMSE:
             nrmse(pred, obs, mask, mode="invalid")  # type: ignore[arg-type]
 
 
+class TestNRMSEEdgeCases:
+    """Edge-case tests for NRMSE normalization."""
+
+    def test_all_false_mask_minmax_finite(self):
+        """NRMSE minmax with all-False mask should return a finite value, not NaN."""
+        pred = jnp.array([1.0, 2.0, 3.0])
+        obs = jnp.array([1.0, 2.0, 3.0])
+        mask = jnp.array([False, False, False])
+        result = nrmse(pred, obs, mask, mode="minmax")
+        assert jnp.isfinite(result)
+
+    def test_constant_obs_std(self):
+        """NRMSE std with constant observations (zero std) should not blow up."""
+        pred = jnp.array([1.0, 2.0, 3.0])
+        obs = jnp.array([5.0, 5.0, 5.0])
+        result = nrmse(pred, obs, mode="std")
+        assert jnp.isfinite(result)
+
+    def test_zero_mean_obs_mean(self):
+        """NRMSE mean with zero-mean observations should not blow up."""
+        pred = jnp.array([0.1, -0.1, 0.0])
+        obs = jnp.array([-1.0, 1.0, 0.0])
+        result = nrmse(pred, obs, mode="mean")
+        assert jnp.isfinite(result)
+
+
 class TestGradients:
     """Test that loss functions are differentiable."""
 

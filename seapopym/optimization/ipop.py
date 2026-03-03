@@ -50,18 +50,22 @@ class IPOPResult:
 
 
 def _params_distance(a: Params, b: Params, bounds: dict[str, tuple[float, float]]) -> float:
-    """Euclidean distance between two parameter dicts, normalized by bounds."""
+    """Euclidean distance between two parameter dicts, normalized by bounds.
+
+    Only keys present in *bounds* contribute to the distance so that
+    unbounded keys (whose raw scale may be arbitrary) do not dominate.
+    """
     dist_sq = 0.0
     for key in a:
-        if key in b:
-            va = jnp.atleast_1d(a[key])
-            vb = jnp.atleast_1d(b[key])
-            if key in bounds:
-                low, high = bounds[key]
-                va = (va - low) / (high - low)
-                vb = (vb - low) / (high - low)
-            diff = va - vb
-            dist_sq += float(jnp.sum(diff**2))
+        if key not in b or key not in bounds:
+            continue
+        va = jnp.atleast_1d(a[key])
+        vb = jnp.atleast_1d(b[key])
+        low, high = bounds[key]
+        va = (va - low) / (high - low)
+        vb = (vb - low) / (high - low)
+        diff = va - vb
+        dist_sq += float(jnp.sum(diff**2))
     return float(jnp.sqrt(dist_sq))
 
 

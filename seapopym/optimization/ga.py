@@ -6,7 +6,6 @@ Handles Objective setup, loss building, normalization, and optimization.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -22,6 +21,7 @@ from seapopym.optimization._common import (
     denormalize,
     flatten_params,
     normalize,
+    run_evolution_strategy,
     setup_objectives,
     unflatten_params,
 )
@@ -33,8 +33,6 @@ from seapopym.types import Array, Params
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
     from seapopym.engine.runner import Runner
-
-logger = logging.getLogger(__name__)
 
 
 class GAOptimizer:
@@ -98,7 +96,7 @@ class GAOptimizer:
         Args:
             model: Compiled model to calibrate.
             n_generations: Maximum number of generations.
-            tol_fun: Relative improvement threshold for early stopping.
+            tol_fun: Absolute improvement threshold for early stopping.
             patience: Generations without improvement before stopping.
             progress_bar: If True, display inline progress indicator.
 
@@ -152,57 +150,24 @@ class GAOptimizer:
         norm_lower = jnp.zeros_like(x0_norm)
         norm_upper = jnp.ones_like(x0_norm)
 
-        loss_history: list[float] = []
-        best_loss = float("inf")
-        best_flat_norm = x0_norm
-        stall_count = 0
-        converged = False
-
-        for gen in range(n_generations):
-            key, ask_key, tell_key = jax.random.split(key, 3)
-
-            population, state = strategy.ask(ask_key, state, es_params)
-            population = jnp.clip(population, norm_lower, norm_upper)
-            fitness = eval_population(population)
-            state, _metrics = strategy.tell(tell_key, population, fitness, state, es_params)
-
-            min_fitness = float(jnp.min(fitness))
-            loss_history.append(min_fitness)
-
-            if min_fitness < best_loss * (1 - tol_fun):
-                best_loss = min_fitness
-                best_idx = jnp.argmin(fitness)
-                best_flat_norm = population[best_idx]
-                stall_count = 0
-            else:
-                stall_count += 1
-
-            if stall_count >= patience:
-                converged = True
-                logger.info(
-                    "Converged at generation %d: no improvement over %d generations (best_loss=%.6e)",
-                    gen, patience, best_loss,
-                )
-                break
-
-            if gen % 50 == 0:
-                logger.info(
-                    "gen %d/%d: best_loss=%.6e, stall=%d/%d",
-                    gen, n_generations, best_loss, stall_count, patience,
-                )
-
-            if progress_bar:
-                print_rate = max(1, n_generations // 20)
-                if gen % print_rate == 0 or gen == n_generations - 1:
-                    print(f"\r  [{gen+1}/{n_generations}] loss={best_loss:.4e}", end="", flush=True)
-                if gen == n_generations - 1:
-                    print()
-
-        if progress_bar:
-            print()
+        best_flat_norm, loss_history, converged = run_evolution_strategy(
+            strategy=strategy,
+            es_params=es_params,
+            state=state,
+            eval_population=eval_population,
+            n_generations=n_generations,
+            tol_fun=tol_fun,
+            patience=patience,
+            key=key,
+            norm_lower=norm_lower,
+            norm_upper=norm_upper,
+            x0_norm=x0_norm,
+            progress_bar=progress_bar,
+        )
 
         best_flat_orig = denormalize(best_flat_norm, lower, upper)
         best_params = unflatten_params(keys, best_flat_orig, shapes, initial_params)
+        best_loss = min(loss_history) if loss_history else float("inf")
 
         return OptimizeResult(
             params=best_params,

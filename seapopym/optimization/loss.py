@@ -117,7 +117,8 @@ def nrmse(
         else:
             raise ValueError(f"Unknown normalization mode: {mode}")
 
-    # Avoid division by zero
+    # Avoid division by zero or NaN (e.g. minmax with all-False mask)
+    norm_factor = jnp.where(jnp.isfinite(norm_factor), norm_factor, 1.0)
     norm_factor = jnp.maximum(norm_factor, 1e-10)
 
     return rmse_val / norm_factor

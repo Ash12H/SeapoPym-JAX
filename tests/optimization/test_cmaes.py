@@ -135,6 +135,25 @@ class TestCMAESOptimizerRunLossFn:
         assert float(result1.params["x"]) == pytest.approx(float(result2.params["x"]))
         assert result1.loss == pytest.approx(result2.loss)
 
+    def test_patience_convergence(self):
+        """CMA-ES should set converged=True when patience is exhausted."""
+
+        def loss_fn(params):
+            return jnp.array(1.0)  # constant → never improves
+
+        runner = _FakeRunner()
+        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
+        opt = CMAESOptimizer(
+            runner, [(obj, "mse", 1.0)],
+            bounds={"x": (0.0, 10.0)},
+            popsize=8, seed=42,
+        )
+
+        result = opt._run_loss_fn(loss_fn, {"x": jnp.array(5.0)}, n_generations=200, patience=5)
+
+        assert result.converged is True
+        assert result.n_iterations < 200
+
     def test_loss_history_decreasing(self):
         def loss_fn(params):
             return (params["x"] - 5.0) ** 2

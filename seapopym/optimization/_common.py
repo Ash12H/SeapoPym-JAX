@@ -7,10 +7,12 @@ and GradientOptimizer.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+import jax
 import jax.numpy as jnp
 
 from seapopym.optimization.loss import mse, nrmse, rmse
@@ -21,6 +23,8 @@ from seapopym.types import Array, Params
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
     from seapopym.engine.runner import Runner
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Metric resolution
@@ -142,6 +146,9 @@ def build_bounds_arrays(
         size = jnp.atleast_1d(params[k]).size
         if k in bounds:
             low, high = bounds[k]
+            if low >= high:
+                msg = f"Invalid bounds for '{k}': low ({low}) >= high ({high})"
+                raise ValueError(msg)
             lowers.extend([low] * size)
             uppers.extend([high] * size)
         else:
@@ -158,3 +165,76 @@ def normalize(flat: Array, lower: Array, upper: Array) -> Array:
 def denormalize(flat_norm: Array, lower: Array, upper: Array) -> Array:
     """Transform from [0,1] back to original space."""
     return flat_norm * (upper - lower) + lower
+
+
+# ---------------------------------------------------------------------------
+# Shared evolution-strategy loop
+# ---------------------------------------------------------------------------
+
+
+def run_evolution_strategy(
+    strategy,
+    es_params,
+    state,
+    eval_population: Callable[[Array], Array],
+    n_generations: int,
+    tol_fun: float,
+    patience: int,
+    key: Array,
+    norm_lower: Array,
+    norm_upper: Array,
+    x0_norm: Array,
+    progress_bar: bool = False,
+) -> tuple[Array, list[float], bool]:
+    """Shared ask/tell loop for evolutionary strategies.
+
+    Returns ``(best_flat_norm, loss_history, converged)``.
+    """
+    loss_history: list[float] = []
+    best_loss = float("inf")
+    best_flat_norm = x0_norm
+    stall_count = 0
+    converged = False
+
+    for gen in range(n_generations):
+        key, ask_key, tell_key = jax.random.split(key, 3)
+
+        population, state = strategy.ask(ask_key, state, es_params)
+        population = jnp.clip(population, norm_lower, norm_upper)
+        fitness = eval_population(population)
+        state, _metrics = strategy.tell(tell_key, population, fitness, state, es_params)
+
+        min_fitness = float(jnp.min(fitness))
+        loss_history.append(min_fitness)
+
+        if min_fitness < best_loss - tol_fun:
+            best_loss = min_fitness
+            best_idx = jnp.argmin(fitness)
+            best_flat_norm = population[best_idx]
+            stall_count = 0
+        else:
+            stall_count += 1
+
+        if stall_count >= patience:
+            converged = True
+            logger.info(
+                "Converged at generation %d: no improvement over %d generations (best_loss=%.6e)",
+                gen, patience, best_loss,
+            )
+            break
+
+        if gen % 50 == 0:
+            logger.info(
+                "gen %d/%d: best_loss=%.6e, stall=%d/%d",
+                gen, n_generations, best_loss, stall_count, patience,
+            )
+
+        if progress_bar:
+            print_rate = max(1, n_generations // 20)
+            if gen % print_rate == 0 or gen == n_generations - 1:
+                print(f"\r  [{gen+1}/{n_generations}] loss={best_loss:.4e}", end="", flush=True)
+
+    if progress_bar:
+        print()
+
+    return best_flat_norm, loss_history, converged
