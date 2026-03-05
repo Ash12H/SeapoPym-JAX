@@ -19,10 +19,10 @@ class TestGAOptimizerInit:
         runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GAOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
-        assert opt.popsize == 32
+        assert opt.popsize == 64
         assert opt.seed == 0
-        assert opt.crossover_rate == 0.5
-        assert opt.mutation_std == 0.1
+        assert opt.crossover_rate == 0.8
+        assert opt.mutation_std == 0.05
 
     def test_no_default_priors(self):
         runner = _FakeRunner()

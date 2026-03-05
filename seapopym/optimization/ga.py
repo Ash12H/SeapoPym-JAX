@@ -47,8 +47,8 @@ class GAOptimizer:
         priors: Optional prior distributions. When ``None``, defaults to
             ``Uniform`` from bounds (no penalty).
         popsize: Population size.
-        crossover_rate: Crossover rate for SimpleGA.
-        mutation_std: Mutation standard deviation for SimpleGA.
+        crossover_rate: Crossover rate for SimpleGA (in [0, 1]).
+        mutation_std: Mutation standard deviation in normalized [0, 1] space.
         seed: Random seed for reproducibility.
 
     Example::
@@ -68,9 +68,9 @@ class GAOptimizer:
         objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]],
         priors: PriorSet | None = None,
-        popsize: int = 32,
-        crossover_rate: float = 0.5,
-        mutation_std: float = 0.1,
+        popsize: int = 64,
+        crossover_rate: float = 0.8,
+        mutation_std: float = 0.05,
         seed: int = 0,
     ) -> None:
         self.runner = runner
