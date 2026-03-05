@@ -79,6 +79,14 @@ declarations:
     mask:
       units: "dimensionless"
       dims: [Y, X]
+    bc_north:
+      units: "dimensionless"
+    bc_south:
+      units: "dimensionless"
+    bc_east:
+      units: "dimensionless"
+    bc_west:
+      units: "dimensionless"
 
 process:
   # --- Environment ---
@@ -205,6 +213,10 @@ process:
       face_width: forcings.face_width
       cell_area: forcings.cell_area
       mask: forcings.mask
+      bc_north: forcings.bc_north
+      bc_south: forcings.bc_south
+      bc_east: forcings.bc_east
+      bc_west: forcings.bc_west
     outputs:
       advection_rate: derived.biomass_advection
       diffusion_rate: derived.biomass_diffusion
@@ -222,6 +234,10 @@ process:
       face_width: forcings.face_width
       cell_area: forcings.cell_area
       mask: forcings.mask
+      bc_north: forcings.bc_north
+      bc_south: forcings.bc_south
+      bc_east: forcings.bc_east
+      bc_west: forcings.bc_west
     outputs:
       advection_rate: derived.production_advection
       diffusion_rate: derived.production_diffusion
