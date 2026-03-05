@@ -4,10 +4,14 @@
 # Demonstrates multi-restart CMA-ES with increasing population (IPOP strategy,
 # Auger & Hansen 2005) on a 0D LMTL ecosystem model.
 #
+# Runs **two experiments** with shared model setup:
+# 1. Clean observations (no noise)
+# 2. Noisy observations (15% Gaussian noise)
+#
 # Steps:
 # 1. Spin-up: simulate SPINUP_YEARS to stabilize the system
 # 2. Optimization year: generate synthetic observations on OPT_YEARS
-# 3. Run IPOP-CMA-ES to recover the parameters
+# 3. Run IPOP-CMA-ES to recover the parameters (clean & noisy)
 # 4. Visualize modes found, convergence, and parameter recovery
 
 # %%
@@ -73,6 +77,8 @@ BOUNDS = {
 }
 
 FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
+
+NOISE_LEVELS = [0.0, 0.15]
 
 PLOT_FILE = "examples/images/05_ipop_cmaes_lmtl_0d.png"
 
@@ -169,6 +175,7 @@ print(
     f"  IPOP: {N_RESTARTS} restarts, pop {INITIAL_POPSIZE}->{INITIAL_POPSIZE * 2 ** (N_RESTARTS - 1)}, "
     f"{N_GENERATIONS} gen"
 )
+print(f"  Noise levels: {NOISE_LEVELS}")
 print("=" * 60)
 
 print("\nGenerating observations with TRUE parameters...")
@@ -191,11 +198,12 @@ n_obs = max(1, int(OBS_FRACTION * n_opt_steps))
 rng = np.random.default_rng(SEED)
 obs_local_indices = np.sort(rng.choice(n_opt_steps, size=n_obs, replace=False))
 obs_global_indices = obs_local_indices + spinup_steps
-obs_values = true_biomass[obs_local_indices]
-print(f"  {n_obs} observations ({100 * n_obs / n_opt_steps:.1f}%), std={float(jnp.std(obs_values)):.6f}")
+obs_values_clean = true_biomass[obs_local_indices]
+print(f"  {n_obs} observations ({100 * n_obs / n_opt_steps:.1f}%), std={float(jnp.std(obs_values_clean)):.6f}")
+
 
 # %% [markdown]
-# ## Objective & Optimizer
+# ## Shared helpers
 
 # %%
 def extract_predictions(outputs):
@@ -203,120 +211,141 @@ def extract_predictions(outputs):
     ts = jnp.mean(biomass, axis=tuple(range(1, biomass.ndim)))
     return ts[obs_global_indices]
 
-objective = Objective(observations=obs_values, transform=extract_predictions)
 
-optimizer = IPOPCMAESOptimizer(
-    runner=runner,
-    objectives=[(objective, "nrmse", 1.0)],
-    bounds=BOUNDS,
-    n_restarts=N_RESTARTS,
-    initial_popsize=INITIAL_POPSIZE,
-    n_generations=N_GENERATIONS,
-    distance_threshold=DISTANCE_THRESHOLD,
-    seed=SEED,
-)
-
-# %% [markdown]
-# ## IPOP-CMA-ES
-
-# %%
-print("\nRunning IPOP-CMA-ES...")
-t0 = time.time()
-
-result = optimizer.run(model, progress_bar=True)
-
-elapsed = time.time() - t0
-print(f"\nCompleted in {elapsed:.1f}s")
-print(f"Found {len(result.modes)} distinct mode(s) across {result.n_restarts} restarts")
-
-# %% [markdown]
-# ## Results
-
-# %%
 param_names = list(BOUNDS.keys())
+dt_seconds = model.dt
+time_days = np.arange(n_opt_steps) * dt_seconds / 86400.0
 
-print("\n" + "=" * 60)
-print("Modes found (sorted by loss)")
-print("=" * 60)
+# %% [markdown]
+# ## Run IPOP-CMA-ES for each noise level
 
-header = f"{'Mode':<6} {'Loss':>10}"
-for p in param_names:
-    header += f" {p[:8]:>10}"
-print(header)
-print("-" * len(header))
+# %%
+all_experiment_results = {}
 
-row = f"{'True':<6} {0.0:>10.6f}"
-for p in param_names:
-    row += f" {TRUE_PARAMS[p]:>10.4g}"
-print(row)
+for noise_level in NOISE_LEVELS:
+    label = "clean" if noise_level == 0.0 else f"noise={noise_level:.0%}"
+    print(f"\n{'=' * 60}")
+    print(f"Experiment: {label}")
+    print(f"{'=' * 60}")
 
-for i, mode in enumerate(result.modes):
-    row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
+    if noise_level > 0:
+        noise_rng = np.random.default_rng(SEED + 1)
+        noise = jnp.array(noise_rng.normal(0, noise_level * np.array(obs_values_clean), size=obs_values_clean.shape))
+        obs_values = obs_values_clean + noise
+    else:
+        obs_values = obs_values_clean
+
+    objective = Objective(observations=obs_values, transform=extract_predictions)
+    optimizer = IPOPCMAESOptimizer(
+        runner=runner,
+        objectives=[(objective, "nrmse", 1.0)],
+        bounds=BOUNDS,
+        n_restarts=N_RESTARTS,
+        initial_popsize=INITIAL_POPSIZE,
+        n_generations=N_GENERATIONS,
+        distance_threshold=DISTANCE_THRESHOLD,
+        seed=SEED,
+    )
+
+    print(f"Running IPOP-CMA-ES ({label})...")
+    t0 = time.time()
+    result = optimizer.run(model, progress_bar=True)
+    elapsed = time.time() - t0
+
+    print(f"  Completed in {elapsed:.1f}s")
+    print(f"  Found {len(result.modes)} distinct mode(s) across {result.n_restarts} restarts")
+
+    all_experiment_results[noise_level] = {
+        "result": result,
+        "obs_values": obs_values,
+        "elapsed": elapsed,
+    }
+
+    # Print modes
+    header = f"{'Mode':<6} {'Loss':>10}"
     for p in param_names:
-        row += f" {float(jnp.squeeze(mode.params[p])):>10.4g}"
+        header += f" {p[:8]:>10}"
+    print(header)
+    print("-" * len(header))
+
+    row = f"{'True':<6} {0.0:>10.6f}"
+    for p in param_names:
+        row += f" {TRUE_PARAMS[p]:>10.4g}"
     print(row)
+
+    for i, mode in enumerate(result.modes):
+        row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
+        for p in param_names:
+            row += f" {float(jnp.squeeze(mode.params[p])):>10.4g}"
+        print(row)
 
 # %% [markdown]
 # ## Visualization
 
 # %%
-n_modes = len(result.modes)
-fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+n_experiments = len(NOISE_LEVELS)
+fig, axes = plt.subplots(n_experiments, 3, figsize=(16, 5 * n_experiments))
+if n_experiments == 1:
+    axes = axes[np.newaxis, :]
 
-# Plot 1: Loss per restart
-ax1 = axes[0]
-restart_losses = [float(r.loss) for r in result.all_results]
-mode_indices = [i for i, r in enumerate(result.all_results) if any(m.loss == r.loss for m in result.modes)]
-ax1.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
-ax1.bar(mode_indices, [restart_losses[i] for i in mode_indices], color="orangered", alpha=0.9)
-ax1.set_xlabel("Restart")
-ax1.set_ylabel("Loss (NRMSE-std)")
-ax1.set_title("Loss per restart")
-popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
-ax1.set_xticks(range(len(restart_losses)))
-ax1.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
+for row_idx, noise_level in enumerate(NOISE_LEVELS):
+    label = "Clean" if noise_level == 0.0 else f"Noise {noise_level:.0%}"
+    exp = all_experiment_results[noise_level]
+    result = exp["result"]
+    obs_values = exp["obs_values"]
+    n_modes = len(result.modes)
+    colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
 
-# Plot 2: Biomass trajectories (year 2 only)
-ax2 = axes[1]
-dt_seconds = model.dt
-time_days = np.arange(n_opt_steps) * dt_seconds / 86400.0
-ax2.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
-ax2.scatter(obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations")
+    # Plot 1: Loss per restart
+    ax1 = axes[row_idx, 0]
+    restart_losses = [float(r.loss) for r in result.all_results]
+    ax1.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
+    for mi, mode in enumerate(result.modes):
+        for ri, r in enumerate(result.all_results):
+            if r.loss == mode.loss:
+                ax1.bar(ri, restart_losses[ri], color=colors[mi], alpha=0.9)
+    ax1.set_xlabel("Restart")
+    ax1.set_ylabel("Loss (NRMSE)")
+    ax1.set_title(f"[{label}] Loss per restart")
+    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
+    ax1.set_xticks(range(len(restart_losses)))
+    ax1.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
 
-colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
-for i, mode in enumerate(result.modes):
-    outputs_mode = runner(model, mode.params)
-    biomass_mode = outputs_mode["biomass"]
-    pred_full = jnp.mean(biomass_mode, axis=tuple(range(1, biomass_mode.ndim)))
-    pred = pred_full[spinup_steps:]
-    ax2.plot(time_days, pred, "--", color=colors[i], linewidth=1.5, label=f"Mode #{i + 1}")
+    # Plot 2: Biomass trajectories
+    ax2 = axes[row_idx, 1]
+    ax2.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
+    ax2.scatter(
+        obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations"
+    )
+    for i, mode in enumerate(result.modes):
+        outputs_mode = runner(model, mode.params)
+        biomass_mode = outputs_mode["biomass"]
+        pred_full = jnp.mean(biomass_mode, axis=tuple(range(1, biomass_mode.ndim)))
+        pred = pred_full[spinup_steps:]
+        ax2.plot(time_days, pred, "--", color=colors[i], linewidth=1.5, label=f"Mode #{i + 1}")
+    ax2.set_xlabel("Day (year 2)")
+    ax2.set_ylabel("Biomass (g/m²)")
+    ax2.set_title(f"[{label}] Biomass trajectories")
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
 
-ax2.set_xlabel("Day (year 2)")
-ax2.set_ylabel("Biomass (g/m²)")
-ax2.set_title("Biomass trajectories (year 2)")
-ax2.legend(fontsize=8)
-ax2.grid(True, alpha=0.3)
-
-# Plot 3: Parameter recovery
-ax3 = axes[2]
-x = np.arange(len(param_names))
-width = 0.8 / (n_modes + 1)
-
-ax3.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", color="black", alpha=0.3)
-true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
-
-for i, mode in enumerate(result.modes):
-    pred_vals = np.array([float(jnp.squeeze(mode.params[p])) for p in param_names])
-    ratios = pred_vals / true_vals
-    ax3.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
-
-ax3.set_xticks(x)
-ax3.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
-ax3.set_ylabel("Ratio to true value")
-ax3.set_title("Parameter recovery")
-ax3.axhline(y=1, color="k", linestyle="--", alpha=0.5)
-ax3.legend(fontsize=8)
-ax3.grid(True, alpha=0.3, axis="y")
+    # Plot 3: Parameter recovery
+    ax3 = axes[row_idx, 2]
+    x = np.arange(len(param_names))
+    width = 0.8 / (n_modes + 1)
+    ax3.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", color="black", alpha=0.3)
+    true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
+    for i, mode in enumerate(result.modes):
+        pred_vals = np.array([float(jnp.squeeze(mode.params[p])) for p in param_names])
+        ratios = pred_vals / true_vals
+        ax3.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
+    ax3.set_xticks(x)
+    ax3.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
+    ax3.set_ylabel("Ratio to true value")
+    ax3.set_title(f"[{label}] Parameter recovery")
+    ax3.axhline(y=1, color="k", linestyle="--", alpha=0.5)
+    ax3.legend(fontsize=8)
+    ax3.grid(True, alpha=0.3, axis="y")
 
 plt.tight_layout()
 Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)

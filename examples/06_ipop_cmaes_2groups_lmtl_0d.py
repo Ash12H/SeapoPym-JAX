@@ -14,6 +14,10 @@
 # - Day:   surface sensor sees only group 0
 # - Night: surface sensor sees group 0 + group 1
 #
+# Runs **two experiments** with shared model setup:
+# 1. Clean observations (no noise)
+# 2. Noisy observations (30% Gaussian noise)
+#
 # Setup: 1y spin-up + 2y optimization, 5% observations, IPOP-CMA-ES.
 
 # %%
@@ -79,6 +83,8 @@ BOUNDS = {
 }
 
 FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
+
+NOISE_LEVELS = [0.0, 0.30]
 
 PLOT_FILE = "examples/images/06_ipop_cmaes_2groups_lmtl_0d.png"
 
@@ -183,6 +189,7 @@ print(f"  Group 0: surface (day=0, night=0)")
 print(f"  Group 1: DVM     (day=1, night=0)")
 print(f"  Latitude: {LATITUDE}°N")
 print(f"  IPOP: {N_RESTARTS} restarts, pop {INITIAL_POPSIZE}->{INITIAL_POPSIZE * 2 ** (N_RESTARTS - 1)}")
+print(f"  Noise levels: {NOISE_LEVELS}")
 print("=" * 60)
 
 print("\nGenerating observations with TRUE parameters...")
@@ -211,11 +218,11 @@ is_day = rng.random(n_obs) < 0.5
 night_weight = (~is_day).astype(float)
 n_day, n_night = int(np.sum(is_day)), int(np.sum(~is_day))
 
-obs_values = np.array(bio_g0[obs_local_idx]) + night_weight * np.array(bio_g1[obs_local_idx])
-print(f"  {n_obs} observations ({n_day} day, {n_night} night), std={float(np.std(obs_values)):.6f}")
+obs_values_clean = np.array(bio_g0[obs_local_idx]) + night_weight * np.array(bio_g1[obs_local_idx])
+print(f"  {n_obs} observations ({n_day} day, {n_night} night), std={float(np.std(obs_values_clean)):.6f}")
 
 # %% [markdown]
-# ## Objective & Optimizer
+# ## Shared helpers
 
 # %%
 _night_w = jnp.array(night_weight)
@@ -228,158 +235,179 @@ def extract_predictions(outputs):
     return g0[obs_global_idx] + _night_w * g1[obs_global_idx]
 
 
-objective = Objective(observations=jnp.array(obs_values), transform=extract_predictions)
-
-optimizer = IPOPCMAESOptimizer(
-    runner=runner,
-    objectives=[(objective, "nrmse", 1.0)],
-    bounds=BOUNDS,
-    n_restarts=N_RESTARTS,
-    initial_popsize=INITIAL_POPSIZE,
-    n_generations=N_GENERATIONS,
-    distance_threshold=DISTANCE_THRESHOLD,
-    seed=SEED,
-)
+dt_sec = model.dt
+time_days = np.arange(n_opt_steps) * dt_sec / 86400.0
 
 # %% [markdown]
-# ## IPOP-CMA-ES
+# ## Run IPOP-CMA-ES for each noise level
 
 # %%
-print("\nRunning IPOP-CMA-ES...")
-t0 = time.time()
-result = optimizer.run(model, progress_bar=True)
-elapsed = time.time() - t0
+all_experiment_results = {}
 
-print(f"\nCompleted in {elapsed:.1f}s")
-print(f"Found {len(result.modes)} distinct mode(s) across {result.n_restarts} restarts")
+for noise_level in NOISE_LEVELS:
+    label = "clean" if noise_level == 0.0 else f"noise={noise_level:.0%}"
+    print(f"\n{'=' * 60}")
+    print(f"Experiment: {label}")
+    print(f"{'=' * 60}")
 
-# %% [markdown]
-# ## Results
+    if noise_level > 0:
+        noise_rng = np.random.default_rng(SEED + 1)
+        noise = noise_rng.normal(0, noise_level * np.abs(obs_values_clean), size=obs_values_clean.shape)
+        obs_values = obs_values_clean + noise
+    else:
+        obs_values = obs_values_clean
 
-# %%
-print("\n" + "=" * 60)
-print("Modes found (sorted by loss)")
-print("=" * 60)
+    objective = Objective(observations=jnp.array(obs_values), transform=extract_predictions)
+    optimizer = IPOPCMAESOptimizer(
+        runner=runner,
+        objectives=[(objective, "nrmse", 1.0)],
+        bounds=BOUNDS,
+        n_restarts=N_RESTARTS,
+        initial_popsize=INITIAL_POPSIZE,
+        n_generations=N_GENERATIONS,
+        distance_threshold=DISTANCE_THRESHOLD,
+        seed=SEED,
+    )
 
-header = f"{'Mode':<6} {'Loss':>10}"
-for p in ALL_OPT_PARAMS:
-    header += f" {p[:10]:>12}"
-print(header)
-print("-" * len(header))
+    print(f"Running IPOP-CMA-ES ({label})...")
+    t0 = time.time()
+    result = optimizer.run(model, progress_bar=True)
+    elapsed = time.time() - t0
 
-row = f"{'True':<6} {0.0:>10.6f}"
-for p in ALL_OPT_PARAMS:
-    row += f" {TRUE_PARAMS[p]:>12.4g}"
-print(row)
+    print(f"  Completed in {elapsed:.1f}s")
+    print(f"  Found {len(result.modes)} distinct mode(s) across {result.n_restarts} restarts")
 
-for i, mode in enumerate(result.modes):
-    row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
+    all_experiment_results[noise_level] = {
+        "result": result,
+        "obs_values": obs_values,
+        "elapsed": elapsed,
+    }
+
+    # Print modes
+    header = f"{'Mode':<6} {'Loss':>10}"
     for p in ALL_OPT_PARAMS:
-        row += f" {float(jnp.mean(mode.params[p])):>12.4g}"
+        header += f" {p[:10]:>12}"
+    print(header)
+    print("-" * len(header))
+
+    row = f"{'True':<6} {0.0:>10.6f}"
+    for p in ALL_OPT_PARAMS:
+        row += f" {TRUE_PARAMS[p]:>12.4g}"
     print(row)
 
-best = result.modes[0]
-print("\nParameter recovery (best mode, mean over groups):")
-for p in ALL_OPT_PARAMS:
-    ratio = float(jnp.mean(best.params[p])) / TRUE_PARAMS[p]
-    print(f"  {p:<14} ratio = {ratio:.4f}")
+    for i, mode in enumerate(result.modes):
+        row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
+        for p in ALL_OPT_PARAMS:
+            row += f" {float(jnp.mean(mode.params[p])):>12.4g}"
+        print(row)
+
+    best = result.modes[0]
+    print(f"\nParameter recovery (best mode, mean over groups):")
+    for p in ALL_OPT_PARAMS:
+        ratio = float(jnp.mean(best.params[p])) / TRUE_PARAMS[p]
+        print(f"  {p:<14} ratio = {ratio:.4f}")
 
 # %% [markdown]
 # ## Visualization
 
 # %%
-n_modes = len(result.modes)
-fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
-dt_sec = model.dt
-time_days = np.arange(n_opt_steps) * dt_sec / 86400.0
+n_experiments = len(NOISE_LEVELS)
+fig, axes = plt.subplots(n_experiments, 4, figsize=(18, 5 * n_experiments))
+if n_experiments == 1:
+    axes = axes[np.newaxis, :]
 
-# --- Top left: Biomass trajectories (both groups) ---
-ax = axes[0, 0]
-ax.plot(time_days, np.array(bio_g0), "k-", linewidth=2, label="True G0 (surface)", alpha=0.7)
-ax.plot(time_days, np.array(bio_g1), "k--", linewidth=2, label="True G1 (DVM)", alpha=0.7)
-ax.scatter(
-    obs_local_idx[is_day] * dt_sec / 86400.0,
-    obs_values[is_day],
-    c="gold", s=25, zorder=5, label="Obs (day)", edgecolors="k", linewidths=0.5,
-)
-ax.scatter(
-    obs_local_idx[~is_day] * dt_sec / 86400.0,
-    obs_values[~is_day],
-    c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
-)
-for i, mode in enumerate(result.modes):
-    outputs_mode = runner(model, mode.params)
-    biomass_mode = outputs_mode["biomass"]
-    bg0_m = jnp.mean(biomass_mode[:, 0], axis=tuple(range(1, biomass_mode.ndim - 1)))
-    bg1_m = jnp.mean(biomass_mode[:, 1], axis=tuple(range(1, biomass_mode.ndim - 1)))
-    ax.plot(time_days, np.array(bg0_m[spinup_steps:]), "-", color=colors[i],
-            linewidth=1.5, alpha=0.8, label=f"Mode #{i+1} G0")
-    ax.plot(time_days, np.array(bg1_m[spinup_steps:]), "--", color=colors[i],
-            linewidth=1.5, alpha=0.8, label=f"Mode #{i+1} G1")
-ax.set_xlabel("Day")
-ax.set_ylabel("Biomass (g/m²)")
-ax.set_title("Biomass: True vs CMA-ES modes (G0=surface, G1=DVM)")
-ax.legend(fontsize=7, ncol=2)
-ax.grid(True, alpha=0.3)
+for row_idx, noise_level in enumerate(NOISE_LEVELS):
+    label = "Clean" if noise_level == 0.0 else f"Noise {noise_level:.0%}"
+    exp = all_experiment_results[noise_level]
+    result = exp["result"]
+    obs_values = exp["obs_values"]
+    best = result.modes[0]
+    n_modes = len(result.modes)
+    colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
 
-# --- Top right: Parameter recovery ---
-ax = axes[0, 1]
-x_pos = np.arange(len(ALL_OPT_PARAMS))
-width = 0.8 / (n_modes + 1)
-ax.bar(x_pos - 0.4 + width / 2, np.ones(len(ALL_OPT_PARAMS)), width,
-       label="True", color="black", alpha=0.3)
-true_vals = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS])
-for i, mode in enumerate(result.modes):
-    ratios = np.array([float(jnp.mean(mode.params[p])) for p in ALL_OPT_PARAMS]) / true_vals
-    ax.bar(x_pos - 0.4 + (i + 1.5) * width, ratios, width,
-           label=f"Mode #{i+1}", color=colors[i], alpha=0.7)
-ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
-ax.set_xticks(x_pos)
-ax.set_xticklabels([p[:10] for p in ALL_OPT_PARAMS], rotation=30, ha="right", fontsize=9)
-ax.set_ylabel("Ratio to true value")
-ax.set_title("Parameter recovery")
-ax.legend(fontsize=8)
-ax.grid(True, alpha=0.3, axis="y")
+    # --- Col 0: Biomass trajectories (both groups) ---
+    ax = axes[row_idx, 0]
+    ax.plot(time_days, np.array(bio_g0), "k-", linewidth=2, label="True G0 (surface)", alpha=0.7)
+    ax.plot(time_days, np.array(bio_g1), "k--", linewidth=2, label="True G1 (DVM)", alpha=0.7)
+    ax.scatter(
+        obs_local_idx[is_day] * dt_sec / 86400.0,
+        obs_values[is_day],
+        c="gold", s=25, zorder=5, label="Obs (day)", edgecolors="k", linewidths=0.5,
+    )
+    ax.scatter(
+        obs_local_idx[~is_day] * dt_sec / 86400.0,
+        obs_values[~is_day],
+        c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
+    )
+    for i, mode in enumerate(result.modes):
+        outputs_mode = runner(model, mode.params)
+        biomass_mode = outputs_mode["biomass"]
+        bg0_m = jnp.mean(biomass_mode[:, 0], axis=tuple(range(1, biomass_mode.ndim - 1)))
+        bg1_m = jnp.mean(biomass_mode[:, 1], axis=tuple(range(1, biomass_mode.ndim - 1)))
+        ax.plot(time_days, np.array(bg0_m[spinup_steps:]), "-", color=colors[i],
+                linewidth=1.5, alpha=0.8, label=f"Mode #{i+1} G0")
+        ax.plot(time_days, np.array(bg1_m[spinup_steps:]), "--", color=colors[i],
+                linewidth=1.5, alpha=0.8, label=f"Mode #{i+1} G1")
+    ax.set_xlabel("Day")
+    ax.set_ylabel("Biomass (g/m²)")
+    ax.set_title(f"[{label}] Biomass (G0=surface, G1=DVM)")
+    ax.legend(fontsize=7, ncol=2)
+    ax.grid(True, alpha=0.3)
 
-# --- Bottom left: Loss per restart ---
-ax = axes[1, 0]
-restart_losses = [float(r.loss) for r in result.all_results]
-mode_indices = [i for i, r in enumerate(result.all_results)
-                if any(m.loss == r.loss for m in result.modes)]
-ax.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
-ax.bar(mode_indices, [restart_losses[i] for i in mode_indices], color="orangered", alpha=0.9)
-ax.set_xlabel("Restart")
-ax.set_ylabel("Loss (NRMSE)")
-ax.set_title("Loss per restart")
-popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
-ax.set_xticks(range(len(restart_losses)))
-ax.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
+    # --- Col 1: Parameter recovery ---
+    ax = axes[row_idx, 1]
+    x_pos = np.arange(len(ALL_OPT_PARAMS))
+    width = 0.8 / (n_modes + 1)
+    ax.bar(x_pos - 0.4 + width / 2, np.ones(len(ALL_OPT_PARAMS)), width,
+           label="True", color="black", alpha=0.3)
+    true_vals = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS])
+    for i, mode in enumerate(result.modes):
+        ratios = np.array([float(jnp.mean(mode.params[p])) for p in ALL_OPT_PARAMS]) / true_vals
+        ax.bar(x_pos - 0.4 + (i + 1.5) * width, ratios, width,
+               label=f"Mode #{i+1}", color=colors[i], alpha=0.7)
+    ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels([p[:10] for p in ALL_OPT_PARAMS], rotation=30, ha="right", fontsize=9)
+    ax.set_ylabel("Ratio to true value")
+    ax.set_title(f"[{label}] Parameter recovery")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
 
-# --- Bottom right: Surface observation fit ---
-ax = axes[1, 1]
-outputs_best = runner(model, best.params)
-biomass_best = outputs_best["biomass"]
-bg0_best = jnp.mean(biomass_best[:, 0], axis=tuple(range(1, biomass_best.ndim - 1)))
-bg1_best = jnp.mean(biomass_best[:, 1], axis=tuple(range(1, biomass_best.ndim - 1)))
-bg0_opt = np.array(bg0_best[spinup_steps:])
-bg1_opt = np.array(bg1_best[spinup_steps:])
-pred_best = bg0_opt[obs_local_idx] + night_weight * bg1_opt[obs_local_idx]
-ax.scatter(obs_values, pred_best, c=np.where(is_day, "gold", "navy"),
-           edgecolors="k", linewidths=0.5, s=30, zorder=5)
-obs_range = [min(obs_values.min(), pred_best.min()), max(obs_values.max(), pred_best.max())]
-ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
-ax.set_xlabel("Observed")
-ax.set_ylabel("Predicted (best mode)")
-ax.set_title("Observation fit (gold=day, navy=night)")
-ax.legend(fontsize=8)
-ax.grid(True, alpha=0.3)
+    # --- Col 2: Loss per restart ---
+    ax = axes[row_idx, 2]
+    restart_losses = [float(r.loss) for r in result.all_results]
+    ax.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
+    for mi, mode in enumerate(result.modes):
+        for ri, r in enumerate(result.all_results):
+            if r.loss == mode.loss:
+                ax.bar(ri, restart_losses[ri], color=colors[mi], alpha=0.9)
+    ax.set_xlabel("Restart")
+    ax.set_ylabel("Loss (NRMSE)")
+    ax.set_title(f"[{label}] Loss per restart")
+    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
+    ax.set_xticks(range(len(restart_losses)))
+    ax.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
 
-fig.suptitle(
-    f"IPOP-CMA-ES 2 Groups — {elapsed:.0f}s, {n_modes} mode(s), "
-    f"best loss={best.loss:.2e}",
-    fontsize=12,
-)
+    # --- Col 3: Observation fit ---
+    ax = axes[row_idx, 3]
+    outputs_best = runner(model, best.params)
+    biomass_best = outputs_best["biomass"]
+    bg0_best = jnp.mean(biomass_best[:, 0], axis=tuple(range(1, biomass_best.ndim - 1)))
+    bg1_best = jnp.mean(biomass_best[:, 1], axis=tuple(range(1, biomass_best.ndim - 1)))
+    bg0_opt = np.array(bg0_best[spinup_steps:])
+    bg1_opt = np.array(bg1_best[spinup_steps:])
+    pred_best = bg0_opt[obs_local_idx] + night_weight * bg1_opt[obs_local_idx]
+    ax.scatter(obs_values, pred_best, c=np.where(is_day, "gold", "navy"),
+               edgecolors="k", linewidths=0.5, s=30, zorder=5)
+    obs_range = [min(obs_values.min(), pred_best.min()), max(obs_values.max(), pred_best.max())]
+    ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
+    ax.set_xlabel("Observed")
+    ax.set_ylabel("Predicted (best mode)")
+    ax.set_title(f"[{label}] Obs fit (gold=day, navy=night)")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+fig.suptitle("IPOP-CMA-ES 2 Groups — Clean vs Noisy", fontsize=13)
 fig.tight_layout()
 Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
 plt.savefig(PLOT_FILE, dpi=150)
