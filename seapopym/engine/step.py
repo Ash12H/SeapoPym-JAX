@@ -50,12 +50,12 @@ def build_step_fn(
     tendency_map = model.tendency_map
     dt = model.dt
 
-    # Pre-compute vmapped functions for nodes with core_dims
+    # Pre-compute vmapped functions for nodes with broadcast dimensions
     vmapped_funcs: dict[str, tuple[Callable[..., Any], list[str] | None, tuple[int, ...] | None]] = {}
     for compute_node in compute_nodes:
-        if compute_node.core_dims:
-            arg_order = list(compute_node.input_mapping.keys())
-            broadcast_dims = compute_broadcast_dims(compute_node.input_dims, compute_node.core_dims)
+        arg_order = list(compute_node.input_mapping.keys())
+        broadcast_dims = compute_broadcast_dims(compute_node.input_dims, compute_node.core_dims)
+        if broadcast_dims:
             transpose_axes = compute_output_transpose_axes(broadcast_dims, compute_node.out_dims)
             vmapped_funcs[compute_node.name] = (
                 wrap_with_vmap(

@@ -253,7 +253,7 @@ print(row)
 for i, mode in enumerate(result.modes):
     row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
     for p in param_names:
-        row += f" {float(mode.params[p]):>10.4g}"
+        row += f" {float(jnp.squeeze(mode.params[p])):>10.4g}"
     print(row)
 
 # %% [markdown]
@@ -306,7 +306,7 @@ ax3.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", col
 true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
 
 for i, mode in enumerate(result.modes):
-    pred_vals = np.array([float(mode.params[p]) for p in param_names])
+    pred_vals = np.array([float(jnp.squeeze(mode.params[p])) for p in param_names])
     ratios = pred_vals / true_vals
     ax3.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
 

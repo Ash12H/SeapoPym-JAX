@@ -175,7 +175,8 @@ class IPOPCMAESOptimizer:
                 start_params = {}
                 keys = jax.random.split(init_key, len(self.bounds))
                 for (name, (low, high)), subkey in zip(self.bounds.items(), keys, strict=True):
-                    start_params[name] = jax.random.uniform(subkey, minval=low, maxval=high)
+                    shape = jnp.shape(initial_params[name])
+                    start_params[name] = jax.random.uniform(subkey, shape=shape, minval=low, maxval=high)
 
             optimizer = CMAESOptimizer(
                 runner=self.runner,

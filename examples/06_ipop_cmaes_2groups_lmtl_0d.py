@@ -275,13 +275,13 @@ print(row)
 for i, mode in enumerate(result.modes):
     row = f"{'#' + str(i + 1):<6} {mode.loss:>10.6f}"
     for p in ALL_OPT_PARAMS:
-        row += f" {float(mode.params[p]):>12.4g}"
+        row += f" {float(jnp.mean(mode.params[p])):>12.4g}"
     print(row)
 
 best = result.modes[0]
-print("\nParameter recovery (best mode):")
+print("\nParameter recovery (best mode, mean over groups):")
 for p in ALL_OPT_PARAMS:
-    ratio = float(best.params[p]) / TRUE_PARAMS[p]
+    ratio = float(jnp.mean(best.params[p])) / TRUE_PARAMS[p]
     print(f"  {p:<14} ratio = {ratio:.4f}")
 
 # %% [markdown]
@@ -331,7 +331,7 @@ ax.bar(x_pos - 0.4 + width / 2, np.ones(len(ALL_OPT_PARAMS)), width,
        label="True", color="black", alpha=0.3)
 true_vals = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS])
 for i, mode in enumerate(result.modes):
-    ratios = np.array([float(mode.params[p]) for p in ALL_OPT_PARAMS]) / true_vals
+    ratios = np.array([float(jnp.mean(mode.params[p])) for p in ALL_OPT_PARAMS]) / true_vals
     ax.bar(x_pos - 0.4 + (i + 1.5) * width, ratios, width,
            label=f"Mode #{i+1}", color=colors[i], alpha=0.7)
 ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
