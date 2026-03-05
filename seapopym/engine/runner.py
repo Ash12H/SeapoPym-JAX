@@ -9,6 +9,58 @@ Use factory methods to create instances for different use-cases::
     # Optimization (single-shot, no chunking, callable interface)
     runner = Runner.optimization()
     outputs = runner(model, free_params)
+
+Design Notes — Why optimization cannot use time chunking
+========================================================
+
+Simulation mode splits the time axis into chunks processed by successive
+``lax.scan`` calls inside a **plain Python loop**.  This works because
+nothing needs to trace through the loop boundary.
+
+Optimization mode must keep the **entire time axis inside a single
+``lax.scan``** call.  Two independent JAX transforms require this:
+
+1. **``jax.value_and_grad``** (gradient-based optimizers like Adam) —
+   Automatic differentiation traces the computation graph through
+   ``lax.scan``.  A Python ``for`` loop is opaque to the JAX tracer, so
+   splitting the scan into chunks would break gradient computation.
+
+2. **``jax.vmap``** (evolutionary optimizers like CMA-ES / GA) —
+   Population evaluation vectorises ``eval_one`` over all individuals
+   with ``jax.vmap``.  Inside ``eval_one``, the model runs as a single
+   ``lax.scan``.  ``vmap`` can vectorise JAX primitives (including
+   ``lax.scan``) but **cannot** vectorise a Python ``for`` loop.  This
+   ``vmap`` is what enables parallel evaluation of the whole population
+   on GPU/TPU in one kernel launch — removing it would serialise
+   individuals and drastically hurt performance.
+
+In summary::
+
+    Simulation:   Python for-loop  →  lax.scan per chunk   ✅ works
+    Grad optim:   jax.value_and_grad  →  lax.scan           ✅ works
+                  jax.value_and_grad  →  Python for-loop    ❌ breaks grad
+    Evol optim:   jax.vmap  →  lax.scan                     ✅ works
+                  jax.vmap  →  Python for-loop              ❌ breaks vmap
+
+Memory considerations for long time series
+-------------------------------------------
+
+Two things consume GPU memory during optimization:
+
+* **Intermediate states (carry)** — stored at every timestep by
+  ``lax.scan`` for the backward pass.  ``jax.checkpoint`` can trade
+  compute for memory by recomputing them instead of storing them.
+  However, this only helps gradient-based optimizers (which have a
+  backward pass); evolutionary optimizers do not benefit.
+
+* **Forcing data** — loaded in full via ``model.forcings.get_all()``
+  before ``lax.scan`` starts.  ``jax.checkpoint`` does **not** reduce
+  this cost.  Only chunking (``get_chunk(start, end)``) avoids loading
+  all forcings at once, but chunking is incompatible with ``vmap`` and
+  ``grad`` as explained above.
+
+For very long time series, the forcing data is likely the dominant memory
+bottleneck, not the intermediate states.
 """
 
 from __future__ import annotations
