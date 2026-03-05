@@ -13,16 +13,21 @@ declarations:
   parameters:
     lambda_0:
       units: "1/s"
+      dims: [F]
     gamma_lambda:
       units: "1/delta_degC"
+      dims: [F]
     tau_r_0:
       units: "s"
+      dims: [F]
     gamma_tau_r:
       units: "1/delta_degC"
+      dims: [F]
     t_ref:
       units: "degC"
     efficiency:
       units: "dimensionless"
+      dims: [F]
     cohort_ages:
       units: "s"
       dims: [C]

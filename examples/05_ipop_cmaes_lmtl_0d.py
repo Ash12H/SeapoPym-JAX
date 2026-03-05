@@ -121,12 +121,12 @@ npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat
 config = Config.from_dict(
     {
         "parameters": {
-            "lambda_0": {"value": TRUE_PARAMS["lambda_0"]},
-            "gamma_lambda": {"value": TRUE_PARAMS["gamma_lambda"]},
-            "tau_r_0": {"value": TRUE_PARAMS["tau_r_0"]},
-            "gamma_tau_r": {"value": TRUE_PARAMS["gamma_tau_r"]},
+            "lambda_0": {"value": [TRUE_PARAMS["lambda_0"]]},
+            "gamma_lambda": {"value": [TRUE_PARAMS["gamma_lambda"]]},
+            "tau_r_0": {"value": [TRUE_PARAMS["tau_r_0"]]},
+            "gamma_tau_r": {"value": [TRUE_PARAMS["gamma_tau_r"]]},
             "t_ref": {"value": TRUE_PARAMS["t_ref"]},
-            "efficiency": {"value": TRUE_PARAMS["efficiency"]},
+            "efficiency": {"value": [TRUE_PARAMS["efficiency"]]},
             "cohort_ages": {"value": cohort_ages_sec.tolist()},
             "day_layer": {"value": [0]},
             "night_layer": {"value": [0]},
@@ -173,7 +173,7 @@ print("=" * 60)
 
 print("\nGenerating observations with TRUE parameters...")
 t0 = time.time()
-true_params_jax = {k: jnp.array(TRUE_PARAMS[k]) for k in BOUNDS}
+true_params_jax = {k: jnp.array([TRUE_PARAMS[k]]) for k in BOUNDS}
 outputs_true = runner(model, true_params_jax)
 
 biomass_true = outputs_true["biomass"]

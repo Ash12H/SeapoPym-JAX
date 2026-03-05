@@ -101,12 +101,12 @@ npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat
 config = Config.from_dict(
     {
         "parameters": {
-            "lambda_0": {"value": LMTL_LAMBDA_0 / 86400.0},
-            "gamma_lambda": {"value": LMTL_GAMMA_LAMBDA},
-            "tau_r_0": {"value": LMTL_TAU_R_0 * 86400.0},
-            "gamma_tau_r": {"value": LMTL_GAMMA_TAU_R},
+            "lambda_0": {"value": [LMTL_LAMBDA_0 / 86400.0]},
+            "gamma_lambda": {"value": [LMTL_GAMMA_LAMBDA]},
+            "tau_r_0": {"value": [LMTL_TAU_R_0 * 86400.0]},
+            "gamma_tau_r": {"value": [LMTL_GAMMA_TAU_R]},
             "t_ref": {"value": LMTL_T_REF},
-            "efficiency": {"value": LMTL_E},
+            "efficiency": {"value": [LMTL_E]},
             "cohort_ages": {"value": cohort_ages_sec.tolist()},
             "day_layer": {"value": [0]},
             "night_layer": {"value": [0]},
