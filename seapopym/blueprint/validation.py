@@ -408,6 +408,73 @@ def validate_config(
         if not found:
             result.add_error(MissingDataError(var_path, data_type="initial_state"))
 
+    # Check dimension consistency between data and blueprint declarations
+    _validate_data_dims(config, all_vars, result)
+
     if not result.valid:
         raise ConfigValidationError(result.errors, result.warnings)
     return result
+
+
+def _validate_data_dims(
+    config: Config,
+    all_vars: dict[str, Any],
+    result: ValidationResult,
+) -> None:
+    """Validate that data dimensions match blueprint declarations.
+
+    For forcings and initial_state provided as xr.DataArray, checks that
+    the dimension names match the blueprint declarations (ignoring order).
+    The config's ``dimension_mapping`` is applied to data dims before
+    comparison so that non-canonical names (e.g. ``lat`` → ``Y``) are
+    accepted.
+
+    Args:
+        config: The Config to validate.
+        all_vars: All variable declarations from the blueprint.
+        result: ValidationResult to accumulate errors.
+    """
+    import xarray as xr
+
+    dim_map = config.dimension_mapping or {}
+
+    def _mapped_dims(da: xr.DataArray) -> set[str]:
+        return {dim_map.get(str(d), str(d)) for d in da.dims}
+
+    # Validate forcings
+    for var_path, var_decl in all_vars.items():
+        if not var_path.startswith("forcings."):
+            continue
+        if var_decl.dims is None:
+            continue
+
+        forcing_name = var_path.removeprefix("forcings.")
+        source = config.forcings.get(forcing_name)
+        if not isinstance(source, xr.DataArray):
+            continue
+
+        expected = set(var_decl.dims)
+        actual = _mapped_dims(source)
+        if expected != actual:
+            result.add_error(
+                DimensionMismatchError(var_path, expected=sorted(expected), actual=sorted(actual))
+            )
+
+    # Validate initial_state
+    for var_path, var_decl in all_vars.items():
+        if not var_path.startswith("state."):
+            continue
+        if var_decl.dims is None:
+            continue
+
+        state_name = var_path.removeprefix("state.")
+        source = config.initial_state.get(state_name)
+        if not isinstance(source, xr.DataArray):
+            continue
+
+        expected = set(var_decl.dims)
+        actual = _mapped_dims(source)
+        if expected != actual:
+            result.add_error(
+                DimensionMismatchError(var_path, expected=sorted(expected), actual=sorted(actual))
+            )

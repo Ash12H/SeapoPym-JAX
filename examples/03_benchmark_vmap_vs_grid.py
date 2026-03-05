@@ -106,9 +106,9 @@ config_1x1 = Config.from_dict(
             "cohort_ages": {"value": cohort_ages_sec.tolist()},
             "day_layer": {"value": [0]},
             "night_layer": {"value": [0]},
-            "latitude": {"value": LATITUDE},
         },
         "forcings": {
+            "latitude": xr.DataArray(np.full(ny_1, LATITUDE), dims=["Y"], coords={"Y": lat_1}),
             "temperature": temp_da_1,
             "primary_production": npp_da_1,
             "day_of_year": doy_da_1,
@@ -144,7 +144,7 @@ def run_single_sim(params: dict) -> jnp.ndarray:
     full_params["cohort_ages"] = _model_1x1.parameters["cohort_ages"]
     full_params["day_layer"] = _model_1x1.parameters["day_layer"]
     full_params["night_layer"] = _model_1x1.parameters["night_layer"]
-    full_params["latitude"] = _model_1x1.parameters["latitude"]
+    # latitude is now a forcing, not a parameter
 
     def scan_body(carry, t):
         state, p = carry
@@ -215,9 +215,9 @@ def build_grid_model(ny: int, nx: int):
                 "cohort_ages": {"value": cohort_ages_sec.tolist()},
                 "day_layer": {"value": [0]},
                 "night_layer": {"value": [0]},
-                "latitude": {"value": LATITUDE},
             },
             "forcings": {
+                "latitude": xr.DataArray(np.full(ny, LATITUDE), dims=["Y"], coords={"Y": lat}),
                 "temperature": temp_da,
                 "primary_production": npp_da,
                 "day_of_year": doy_da,

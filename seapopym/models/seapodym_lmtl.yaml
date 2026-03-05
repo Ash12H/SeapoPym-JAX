@@ -32,10 +32,11 @@ declarations:
     night_layer:
       units: "dimensionless"
       dims: [F]
-    latitude:
-      units: "degrees"
 
   forcings:
+    latitude:
+      units: "degrees"
+      dims: [Y]
     temperature:
       units: "degC"
       dims: [T, Z, Y, X]
@@ -78,7 +79,7 @@ process:
   # --- Environment ---
   - func: "lmtl:day_length"
     inputs:
-      latitude: parameters.latitude
+      latitude: forcings.latitude
       day_of_year: forcings.day_of_year
     outputs:
       return: derived.day_length

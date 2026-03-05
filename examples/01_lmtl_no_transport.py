@@ -44,7 +44,6 @@ LMTL_GAMMA_LAMBDA = 0.15  # 1/degC
 LMTL_TAU_R_0 = 10.38  # days
 LMTL_GAMMA_TAU_R = 0.11  # 1/degC
 LMTL_T_REF = 0.0  # degC
-LATITUDE = 30.0  # degrees N
 
 PLOT_FILE = "examples/images/01_lmtl_no_transport.png"
 
@@ -111,9 +110,9 @@ config = Config.from_dict(
             "cohort_ages": {"value": cohort_ages_sec.tolist()},
             "day_layer": {"value": [0]},
             "night_layer": {"value": [0]},
-            "latitude": {"value": LATITUDE},
         },
         "forcings": {
+            "latitude": xr.DataArray(np.linspace(-90, 90, ny), dims=["Y"], coords={"Y": lat}),
             "temperature": temp_da,
             "primary_production": npp_da,
             "day_of_year": doy_da,

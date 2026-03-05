@@ -82,7 +82,7 @@ BOUNDS = {
     "efficiency": (BOUNDS_MULTIPLICATOR[0] * TRUE_PARAMS["efficiency"], BOUNDS_MULTIPLICATOR[1] * TRUE_PARAMS["efficiency"]),
 }
 
-FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"], "latitude": LATITUDE}
+FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
 
 NOISE_LEVEL = 0.30
 
@@ -148,9 +148,9 @@ config = Config.from_dict(
             "cohort_ages": {"value": cohort_ages_sec.tolist()},
             "day_layer": {"value": [0, 1]},
             "night_layer": {"value": [0, 0]},
-            "latitude": {"value": LATITUDE},
         },
         "forcings": {
+            "latitude": xr.DataArray(np.full(ny, LATITUDE), dims=["Y"], coords={"Y": lat}),
             "temperature": temp_da,
             "primary_production": npp_da,
             "day_of_year": doy_da,
