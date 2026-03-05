@@ -259,7 +259,7 @@ for noise_level in NOISE_LEVELS:
 
 # %%
 n_experiments = len(NOISE_LEVELS)
-fig, axes = plt.subplots(n_experiments, 3, figsize=(16, 5 * n_experiments))
+fig, axes = plt.subplots(n_experiments, 4, figsize=(20, 5 * n_experiments))
 if n_experiments == 1:
     axes = axes[np.newaxis, :]
 
@@ -270,22 +270,8 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     obs_values = exp["obs_values"]
     loss_history = result.loss_history
 
-    # --- Col 0: Loss evolution ---
+    # --- Col 0: Biomass time series ---
     ax = axes[row_idx, 0]
-    generations = np.arange(1, len(loss_history) + 1)
-    best_of_gen = np.array(loss_history)
-    elite = np.minimum.accumulate(best_of_gen)
-
-    ax.semilogy(generations, best_of_gen, color="steelblue", linewidth=0.8, alpha=0.5, label="Best of generation")
-    ax.semilogy(generations, elite, color="orangered", linewidth=2, label="Elite (cumul. min)")
-    ax.set_xlabel("Generation")
-    ax.set_ylabel("Loss (NRMSE)")
-    ax.set_title(f"[{label}] Loss evolution")
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3)
-
-    # --- Col 1: Biomass trajectories ---
-    ax = axes[row_idx, 1]
     ax.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
     ax.scatter(
         obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations"
@@ -298,6 +284,18 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.set_xlabel("Day (year 2)")
     ax.set_ylabel("Biomass (g/m²)")
     ax.set_title(f"[{label}] Biomass trajectories")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # --- Col 1: OBS vs PRED scatter ---
+    ax = axes[row_idx, 1]
+    pred_best = np.array(pred)[obs_local_indices - spinup_steps]
+    ax.scatter(obs_values, pred_best, c="red", edgecolors="k", linewidths=0.5, s=30, zorder=5)
+    obs_range = [min(np.min(obs_values), np.min(pred_best)), max(np.max(obs_values), np.max(pred_best))]
+    ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
+    ax.set_xlabel("Observed")
+    ax.set_ylabel("Predicted (GA)")
+    ax.set_title(f"[{label}] Obs vs Pred")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -317,6 +315,19 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3, axis="y")
+
+    # --- Col 3: Loss evolution ---
+    ax = axes[row_idx, 3]
+    generations = np.arange(1, len(loss_history) + 1)
+    best_of_gen = np.array(loss_history)
+    elite = np.minimum.accumulate(best_of_gen)
+    ax.semilogy(generations, best_of_gen, color="steelblue", linewidth=0.8, alpha=0.5, label="Best of generation")
+    ax.semilogy(generations, elite, color="orangered", linewidth=2, label="Elite (cumul. min)")
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Loss (NRMSE)")
+    ax.set_title(f"[{label}] Loss evolution")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
 Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)

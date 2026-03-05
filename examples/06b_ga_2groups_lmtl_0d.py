@@ -276,18 +276,27 @@ for noise_level in NOISE_LEVELS:
     }
 
     # Print parameter recovery
-    print(f"\n  Parameter recovery (mean over groups):")
+    print(f"\n  Parameter recovery (per group):")
     for p in ALL_OPT_PARAMS:
-        val = float(jnp.mean(result.params[p]))
-        ratio = val / TRUE_PARAMS[p]
-        print(f"    {p:<14} = {val:>12.4g}  (ratio = {ratio:.4f})")
+        vals = result.params[p]
+        for g in range(n_groups):
+            v = float(vals[g])
+            ratio = v / TRUE_PARAMS[p]
+            print(f"    {p:<14} G{g} = {v:>12.4g}  (ratio = {ratio:.4f})")
 
 # %% [markdown]
 # ## Visualization
 
 # %%
+# Build per-group parameter labels
+param_labels = []
+for p in ALL_OPT_PARAMS:
+    for g in range(n_groups):
+        param_labels.append(f"{p[:10]} G{g}")
+true_vals_flat = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS for _ in range(n_groups)])
+
 n_experiments = len(NOISE_LEVELS)
-fig, axes = plt.subplots(n_experiments, 3, figsize=(16, 5 * n_experiments))
+fig, axes = plt.subplots(n_experiments, 4, figsize=(20, 5 * n_experiments))
 if n_experiments == 1:
     axes = axes[np.newaxis, :]
 
@@ -298,32 +307,16 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     obs_values = exp["obs_values"]
     loss_history = result.loss_history
 
-    # --- Col 0: Loss evolution ---
+    # --- Col 0: Biomass time series ---
     ax = axes[row_idx, 0]
-    generations = np.arange(1, len(loss_history) + 1)
-    best_of_gen = np.array(loss_history)
-    elite = np.minimum.accumulate(best_of_gen)
-
-    ax.semilogy(generations, best_of_gen, color="steelblue", linewidth=0.8, alpha=0.5, label="Best of generation")
-    ax.semilogy(generations, elite, color="orangered", linewidth=2, label="Elite (cumul. min)")
-    ax.set_xlabel("Generation")
-    ax.set_ylabel("Loss (NRMSE)")
-    ax.set_title(f"[{label}] Loss evolution")
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3)
-
-    # --- Col 1: Biomass trajectories (both groups) ---
-    ax = axes[row_idx, 1]
     ax.plot(time_days, np.array(bio_g0), "k-", linewidth=2, label="True G0 (surface)", alpha=0.7)
     ax.plot(time_days, np.array(bio_g1), "k--", linewidth=2, label="True G1 (DVM)", alpha=0.7)
     ax.scatter(
-        obs_local_idx[is_day] * dt_sec / 86400.0,
-        obs_values[is_day],
+        obs_local_idx[is_day] * dt_sec / 86400.0, obs_values[is_day],
         c="gold", s=25, zorder=5, label="Obs (day)", edgecolors="k", linewidths=0.5,
     )
     ax.scatter(
-        obs_local_idx[~is_day] * dt_sec / 86400.0,
-        obs_values[~is_day],
+        obs_local_idx[~is_day] * dt_sec / 86400.0, obs_values[~is_day],
         c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
     )
     outputs_best = runner(model, result.params)
@@ -340,24 +333,53 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.legend(fontsize=7, ncol=2)
     ax.grid(True, alpha=0.3)
 
-    # --- Col 2: Parameter recovery ---
-    ax = axes[row_idx, 2]
-    x = np.arange(len(ALL_OPT_PARAMS))
-    true_vals = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS])
-    pred_vals = np.array([float(jnp.mean(result.params[p])) for p in ALL_OPT_PARAMS])
-    ratios = pred_vals / true_vals
+    # --- Col 1: OBS vs PRED scatter ---
+    ax = axes[row_idx, 1]
+    bg0_opt = np.array(bg0_best[spinup_steps:])
+    bg1_opt = np.array(bg1_best[spinup_steps:])
+    pred_best = bg0_opt[obs_local_idx] + night_weight * bg1_opt[obs_local_idx]
+    ax.scatter(obs_values, pred_best, c=np.where(is_day, "gold", "navy"),
+               edgecolors="k", linewidths=0.5, s=30, zorder=5)
+    obs_range = [min(obs_values.min(), pred_best.min()), max(obs_values.max(), pred_best.max())]
+    ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
+    ax.set_xlabel("Observed")
+    ax.set_ylabel("Predicted (GA)")
+    ax.set_title(f"[{label}] Obs vs Pred (gold=day, navy=night)")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
 
-    ax.bar(x - 0.15, np.ones(len(ALL_OPT_PARAMS)), 0.3, label="True", color="black", alpha=0.3)
-    ax.bar(x + 0.15, ratios, 0.3, label="GA", color="orangered", alpha=0.7)
-    ax.set_xticks(x)
-    ax.set_xticklabels([p[:10] for p in ALL_OPT_PARAMS], rotation=30, ha="right", fontsize=9)
-    ax.set_ylabel("Ratio to true value")
-    ax.set_title(f"[{label}] Parameter recovery")
+    # --- Col 2: Parameter recovery (10 individual params) ---
+    ax = axes[row_idx, 2]
+    n_all = len(param_labels)
+    x_pos = np.arange(n_all)
+    vals = np.array([float(result.params[p][g]) for p in ALL_OPT_PARAMS for g in range(n_groups)])
+    ratios = vals / true_vals_flat
+
+    ax.bar(x_pos - 0.15, np.ones(n_all), 0.3, label="True", color="black", alpha=0.3)
+    ax.bar(x_pos + 0.15, ratios, 0.3, label="GA", color="orangered", alpha=0.7)
     ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(param_labels, rotation=45, ha="right", fontsize=7)
+    ax.set_ylabel("Ratio to true value")
+    ax.set_title(f"[{label}] Parameter recovery (per group)")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3, axis="y")
 
-plt.tight_layout()
+    # --- Col 3: Loss evolution ---
+    ax = axes[row_idx, 3]
+    generations = np.arange(1, len(loss_history) + 1)
+    best_of_gen = np.array(loss_history)
+    elite = np.minimum.accumulate(best_of_gen)
+    ax.semilogy(generations, best_of_gen, color="steelblue", linewidth=0.8, alpha=0.5, label="Best of generation")
+    ax.semilogy(generations, elite, color="orangered", linewidth=2, label="Elite (cumul. min)")
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Loss (NRMSE)")
+    ax.set_title(f"[{label}] Loss evolution")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+fig.suptitle("SimpleGA 2 Groups — Clean vs Noisy", fontsize=13)
+fig.tight_layout()
 Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
 plt.savefig(PLOT_FILE, dpi=150)
 print(f"\nPlot saved to {PLOT_FILE}")

@@ -284,7 +284,7 @@ for noise_level in NOISE_LEVELS:
 
 # %%
 n_experiments = len(NOISE_LEVELS)
-fig, axes = plt.subplots(n_experiments, 3, figsize=(16, 5 * n_experiments))
+fig, axes = plt.subplots(n_experiments, 4, figsize=(20, 5 * n_experiments))
 if n_experiments == 1:
     axes = axes[np.newaxis, :]
 
@@ -293,28 +293,14 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     exp = all_experiment_results[noise_level]
     result = exp["result"]
     obs_values = exp["obs_values"]
+    best = result.modes[0]
     n_modes = len(result.modes)
     colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
 
-    # Plot 1: Loss per restart
-    ax1 = axes[row_idx, 0]
-    restart_losses = [float(r.loss) for r in result.all_results]
-    ax1.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
-    for mi, mode in enumerate(result.modes):
-        for ri, r in enumerate(result.all_results):
-            if r.loss == mode.loss:
-                ax1.bar(ri, restart_losses[ri], color=colors[mi], alpha=0.9)
-    ax1.set_xlabel("Restart")
-    ax1.set_ylabel("Loss (NRMSE)")
-    ax1.set_title(f"[{label}] Loss per restart")
-    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
-    ax1.set_xticks(range(len(restart_losses)))
-    ax1.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
-
-    # Plot 2: Biomass trajectories
-    ax2 = axes[row_idx, 1]
-    ax2.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
-    ax2.scatter(
+    # --- Col 0: Biomass time series ---
+    ax = axes[row_idx, 0]
+    ax.plot(time_days, true_biomass, "k-", linewidth=2, label="True", alpha=0.7)
+    ax.scatter(
         obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations"
     )
     for i, mode in enumerate(result.modes):
@@ -322,30 +308,60 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
         biomass_mode = outputs_mode["biomass"]
         pred_full = jnp.mean(biomass_mode, axis=tuple(range(1, biomass_mode.ndim)))
         pred = pred_full[spinup_steps:]
-        ax2.plot(time_days, pred, "--", color=colors[i], linewidth=1.5, label=f"Mode #{i + 1}")
-    ax2.set_xlabel("Day (year 2)")
-    ax2.set_ylabel("Biomass (g/m²)")
-    ax2.set_title(f"[{label}] Biomass trajectories")
-    ax2.legend(fontsize=8)
-    ax2.grid(True, alpha=0.3)
+        ax.plot(time_days, pred, "--", color=colors[i], linewidth=1.5, label=f"Mode #{i + 1}")
+    ax.set_xlabel("Day (year 2)")
+    ax.set_ylabel("Biomass (g/m²)")
+    ax.set_title(f"[{label}] Biomass trajectories")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
 
-    # Plot 3: Parameter recovery
-    ax3 = axes[row_idx, 2]
+    # --- Col 1: OBS vs PRED scatter ---
+    ax = axes[row_idx, 1]
+    outputs_best = runner(model, best.params)
+    biomass_best = outputs_best["biomass"]
+    pred_full = jnp.mean(biomass_best, axis=tuple(range(1, biomass_best.ndim)))
+    pred_best = np.array(pred_full[spinup_steps:])[obs_local_indices - spinup_steps]
+    ax.scatter(obs_values, pred_best, c="red", edgecolors="k", linewidths=0.5, s=30, zorder=5)
+    obs_range = [min(np.min(obs_values), np.min(pred_best)), max(np.max(obs_values), np.max(pred_best))]
+    ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
+    ax.set_xlabel("Observed")
+    ax.set_ylabel("Predicted (best mode)")
+    ax.set_title(f"[{label}] Obs vs Pred")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # --- Col 2: Parameter recovery ---
+    ax = axes[row_idx, 2]
     x = np.arange(len(param_names))
     width = 0.8 / (n_modes + 1)
-    ax3.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", color="black", alpha=0.3)
+    ax.bar(x - 0.4 + width / 2, np.ones(len(param_names)), width, label="True", color="black", alpha=0.3)
     true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
     for i, mode in enumerate(result.modes):
         pred_vals = np.array([float(jnp.squeeze(mode.params[p])) for p in param_names])
         ratios = pred_vals / true_vals
-        ax3.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
-    ax3.set_xticks(x)
-    ax3.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
-    ax3.set_ylabel("Ratio to true value")
-    ax3.set_title(f"[{label}] Parameter recovery")
-    ax3.axhline(y=1, color="k", linestyle="--", alpha=0.5)
-    ax3.legend(fontsize=8)
-    ax3.grid(True, alpha=0.3, axis="y")
+        ax.bar(x - 0.4 + (i + 1.5) * width, ratios, width, label=f"Mode #{i + 1}", color=colors[i], alpha=0.7)
+    ax.set_xticks(x)
+    ax.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
+    ax.set_ylabel("Ratio to true value")
+    ax.set_title(f"[{label}] Parameter recovery")
+    ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # --- Col 3: Loss per restart ---
+    ax = axes[row_idx, 3]
+    restart_losses = [float(r.loss) for r in result.all_results]
+    ax.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
+    for mi, mode in enumerate(result.modes):
+        for ri, r in enumerate(result.all_results):
+            if r.loss == mode.loss:
+                ax.bar(ri, restart_losses[ri], color=colors[mi], alpha=0.9)
+    ax.set_xlabel("Restart")
+    ax.set_ylabel("Loss (NRMSE)")
+    ax.set_title(f"[{label}] Loss per restart")
+    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
+    ax.set_xticks(range(len(restart_losses)))
+    ax.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
 
 plt.tight_layout()
 Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)

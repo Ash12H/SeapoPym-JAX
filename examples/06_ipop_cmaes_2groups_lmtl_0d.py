@@ -302,17 +302,27 @@ for noise_level in NOISE_LEVELS:
         print(row)
 
     best = result.modes[0]
-    print(f"\nParameter recovery (best mode, mean over groups):")
+    print(f"\nParameter recovery (best mode, per group):")
     for p in ALL_OPT_PARAMS:
-        ratio = float(jnp.mean(best.params[p])) / TRUE_PARAMS[p]
-        print(f"  {p:<14} ratio = {ratio:.4f}")
+        vals = best.params[p]
+        for g in range(n_groups):
+            v = float(vals[g])
+            ratio = v / TRUE_PARAMS[p]
+            print(f"  {p:<14} G{g} = {v:>12.4g}  (ratio = {ratio:.4f})")
 
 # %% [markdown]
 # ## Visualization
 
 # %%
+# Build per-group parameter labels: "lambda_0 G0", "lambda_0 G1", ...
+param_labels = []
+for p in ALL_OPT_PARAMS:
+    for g in range(n_groups):
+        param_labels.append(f"{p[:10]} G{g}")
+true_vals_flat = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS for _ in range(n_groups)])
+
 n_experiments = len(NOISE_LEVELS)
-fig, axes = plt.subplots(n_experiments, 4, figsize=(18, 5 * n_experiments))
+fig, axes = plt.subplots(n_experiments, 4, figsize=(20, 5 * n_experiments))
 if n_experiments == 1:
     axes = axes[np.newaxis, :]
 
@@ -325,18 +335,16 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     n_modes = len(result.modes)
     colors = plt.cm.Set1(np.linspace(0, 1, max(n_modes, 1)))
 
-    # --- Col 0: Biomass trajectories (both groups) ---
+    # --- Col 0: Biomass time series ---
     ax = axes[row_idx, 0]
     ax.plot(time_days, np.array(bio_g0), "k-", linewidth=2, label="True G0 (surface)", alpha=0.7)
     ax.plot(time_days, np.array(bio_g1), "k--", linewidth=2, label="True G1 (DVM)", alpha=0.7)
     ax.scatter(
-        obs_local_idx[is_day] * dt_sec / 86400.0,
-        obs_values[is_day],
+        obs_local_idx[is_day] * dt_sec / 86400.0, obs_values[is_day],
         c="gold", s=25, zorder=5, label="Obs (day)", edgecolors="k", linewidths=0.5,
     )
     ax.scatter(
-        obs_local_idx[~is_day] * dt_sec / 86400.0,
-        obs_values[~is_day],
+        obs_local_idx[~is_day] * dt_sec / 86400.0, obs_values[~is_day],
         c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
     )
     for i, mode in enumerate(result.modes):
@@ -354,42 +362,8 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.legend(fontsize=7, ncol=2)
     ax.grid(True, alpha=0.3)
 
-    # --- Col 1: Parameter recovery ---
+    # --- Col 1: OBS vs PRED scatter ---
     ax = axes[row_idx, 1]
-    x_pos = np.arange(len(ALL_OPT_PARAMS))
-    width = 0.8 / (n_modes + 1)
-    ax.bar(x_pos - 0.4 + width / 2, np.ones(len(ALL_OPT_PARAMS)), width,
-           label="True", color="black", alpha=0.3)
-    true_vals = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS])
-    for i, mode in enumerate(result.modes):
-        ratios = np.array([float(jnp.mean(mode.params[p])) for p in ALL_OPT_PARAMS]) / true_vals
-        ax.bar(x_pos - 0.4 + (i + 1.5) * width, ratios, width,
-               label=f"Mode #{i+1}", color=colors[i], alpha=0.7)
-    ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels([p[:10] for p in ALL_OPT_PARAMS], rotation=30, ha="right", fontsize=9)
-    ax.set_ylabel("Ratio to true value")
-    ax.set_title(f"[{label}] Parameter recovery")
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3, axis="y")
-
-    # --- Col 2: Loss per restart ---
-    ax = axes[row_idx, 2]
-    restart_losses = [float(r.loss) for r in result.all_results]
-    ax.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
-    for mi, mode in enumerate(result.modes):
-        for ri, r in enumerate(result.all_results):
-            if r.loss == mode.loss:
-                ax.bar(ri, restart_losses[ri], color=colors[mi], alpha=0.9)
-    ax.set_xlabel("Restart")
-    ax.set_ylabel("Loss (NRMSE)")
-    ax.set_title(f"[{label}] Loss per restart")
-    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
-    ax.set_xticks(range(len(restart_losses)))
-    ax.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
-
-    # --- Col 3: Observation fit ---
-    ax = axes[row_idx, 3]
     outputs_best = runner(model, best.params)
     biomass_best = outputs_best["biomass"]
     bg0_best = jnp.mean(biomass_best[:, 0], axis=tuple(range(1, biomass_best.ndim - 1)))
@@ -403,9 +377,44 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
     ax.set_xlabel("Observed")
     ax.set_ylabel("Predicted (best mode)")
-    ax.set_title(f"[{label}] Obs fit (gold=day, navy=night)")
+    ax.set_title(f"[{label}] Obs vs Pred (gold=day, navy=night)")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
+
+    # --- Col 2: Parameter recovery (10 individual params) ---
+    ax = axes[row_idx, 2]
+    n_all = len(param_labels)
+    x_pos = np.arange(n_all)
+    n_bar_groups = n_modes + 1
+    width = 0.8 / n_bar_groups
+    ax.bar(x_pos - 0.4 + width / 2, np.ones(n_all), width, label="True", color="black", alpha=0.3)
+    for i, mode in enumerate(result.modes):
+        vals = np.array([float(mode.params[p][g]) for p in ALL_OPT_PARAMS for g in range(n_groups)])
+        ratios = vals / true_vals_flat
+        ax.bar(x_pos - 0.4 + (i + 1.5) * width, ratios, width,
+               label=f"Mode #{i+1}", color=colors[i], alpha=0.7)
+    ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(param_labels, rotation=45, ha="right", fontsize=7)
+    ax.set_ylabel("Ratio to true value")
+    ax.set_title(f"[{label}] Parameter recovery (per group)")
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # --- Col 3: Loss per restart ---
+    ax = axes[row_idx, 3]
+    restart_losses = [float(r.loss) for r in result.all_results]
+    ax.bar(range(len(restart_losses)), restart_losses, color="steelblue", alpha=0.7)
+    for mi, mode in enumerate(result.modes):
+        for ri, r in enumerate(result.all_results):
+            if r.loss == mode.loss:
+                ax.bar(ri, restart_losses[ri], color=colors[mi], alpha=0.9)
+    ax.set_xlabel("Restart")
+    ax.set_ylabel("Loss (NRMSE)")
+    ax.set_title(f"[{label}] Loss per restart")
+    popsizes = [INITIAL_POPSIZE * 2**i for i in range(len(restart_losses))]
+    ax.set_xticks(range(len(restart_losses)))
+    ax.set_xticklabels([f"pop={p}" for p in popsizes], rotation=45, ha="right", fontsize=8)
 
 fig.suptitle("IPOP-CMA-ES 2 Groups — Clean vs Noisy", fontsize=13)
 fig.tight_layout()
