@@ -169,7 +169,7 @@ print("=" * 60)
 print("\nGenerating observations with TRUE parameters...")
 t0 = time.time()
 true_params_jax = {k: jnp.array([TRUE_PARAMS[k]]) for k in BOUNDS}
-outputs_true = runner(model, true_params_jax)
+outputs_true = runner(model, true_params_jax, export_variables=["biomass"])
 
 biomass_true = outputs_true["biomass"]
 true_biomass_full = jnp.mean(biomass_true, axis=tuple(range(1, biomass_true.ndim)))
@@ -276,7 +276,7 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.scatter(
         obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations"
     )
-    outputs_best = runner(model, result.params)
+    outputs_best = runner(model, result.params, export_variables=["biomass"])
     biomass_best = outputs_best["biomass"]
     pred_full = jnp.mean(biomass_best, axis=tuple(range(1, biomass_best.ndim)))
     pred = pred_full[spinup_steps:]

@@ -271,7 +271,7 @@ print("=" * 60)
 print("\nGenerating observations with TRUE parameters...")
 t0 = time.time()
 true_params_jax = {k: jnp.array([TRUE_PARAMS[k]] * N_GROUPS) for k in ALL_OPT_PARAMS}
-outputs_true = runner(model, true_params_jax)
+outputs_true = runner(model, true_params_jax, export_variables=["biomass"])
 
 biomass_true = outputs_true["biomass"]  # (T, F, Y, X)
 bio_g0_full = biomass_true[:, 0, OBS_Y, OBS_X]
@@ -435,7 +435,7 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
         obs_local_idx[~is_day] * dt_sec / 86400.0, obs_values[~is_day],
         c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
     )
-    outputs_best = runner(model, result.params)
+    outputs_best = runner(model, result.params, export_variables=["biomass"])
     biomass_best = outputs_best["biomass"]
     bg0_best = biomass_best[:, 0, OBS_Y, OBS_X]
     bg1_best = biomass_best[:, 1, OBS_Y, OBS_X]

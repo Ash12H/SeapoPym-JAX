@@ -181,7 +181,7 @@ print("=" * 60)
 print("\nGenerating observations with TRUE parameters...")
 t0 = time.time()
 true_params_jax = {k: jnp.array([TRUE_PARAMS[k]]) for k in BOUNDS}
-outputs_true = runner(model, true_params_jax)
+outputs_true = runner(model, true_params_jax, export_variables=["biomass"])
 
 biomass_true = outputs_true["biomass"]
 true_biomass_full = jnp.mean(biomass_true, axis=tuple(range(1, biomass_true.ndim)))
@@ -304,7 +304,7 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
         obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations"
     )
     for i, mode in enumerate(result.modes):
-        outputs_mode = runner(model, mode.params)
+        outputs_mode = runner(model, mode.params, export_variables=["biomass"])
         biomass_mode = outputs_mode["biomass"]
         pred_full = jnp.mean(biomass_mode, axis=tuple(range(1, biomass_mode.ndim)))
         pred = pred_full[spinup_steps:]
@@ -317,7 +317,7 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
 
     # --- Col 1: OBS vs PRED scatter ---
     ax = axes[row_idx, 1]
-    outputs_best = runner(model, best.params)
+    outputs_best = runner(model, best.params, export_variables=["biomass"])
     biomass_best = outputs_best["biomass"]
     pred_full = jnp.mean(biomass_best, axis=tuple(range(1, biomass_best.ndim)))
     pred_best = np.array(pred_full[spinup_steps:])[obs_local_indices - spinup_steps]
