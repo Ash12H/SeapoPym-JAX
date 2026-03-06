@@ -72,11 +72,13 @@ class GAOptimizer:
         crossover_rate: float = 0.8,
         mutation_std: float = 0.05,
         seed: int = 0,
+        export_variables: list[str] | None = None,
     ) -> None:
         self.runner = runner
         self.objectives = objectives
         self.bounds = bounds
         self.priors = priors
+        self.export_variables = export_variables
         self.popsize = popsize
         self.crossover_rate = crossover_rate
         self.mutation_std = mutation_std
@@ -103,7 +105,7 @@ class GAOptimizer:
             OptimizeResult with optimized parameters and diagnostics.
         """
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(self.runner, model, prepared, self.priors)
+        loss_fn = build_loss_fn(self.runner, model, prepared, self.priors, self.export_variables)
         initial_params = {k: model.parameters[k] for k in self.bounds}
 
         return self._run_loss_fn(loss_fn, initial_params, n_generations, tol_fun, patience, progress_bar)

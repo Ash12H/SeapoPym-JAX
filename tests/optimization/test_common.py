@@ -163,7 +163,7 @@ class TestBuildLossFn:
         from seapopym.optimization.objective import Objective
 
         class _FakeRunner:
-            def __call__(self, model, free_params):
+            def __call__(self, model, free_params, export_variables=None):
                 return {"out": free_params["x"] * jnp.ones(3)}
 
         class _FakeModel:

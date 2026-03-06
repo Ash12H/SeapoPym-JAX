@@ -96,6 +96,7 @@ class GradientOptimizer:
         algorithm: Literal["adam", "sgd", "rmsprop", "adagrad"] = "adam",
         learning_rate: float = 0.01,
         scaling: Literal["none", "bounds", "log"] = "none",
+        export_variables: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         if algorithm not in self.ALGORITHMS:
@@ -111,6 +112,7 @@ class GradientOptimizer:
         self.algorithm = algorithm
         self.learning_rate = learning_rate
         self.scaling = scaling
+        self.export_variables = export_variables
 
         optimizer_fn = self.ALGORITHMS[algorithm]
         self._optimizer = optimizer_fn(learning_rate, **kwargs)
@@ -141,7 +143,7 @@ class GradientOptimizer:
             priors = build_default_priors(self.bounds)
 
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(self.runner, model, prepared, priors)
+        loss_fn = build_loss_fn(self.runner, model, prepared, priors, self.export_variables)
         initial_params = {k: model.parameters[k] for k in self.bounds} if self.bounds else dict(model.parameters)
 
         return self._run_loss_fn(loss_fn, initial_params, n_steps, tolerance, progress_bar)

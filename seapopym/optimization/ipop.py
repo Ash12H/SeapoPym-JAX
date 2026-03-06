@@ -123,11 +123,13 @@ class IPOPCMAESOptimizer:
         n_generations: int = 100,
         distance_threshold: float = 0.1,
         seed: int = 0,
+        export_variables: list[str] | None = None,
     ) -> None:
         self.runner = runner
         self.objectives = objectives
         self.bounds = bounds
         self.priors = priors
+        self.export_variables = export_variables
         self.n_restarts = n_restarts
         self.initial_popsize = initial_popsize
         self.n_generations = n_generations
@@ -149,7 +151,7 @@ class IPOPCMAESOptimizer:
             IPOPResult with distinct modes sorted by loss.
         """
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(self.runner, model, prepared, self.priors)
+        loss_fn = build_loss_fn(self.runner, model, prepared, self.priors, self.export_variables)
         initial_params = {k: model.parameters[k] for k in self.bounds}
 
         return self._run_loss_fn(loss_fn, initial_params, progress_bar)

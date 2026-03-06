@@ -78,11 +78,12 @@ def build_loss_fn(
     model: CompiledModel,
     prepared_objectives: list[tuple[PreparedObjective, Callable, float]],
     priors: PriorSet | None,
+    export_variables: list[str] | None = None,
 ) -> Callable[[Params], Array]:
     """Build composite loss: sum(w_i * metric_i) + prior_penalty."""
 
     def loss_fn(free_params: Params) -> Array:
-        outputs = runner(model, free_params)
+        outputs = runner(model, free_params, export_variables=export_variables)
 
         total = jnp.array(0.0)
         for p, metric_fn, weight in prepared_objectives:
