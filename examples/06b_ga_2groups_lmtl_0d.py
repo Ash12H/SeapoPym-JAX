@@ -88,7 +88,7 @@ PLOT_FILE = "examples/images/06b_ga_2groups_lmtl_0d.png"
 # %%
 blueprint = LMTL_NO_TRANSPORT
 
-max_age_days = int(np.ceil(TRUE_PARAMS["tau_r_0"] / 86400))
+max_age_days = int(np.ceil(BOUNDS["tau_r_0"][1] / 86400))  # upper bound covers all optimizer trials
 cohort_ages_sec = np.arange(0, max_age_days + 1) * 86400.0
 n_cohorts = len(cohort_ages_sec)
 
