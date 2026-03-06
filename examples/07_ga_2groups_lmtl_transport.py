@@ -172,9 +172,7 @@ v_4d = np.broadcast_to(v_field[None, None, :, :], (len(dates), N_LAYERS, NY, NX)
 u_da = xr.DataArray(u_4d, dims=["T", "Z", "Y", "X"], coords={"T": dates, "Z": np.arange(N_LAYERS), "Y": lat, "X": lon})
 v_da = xr.DataArray(v_4d, dims=["T", "Z", "Y", "X"], coords={"T": dates, "Z": np.arange(N_LAYERS), "Y": lat, "X": lon})
 
-# --- Diffusivity (uniform, stationary) ---
-D_4d = np.full((len(dates), N_LAYERS, NY, NX), DIFFUSIVITY)
-D_da = xr.DataArray(D_4d, dims=["T", "Z", "Y", "X"], coords={"T": dates, "Z": np.arange(N_LAYERS), "Y": lat, "X": lon})
+# --- Diffusivity (uniform scalar) ---
 
 # --- Grid metrics (uniform rectangular grid) ---
 dx_arr = np.full((NY, NX), CELL_SIZE)
@@ -218,7 +216,7 @@ config = Config.from_dict(
             "day_of_year": doy_da,
             "u": u_da,
             "v": v_da,
-            "D": D_da,
+            "D": DIFFUSIVITY,
             "dx": dx_da,
             "dy": dy_da,
             "face_height": face_height_da,

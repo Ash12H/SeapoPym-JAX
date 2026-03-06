@@ -125,7 +125,6 @@ def run_simulation_jax(n_cells, use_jit=True):
     face_height = dy_arr  # For simple grid
     face_width = dx_arr
     cell_area = dx_arr * dy_arr
-    D_arr = jnp.full((ny, nx), D_DIFFUSION)
     mask = jnp.ones((ny, nx))
 
     # Time stepping
@@ -140,7 +139,7 @@ def run_simulation_jax(n_cells, use_jit=True):
             state,
             u,
             v,
-            D_arr,
+            D_DIFFUSION,
             dx_arr,
             dy_arr,
             face_height,
@@ -250,7 +249,6 @@ u, v = create_rotation_velocity(n_test, n_test)
 dx = dy = DOMAIN_SIZE / n_test
 dx_arr = jnp.full((n_test, n_test), dx)
 dy_arr = jnp.full((n_test, n_test), dy)
-D_arr = jnp.zeros((n_test, n_test))
 mask = jnp.ones((n_test, n_test))
 cell_area = dx_arr * dy_arr
 
@@ -260,7 +258,7 @@ def loss_fn(state):
         state,
         u,
         v,
-        D_arr,
+        0.0,
         dx_arr,
         dy_arr,
         dy_arr,

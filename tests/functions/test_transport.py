@@ -93,7 +93,7 @@ class TestTransportTendencyBasic:
         state = jnp.ones((ny, nx))
         u = jnp.full((ny, nx), 1.0)  # 1 m/s eastward
         v = jnp.zeros((ny, nx))
-        D = jnp.full((ny, nx), 100.0)
+        D = 100.0
 
         adv, diff = transport_tendency(
             state,
@@ -126,7 +126,7 @@ class TestTransportTendencyBasic:
 
         u = jnp.zeros((ny, nx))
         v = jnp.zeros((ny, nx))
-        D = jnp.full((ny, nx), 100.0)
+        D = 100.0
 
         adv, diff = transport_tendency(
             state,
@@ -161,7 +161,7 @@ class TestTransportTendencyBasic:
 
         u = jnp.full((ny, nx), 1.0)  # Eastward flow
         v = jnp.zeros((ny, nx))
-        D = jnp.zeros((ny, nx))  # No diffusion
+        D = 0.0  # No diffusion
 
         adv, diff = transport_tendency(
             state,
@@ -191,7 +191,7 @@ class TestTransportTendencyBasic:
         state = jnp.ones((ny, nx))
         u = jnp.full((ny, nx), 1.0)
         v = jnp.zeros((ny, nx))
-        D = jnp.full((ny, nx), 100.0)
+        D = 100.0
 
         # Create land in the middle
         mask = jnp.ones((ny, nx))
@@ -228,7 +228,7 @@ class TestTransportDifferentiability:
         state = jnp.ones((ny, nx)) * 0.5
         u = jnp.full((ny, nx), 0.1)
         v = jnp.zeros((ny, nx))
-        D = jnp.full((ny, nx), 100.0)
+        D = 100.0
         dx = jnp.full((ny, nx), 1000.0)
         dy = jnp.full((ny, nx), 1000.0)
         cell_area = dx * dy
@@ -266,7 +266,7 @@ class TestTransportDifferentiability:
         state = state.at[:, nx // 2 :].set(1.0)  # Step function
         u = jnp.zeros((ny, nx))
         v = jnp.zeros((ny, nx))
-        D = jnp.full((ny, nx), 100.0)
+        D = jnp.array(100.0)
         dx = jnp.full((ny, nx), 1000.0)
         dy = jnp.full((ny, nx), 1000.0)
         cell_area = dx * dy
@@ -294,11 +294,11 @@ class TestTransportDifferentiability:
 
         grad = jax.grad(loss_fn)(D)
 
-        # Gradient should exist
-        assert grad.shape == D.shape
-        assert not jnp.any(jnp.isnan(grad))
+        # Gradient should exist (scalar)
+        assert grad.shape == ()
+        assert not jnp.isnan(grad)
         # Gradient should be non-zero (D affects diffusion)
-        assert jnp.any(grad != 0)
+        assert grad != 0
 
     def test_jit_compilation(self):
         """Transport function should be JIT-compilable."""
@@ -306,7 +306,7 @@ class TestTransportDifferentiability:
         state = jnp.ones((ny, nx))
         u = jnp.full((ny, nx), 0.1)
         v = jnp.zeros((ny, nx))
-        D = jnp.full((ny, nx), 100.0)
+        D = 100.0
         dx = jnp.full((ny, nx), 1000.0)
         dy = jnp.full((ny, nx), 1000.0)
         cell_area = dx * dy
@@ -353,7 +353,7 @@ class TestBoundaryConditions:
         state, ny, nx = gradient_field
         u = jnp.full((ny, nx), 1.0)
         v = jnp.zeros((ny, nx))
-        D = jnp.zeros((ny, nx))
+        D = 0.0
         dx = jnp.full((ny, nx), 1000.0)
         dy = jnp.full((ny, nx), 1000.0)
         cell_area = dx * dy
@@ -386,7 +386,7 @@ class TestBoundaryConditions:
         state, ny, nx = gradient_field
         u = jnp.full((ny, nx), 1.0)  # Trying to push mass out east
         v = jnp.zeros((ny, nx))
-        D = jnp.zeros((ny, nx))
+        D = 0.0
         dx = jnp.full((ny, nx), 1000.0)
         dy = jnp.full((ny, nx), 1000.0)
         cell_area = dx * dy
@@ -422,7 +422,7 @@ class TestBoundaryConditions:
         uniform_state = jnp.ones((ny, nx))
         u = jnp.full((ny, nx), 1.0)
         v = jnp.zeros((ny, nx))
-        D = jnp.zeros((ny, nx))
+        D = 0.0
         dx = jnp.full((ny, nx), 1000.0)
         dy = jnp.full((ny, nx), 1000.0)
         cell_area = dx * dy

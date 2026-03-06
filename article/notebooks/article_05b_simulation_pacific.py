@@ -128,12 +128,7 @@ ocean_mask = xr.where(
     0.0,
 )
 
-# Diffusion coefficient (constant)
-D_da = xr.DataArray(
-    np.full((ny, nx), D_HORIZONTAL),
-    dims=["Y", "X"],
-    coords={"Y": lat, "X": lon},
-)
+# Diffusion coefficient (scalar constant)
 
 print(f"dx range: {dx_2d.min():.0f} - {dx_2d.max():.0f} m")
 print(f"dy: {dy_m:.0f} m")
@@ -470,7 +465,7 @@ config_no_transport = Config.from_dict(
 # Config for TRANSPORT
 transport_params = {
     **common_params,
-    "D": D_da,
+    "D": D_HORIZONTAL,
     "dx": dx_da,
     "dy": dy_da,
     "face_height": face_height_da,
