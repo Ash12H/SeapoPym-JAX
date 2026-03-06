@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 def build_step_fn(
     model: CompiledModel,
+    export_variables: list[str] | None = None,
 ) -> Callable[..., tuple[Any, Outputs]]:
     """Build a step function from a compiled model.
 
@@ -40,6 +41,9 @@ def build_step_fn(
 
     Args:
         model: Compiled model containing compute_nodes, tendency_map, parameters, and metadata.
+        export_variables: If provided, only these variables are included in
+            the scan outputs. Filtering happens *inside* the step function,
+            so ``lax.scan`` never accumulates the excluded variables.
 
     Returns:
         Step function with signature ((state, params), forcings_t) -> ((new_state, params), outputs).
@@ -109,6 +113,8 @@ def build_step_fn(
 
         # Build outputs (include state variables for saving)
         outputs: Outputs = {**intermediates, **new_state}
+        if export_variables is not None:
+            outputs = {k: v for k, v in outputs.items() if k in export_variables}
 
         return new_state, outputs
 

@@ -230,19 +230,27 @@ class Runner:
 
     # --- Optimization interface ---
 
-    def __call__(self, model: CompiledModel, free_params: Params) -> Outputs:
+    def __call__(
+        self,
+        model: CompiledModel,
+        free_params: Params,
+        export_variables: list[str] | None = None,
+    ) -> Outputs:
         """Run the model with merged parameters (optimization interface).
 
         Args:
             model: Compiled model.
             free_params: Free parameters to override in model.parameters.
+            export_variables: If provided, only these variables are accumulated
+                by ``lax.scan``. This reduces memory when only a subset (e.g.
+                ``["biomass"]``) is needed for the objective function.
 
         Returns:
             Model outputs (dict of arrays).
         """
         if self.config.vmap_params:
-            return self._run_optimization_vmap(model, free_params)
-        return self._run_optimization(model, free_params)
+            return self._run_optimization_vmap(model, free_params, export_variables)
+        return self._run_optimization(model, free_params, export_variables)
 
     # --- Internal: simulation ---
 
@@ -293,10 +301,10 @@ class Runner:
             f"(chunk_size={chunk_size})"
         )
 
-        step_fn = build_step_fn(model)
         state = dict(model.state)
         params = dict(model.parameters)
         output_vars = export_variables if export_variables is not None else list(state.keys())
+        step_fn = build_step_fn(model, export_variables=output_vars)
         writer = self._build_writer(model, output_path, output_vars)
 
         try:
@@ -324,22 +332,32 @@ class Runner:
 
     # --- Internal: optimization ---
 
-    def _run_optimization(self, model: CompiledModel, free_params: Params) -> Outputs:
+    def _run_optimization(
+        self,
+        model: CompiledModel,
+        free_params: Params,
+        export_variables: list[str] | None = None,
+    ) -> Outputs:
         """Single-shot run with merged parameters."""
         merged = {**model.parameters, **free_params}
-        step_fn = build_step_fn(model)
+        step_fn = build_step_fn(model, export_variables=export_variables)
         forcings = model.forcings.get_all()
         (final_state, _), outputs = lax.scan(
             step_fn, (dict(model.state), merged), forcings
         )
         return outputs
 
-    def _run_optimization_vmap(self, model: CompiledModel, free_params: Params) -> Outputs:
+    def _run_optimization_vmap(
+        self,
+        model: CompiledModel,
+        free_params: Params,
+        export_variables: list[str] | None = None,
+    ) -> Outputs:
         """Vmap over a population of free parameter sets."""
 
         def run_one(single_free: Params) -> Outputs:
             merged = {**model.parameters, **single_free}
-            step_fn = build_step_fn(model)
+            step_fn = build_step_fn(model, export_variables=export_variables)
             forcings = model.forcings.get_all()
             (_, _), outputs = lax.scan(
                 step_fn, (dict(model.state), merged), forcings
