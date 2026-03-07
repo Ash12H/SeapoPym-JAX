@@ -157,12 +157,30 @@ class ForcingStore:
 
     def _xarray_interpolate(self, data: xr.DataArray, target_times: np.ndarray) -> np.ndarray:
         """Interpolate a lazy DataArray to target times via xarray."""
+        data = self._compute_source_window(data, target_times)
         if self.interp_method == "linear":
             return data.interp(T=target_times, method="linear",
                                kwargs={"fill_value": "extrapolate"}).values
         if self.interp_method in ("nearest", "ffill"):
             return data.reindex(T=target_times, method=self.interp_method).values
         raise ValueError(f"Unknown interp_method: {self.interp_method}")
+
+    def _compute_source_window(self, data: xr.DataArray, target_times: np.ndarray) -> xr.DataArray:
+        """Slice source DataArray to minimal temporal window for interpolation."""
+        if "T" not in data.dims or len(target_times) == 0:
+            return data
+
+        t_index = data.indexes["T"]
+        source_len = len(t_index)
+
+        # Bracket: 1 point before first target, 1 point after last target
+        i_start = max(0, t_index.searchsorted(target_times[0], side="right") - 1)
+        i_end = min(source_len, t_index.searchsorted(target_times[-1], side="left") + 2)
+
+        if i_end - i_start >= source_len:
+            return data
+
+        return data.isel(T=slice(i_start, i_end))
 
     def _materialize_with_nan(self, arr: Array) -> Array:
         """Materialize array and replace NaN with fill_nan."""

@@ -28,20 +28,20 @@
 
 > `day_of_year` was reduced from dims `[T, Y, X]` (259 MB/chunk) to `[T]` (4 KB/chunk) by removing the unnecessary spatial broadcast.
 
-### Interpolation - hidden cost
+### Interpolation - source windowing
 
-Source arrays loaded for `xarray.interp()`:
+Before interpolation, `_compute_source_window()` slices the source DataArray to a narrow temporal window around the chunk's target times (1 point before first target, 1 point after last target). This avoids materializing the full source array in RAM.
 
-| Source             | Shape                  | Size     |
-|--------------------|------------------------|----------|
-| temperature        | (5000, 3, 180, 360)    | 3.89 GB  |
-| u                  | (5000, 3, 180, 360)    | 3.89 GB  |
-| v                  | (5000, 3, 180, 360)    | 3.89 GB  |
-| primary_production | (5000, 180, 360)       | 1.30 GB  |
-| day_of_year        | (5000,)                | 20 KB    |
-| **Total sources**  |                        | **~13 GB** |
+| Source             | Full shape             | Full size | Windowed shape (chunk=1000) | Windowed size |
+|--------------------|------------------------|-----------|-----------------------------|---------------|
+| temperature        | (5000, 3, 180, 360)    | 3.89 GB   | (~15, 3, 180, 360)          | ~12 MB        |
+| u                  | (5000, 3, 180, 360)    | 3.89 GB   | (~15, 3, 180, 360)          | ~12 MB        |
+| v                  | (5000, 3, 180, 360)    | 3.89 GB   | (~15, 3, 180, 360)          | ~12 MB        |
+| primary_production | (5000, 180, 360)       | 1.30 GB   | (~15, 180, 360)             | ~4 MB         |
+| day_of_year        | (5000,)                | 20 KB     | (~15,)                      | <1 KB         |
+| **Total sources**  |                        | **~13 GB**|                             | **~40 MB**    |
 
-These are loaded at the first `get_chunk()` call and potentially cached in RAM by xarray for subsequent chunks. **Key question to measure**: do the sources persist in memory after `get_chunk()` returns?
+Previously, the full source arrays (~13 GB total) were materialized at the first `get_chunk()` call and cached in RAM. With temporal windowing, only the relevant slice (~40 MB per chunk) is loaded and discarded after each chunk.
 
 ### Scan output per chunk (export_variables=["biomass"])
 
@@ -75,11 +75,10 @@ Use `DiskWriter` (Zarr) for large simulations.
 Phase                              Estimated RAM
 --------------------------------------------------
 Compilation                        < 100 MB
-get_chunk() first                  +13 GB (interp sources)
-                                   +2.6 GB (interpolated chunk)
-Chunk loop (N=70)                  13 GB (sources) + 2.6 GB (chunk) + N x 1.56 GB (outputs)
-Last chunk                         13 + 2.6 + 109 = ~125 GB
-finalize()                         Peak ~230 GB
+get_chunk() each                   ~40 MB (windowed sources) + 2.6 GB (interpolated chunk)
+Chunk loop (N=70)                  2.6 GB (chunk) + N x 1.56 GB (outputs)
+Last chunk                         2.6 + 109 = ~112 GB
+finalize()                         Peak ~220 GB
 Post-finalize (xr.Dataset)        ~109 GB
 ```
 

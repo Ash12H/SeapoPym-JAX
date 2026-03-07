@@ -41,7 +41,7 @@ jax.config.update("jax_default_device", jax.devices("cpu")[0])
 # ## Section 1: Configuration
 
 # %%
-GRID_SIDE = 20
+GRID_SIDE = 200
 N_GROUPS = 6
 N_LAYERS = 3
 CHUNK_SIZE = 1000

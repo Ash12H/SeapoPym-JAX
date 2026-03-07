@@ -158,6 +158,114 @@ class TestForcingStore:
         chunk = store.get_chunk(0, 3)
         assert chunk["temp"].shape == (3, 5, 5)
 
+    def test_chunk_consistency_with_interpolation_linear(self):
+        """Chunked interpolation (linear) matches get_all."""
+        import pandas as pd
+
+        source_times = pd.date_range("2000-01-01", periods=5, freq="2D")
+        target_times = pd.date_range("2000-01-01", periods=9, freq="1D")
+        data = np.linspace(0, 40, 5).reshape(-1, 1).astype(np.float64)
+        da = xr.DataArray(data, dims=["T", "Y"], coords={"T": source_times})
+
+        store = ForcingStore(
+            _forcings={"temp": da},
+            n_timesteps=9,
+            interp_method="linear",
+            _dynamic_forcings={"temp"},
+            _time_coords=target_times.values,
+        )
+
+        all_data = np.asarray(store.get_all()["temp"])
+        chunks = []
+        for start in range(0, 9, 3):
+            end = min(start + 3, 9)
+            chunks.append(np.asarray(store.get_chunk(start, end)["temp"]))
+        reconstructed = np.concatenate(chunks, axis=0)
+        np.testing.assert_allclose(reconstructed, all_data, rtol=1e-10)
+
+    def test_chunk_consistency_with_interpolation_nearest(self):
+        """Chunked interpolation (nearest) matches get_all."""
+        import pandas as pd
+
+        source_times = pd.date_range("2000-01-01", periods=5, freq="2D")
+        target_times = pd.date_range("2000-01-01", periods=9, freq="1D")
+        data = np.linspace(0, 40, 5).reshape(-1, 1).astype(np.float64)
+        da = xr.DataArray(data, dims=["T", "Y"], coords={"T": source_times})
+
+        store = ForcingStore(
+            _forcings={"temp": da},
+            n_timesteps=9,
+            interp_method="nearest",
+            _dynamic_forcings={"temp"},
+            _time_coords=target_times.values,
+        )
+
+        all_data = np.asarray(store.get_all()["temp"])
+        chunks = []
+        for start in range(0, 9, 3):
+            end = min(start + 3, 9)
+            chunks.append(np.asarray(store.get_chunk(start, end)["temp"]))
+        reconstructed = np.concatenate(chunks, axis=0)
+        np.testing.assert_allclose(reconstructed, all_data, rtol=1e-10)
+
+    def test_chunk_consistency_with_interpolation_ffill(self):
+        """Chunked interpolation (ffill) matches get_all."""
+        import pandas as pd
+
+        source_times = pd.date_range("2000-01-01", periods=5, freq="2D")
+        target_times = pd.date_range("2000-01-01", periods=9, freq="1D")
+        data = np.linspace(0, 40, 5).reshape(-1, 1).astype(np.float64)
+        da = xr.DataArray(data, dims=["T", "Y"], coords={"T": source_times})
+
+        store = ForcingStore(
+            _forcings={"temp": da},
+            n_timesteps=9,
+            interp_method="ffill",
+            _dynamic_forcings={"temp"},
+            _time_coords=target_times.values,
+        )
+
+        all_data = np.asarray(store.get_all()["temp"])
+        chunks = []
+        for start in range(0, 9, 3):
+            end = min(start + 3, 9)
+            chunks.append(np.asarray(store.get_chunk(start, end)["temp"]))
+        reconstructed = np.concatenate(chunks, axis=0)
+        np.testing.assert_allclose(reconstructed, all_data, rtol=1e-10)
+
+    def test_windowing_reduces_source_size(self):
+        """Windowing slices source to a small window around target times."""
+        import pandas as pd
+
+        source_times = pd.date_range("2000-01-01", periods=100, freq="1D")
+        data = np.arange(100).reshape(-1, 1).astype(np.float64)
+        da = xr.DataArray(data, dims=["T", "Y"], coords={"T": source_times})
+
+        store = ForcingStore(interp_method="linear")
+        target = pd.date_range("2000-03-01", periods=5, freq="1D").values
+        windowed = store._compute_source_window(da, target)
+        assert windowed.sizes["T"] <= 7
+
+    def test_windowing_full_range_passthrough(self):
+        """When target covers all source, return the same object."""
+        import pandas as pd
+
+        source_times = pd.date_range("2000-01-01", periods=10, freq="1D")
+        data = np.arange(10).reshape(-1, 1).astype(np.float64)
+        da = xr.DataArray(data, dims=["T", "Y"], coords={"T": source_times})
+
+        store = ForcingStore(interp_method="linear")
+        target = pd.date_range("1999-12-01", periods=60, freq="1D").values
+        windowed = store._compute_source_window(da, target)
+        assert windowed is da
+
+    def test_windowing_no_t_coord_passthrough(self):
+        """DataArray without T dim is returned unchanged."""
+        da = xr.DataArray(np.ones((5, 5)), dims=["Y", "X"])
+        store = ForcingStore(interp_method="linear")
+        windowed = store._compute_source_window(da, np.array([]))
+        assert windowed is da
+
     def test_interpolation_without_time_coords_error(self):
         """Interpolation with _time_coords=None raises ValueError."""
         import pandas as pd
