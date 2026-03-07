@@ -277,7 +277,7 @@ class Runner:
         writer = (
             DiskWriter(output_path)
             if output_path is not None
-            else MemoryWriter(model)
+            else MemoryWriter()
         )
         writer.initialize(model.shapes, output_vars, coords=writer_coords, var_dims=var_dims)
         return writer

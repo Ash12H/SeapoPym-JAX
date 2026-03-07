@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     import xarray as xr
 
     from seapopym.blueprint.nodes import DataNode
-    from seapopym.compiler import CompiledModel
 
 logger = logging.getLogger(__name__)
 
@@ -223,16 +222,12 @@ class DiskWriter:
 class MemoryWriter:
     """In-memory writer that builds an xarray Dataset from chunks."""
 
-    def __init__(self, model: CompiledModel) -> None:
-        """Initialize memory writer.
-
-        Args:
-            model: Compiled model (needed for metadata: graph, coords, etc.)
-        """
-        self.model = model
+    def __init__(self) -> None:
+        """Initialize memory writer."""
         self.variables: list[str] = []
-        self._accumulator: dict[str, list[np.ndarray]] = {}
+        self._accumulator: dict[str, list[Array]] = {}
         self._coords: dict[str, Array] = {}
+        self._var_dims: dict[str, tuple[str, ...]] = {}
 
     def initialize(
         self,
@@ -249,44 +244,45 @@ class MemoryWriter:
             coords: Coordinate arrays for dimensions (includes accumulated timestamps).
             var_dims: Mapping from variable name to its dims (unused, kept for protocol compatibility).
         """
-        del shapes, var_dims  # Unused, kept for protocol compatibility
+        del shapes  # Unused, kept for protocol compatibility
         self.variables = variables
         for var in variables:
             self._accumulator[var] = []
 
-        # Store coords (fallback to model coords if not provided)
+        if var_dims is not None:
+            self._var_dims = var_dims
+
         if coords is not None:
             self._coords = {k: np.asarray(v) for k, v in coords.items()}
-        else:
-            self._coords = {k: np.asarray(v) for k, v in self.model.coords.items()}
 
     def append(self, data: dict[str, Array]) -> None:
-        """Append chunk to memory."""
-        # We accumulate specific variables
+        """Append chunk to memory (keeps raw JAX arrays until finalize)."""
         for var_name in self.variables:
             if var_name in data:
-                # Ensure numpy array
-                arr = np.asarray(data[var_name])
-                self._accumulator[var_name].append(arr)
+                self._accumulator[var_name].append(data[var_name])
 
     def finalize(self) -> xr.Dataset | None:
         """Construct and return the xarray Dataset."""
         if not self.variables:
             return None
 
+        import jax.numpy as jnp
         import xarray as xr
 
         from seapopym.dims import get_canonical_order
 
-        # 1. Concatenate arrays along time axis
+        # 1. Concatenate arrays along time axis, then convert to numpy once
         merged_data = {}
         for var_name, chunks in self._accumulator.items():
             if not chunks:
                 continue
-            merged_data[var_name] = np.concatenate(chunks, axis=0)
+            if len(chunks) == 1:
+                merged_data[var_name] = np.asarray(chunks[0])
+            else:
+                merged_data[var_name] = np.asarray(jnp.concatenate(chunks, axis=0))
 
-        # 2. Resolve dimensions from graph
-        var_dims = self._resolve_variable_dims()
+        # 2. Use stored var_dims
+        var_dims = self._var_dims
 
         # 3. Use stored coords (includes real accumulated timestamps)
         coords = self._coords
@@ -318,7 +314,3 @@ class MemoryWriter:
     def close(self) -> None:
         """Release resources (no-op for memory writer)."""
         pass
-
-    def _resolve_variable_dims(self) -> dict[str, tuple[str, ...]]:
-        """Resolve dimensions for all requested variables using data_nodes."""
-        return resolve_var_dims(self.model.data_nodes, self.variables)
