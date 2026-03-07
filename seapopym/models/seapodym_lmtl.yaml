@@ -50,7 +50,7 @@ declarations:
       dims: [T, Y, X]
     day_of_year:
       units: "dimensionless"
-      dims: [T, Y, X]
+      dims: [T]
     # Transport forcings
     u:
       units: "m/s"

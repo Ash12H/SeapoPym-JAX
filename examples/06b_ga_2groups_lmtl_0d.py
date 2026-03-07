@@ -107,8 +107,7 @@ n_layers = 2
 n_groups = 2
 
 doy = dates.dayofyear.values.astype(float)
-doy_3d = np.broadcast_to(doy[:, None, None], (len(dates), ny, nx))
-doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+doy_da = xr.DataArray(doy, dims=["T"], coords={"T": dates})
 
 temp_surface = 15.0 + 5.0 * np.sin(2 * np.pi * doy / 365.0)
 temp_deep = 8.0 + 2.0 * np.sin(2 * np.pi * doy / 365.0)

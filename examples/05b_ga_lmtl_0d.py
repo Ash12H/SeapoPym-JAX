@@ -99,8 +99,7 @@ lon = np.arange(nx)
 
 day_of_year = dates.dayofyear.values
 doy_float = day_of_year.astype(float)
-doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny, nx))
-doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+doy_da = xr.DataArray(doy_float, dims=["T"], coords={"T": dates})
 
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny, nx))

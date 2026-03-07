@@ -76,7 +76,6 @@ day_of_year = dates.dayofyear.values
 
 # Base forcing arrays (float64)
 doy_float = day_of_year.astype(np.float64)
-doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny, nx))
 
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny, nx))
@@ -134,8 +133,8 @@ for name, dtype in DTYPES.items():
                     coords={"T": dates, "Y": lat, "X": lon},
                 ),
                 "day_of_year": xr.DataArray(
-                    cast(doy_3d), dims=["T", "Y", "X"],
-                    coords={"T": dates, "Y": lat, "X": lon},
+                    cast(doy_float), dims=["T"],
+                    coords={"T": dates},
                 ),
             },
             "initial_state": {

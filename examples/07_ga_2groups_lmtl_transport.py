@@ -123,8 +123,7 @@ lon = np.arange(NX, dtype=float)
 
 # --- Day of year ---
 doy = dates.dayofyear.values.astype(float)
-doy_3d = np.broadcast_to(doy[:, None, None], (len(dates), NY, NX))
-doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+doy_da = xr.DataArray(doy, dims=["T"], coords={"T": dates})
 
 # --- Temperature (2 layers, seasonal) ---
 temp_surface = 15.0 + 5.0 * np.sin(2 * np.pi * doy / 365.0)

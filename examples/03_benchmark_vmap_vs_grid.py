@@ -81,8 +81,7 @@ ny_1, nx_1 = 1, 1
 lat_1, lon_1 = np.arange(ny_1), np.arange(nx_1)
 
 doy_float = day_of_year.astype(float)
-doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny_1, nx_1))
-doy_da_1 = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat_1, "X": lon_1})
+doy_da_1 = xr.DataArray(doy_float, dims=["T"], coords={"T": dates})
 
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny_1, nx_1))
@@ -192,8 +191,7 @@ def build_grid_model(ny: int, nx: int):
     lat = np.arange(ny)
     lon = np.arange(nx)
 
-    doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny, nx))
-    doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+    doy_da = xr.DataArray(doy_float, dims=["T"], coords={"T": dates})
 
     temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny, nx))
     temp_da = xr.DataArray(
