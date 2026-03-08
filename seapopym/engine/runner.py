@@ -53,7 +53,7 @@ Two things consume GPU memory during optimization:
   However, this only helps gradient-based optimizers (which have a
   backward pass); evolutionary optimizers do not benefit.
 
-* **Forcing data** — loaded in full via ``model.forcings.get_all()``
+* **Forcing data** — loaded in full via ``model.forcings.get_all_dynamic()``
   before ``lax.scan`` starts.  ``jax.checkpoint`` does **not** reduce
   this cost.  Only chunking (``get_chunk(start, end)``) avoids loading
   all forcings at once, but chunking is incompatible with ``vmap`` and
@@ -341,7 +341,7 @@ class Runner:
         """Single-shot run with merged parameters."""
         merged = {**model.parameters, **free_params}
         step_fn = build_step_fn(model, export_variables=export_variables)
-        forcings = model.forcings.get_all()
+        forcings = model.forcings.get_all_dynamic()
         (final_state, _), outputs = lax.scan(
             step_fn, (dict(model.state), merged), forcings
         )
@@ -358,7 +358,7 @@ class Runner:
         def run_one(single_free: Params) -> Outputs:
             merged = {**model.parameters, **single_free}
             step_fn = build_step_fn(model, export_variables=export_variables)
-            forcings = model.forcings.get_all()
+            forcings = model.forcings.get_all_dynamic()
             (_, _), outputs = lax.scan(
                 step_fn, (dict(model.state), merged), forcings
             )

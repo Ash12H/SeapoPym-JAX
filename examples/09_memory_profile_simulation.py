@@ -157,49 +157,48 @@ dy_arr = np.full((NY, NX), CELL_SIZE)
 # ## Section 4: Compile Model with Lazy Forcings
 
 # %%
-config = Config.from_dict(
-    {
-        "parameters": {
-            "lambda_0": {"value": [1 / 150 / 86400] * N_GROUPS},
-            "gamma_lambda": {"value": [0.15] * N_GROUPS},
-            "tau_r_0": {"value": [10.38 * 86400] * N_GROUPS},
-            "gamma_tau_r": {"value": [0.11] * N_GROUPS},
-            "t_ref": {"value": 0.0},
-            "efficiency": {"value": [0.1668] * N_GROUPS},
-            "cohort_ages": {"value": cohort_ages_sec.tolist()},
-            "day_layer": {"value": [i % N_LAYERS for i in range(N_GROUPS)]},
-            "night_layer": {"value": [0] * N_GROUPS},
-        },
-        "forcings": {
-            "latitude": xr.DataArray(np.full(NY, LATITUDE), dims=["Y"], coords={"Y": lat}),
-            "temperature": ds_lazy["temperature"],
-            "primary_production": ds_lazy["primary_production"],
-            "day_of_year": ds_lazy["day_of_year"],
-            "u": ds_lazy["u"],
-            "v": ds_lazy["v"],
-            "D": 0.0,
-            "dx": xr.DataArray(dx_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
-            "dy": xr.DataArray(dy_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
-            "face_height": xr.DataArray(dy_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
-            "face_width": xr.DataArray(dx_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
-            "cell_area": xr.DataArray(dx_arr * dy_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
-            "mask": xr.DataArray(np.ones((NY, NX)), dims=["Y", "X"], coords={"Y": lat, "X": lon}),
-            "bc_north": 1, "bc_south": 1, "bc_east": 1, "bc_west": 1,
-        },
-        "initial_state": {
-            "biomass": xr.DataArray(
-                np.zeros((N_GROUPS, NY, NX)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
-            ),
-            "production": xr.DataArray(
-                np.zeros((N_GROUPS, NY, NX, n_cohorts)),
-                dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon},
-            ),
-        },
-        "execution": {
-            "time_start": start_date, "time_end": end_date,
-            "dt": "1d", "forcing_interpolation": "linear",
-        },
-    }
+config = Config(
+    parameters={
+        "lambda_0": xr.DataArray([1 / 150 / 86400] * N_GROUPS, dims=["F"]),
+        "gamma_lambda": xr.DataArray([0.15] * N_GROUPS, dims=["F"]),
+        "tau_r_0": xr.DataArray([10.38 * 86400] * N_GROUPS, dims=["F"]),
+        "gamma_tau_r": xr.DataArray([0.11] * N_GROUPS, dims=["F"]),
+        "t_ref": xr.DataArray(0.0),
+        "efficiency": xr.DataArray([0.1668] * N_GROUPS, dims=["F"]),
+        "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+        "day_layer": xr.DataArray([i % N_LAYERS for i in range(N_GROUPS)], dims=["F"]),
+        "night_layer": xr.DataArray([0] * N_GROUPS, dims=["F"]),
+    },
+    forcings={
+        "latitude": xr.DataArray(np.full(NY, LATITUDE), dims=["Y"], coords={"Y": lat}),
+        "temperature": ds_lazy["temperature"],
+        "primary_production": ds_lazy["primary_production"],
+        "day_of_year": ds_lazy["day_of_year"],
+        "u": ds_lazy["u"],
+        "v": ds_lazy["v"],
+        "D": xr.DataArray(0.0),
+        "dx": xr.DataArray(dx_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+        "dy": xr.DataArray(dy_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+        "face_height": xr.DataArray(dy_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+        "face_width": xr.DataArray(dx_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+        "cell_area": xr.DataArray(dx_arr * dy_arr, dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+        "mask": xr.DataArray(np.ones((NY, NX)), dims=["Y", "X"], coords={"Y": lat, "X": lon}),
+        "bc_north": xr.DataArray(1), "bc_south": xr.DataArray(1),
+        "bc_east": xr.DataArray(1), "bc_west": xr.DataArray(1),
+    },
+    initial_state={
+        "biomass": xr.DataArray(
+            np.zeros((N_GROUPS, NY, NX)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
+        ),
+        "production": xr.DataArray(
+            np.zeros((N_GROUPS, NY, NX, n_cohorts)),
+            dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon},
+        ),
+    },
+    execution={
+        "time_start": start_date, "time_end": end_date,
+        "dt": "1d", "forcing_interpolation": "linear",
+    },
 )
 
 blueprint = LMTL

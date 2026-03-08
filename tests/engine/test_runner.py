@@ -3,6 +3,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import xarray as xr
 
 from seapopym.blueprint import Config, functional
 from seapopym.compiler import compile_model
@@ -56,20 +57,18 @@ class TestRunnerSimulation:
     @pytest.fixture
     def runner_config(self):
         """Config with 30 timesteps."""
-        return Config.from_dict(
-            {
-                "parameters": {"growth_rate": {"value": 0.001}},
-                "forcings": {
-                    "temperature": np.ones((30, 5, 5)) * 20.0,
-                    "mask": np.ones((5, 5)),
-                },
-                "initial_state": {"biomass": np.ones((5, 5)) * 100.0},
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-31",
-                },
-            }
+        return Config(
+            parameters={"growth_rate": xr.DataArray(0.001)},
+            forcings={
+                "temperature": xr.DataArray(np.ones((30, 5, 5)) * 20.0, dims=["T", "Y", "X"]),
+                "mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
+            },
+            initial_state={"biomass": xr.DataArray(np.ones((5, 5)) * 100.0, dims=["Y", "X"])},
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-31",
+            },
         )
 
     def test_simulation_run_memory(self, simple_blueprint, runner_config):

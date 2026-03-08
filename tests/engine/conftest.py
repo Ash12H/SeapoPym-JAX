@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config
 from seapopym.blueprint.registry import REGISTRY
@@ -69,22 +70,16 @@ def simple_blueprint():
 @pytest.fixture
 def simple_config():
     """Create a simple config for testing (10 timesteps, 5x5 grid)."""
-    return Config.from_dict(
-        {
-            "parameters": {
-                "growth_rate": {"value": 0.1},
-            },
-            "forcings": {
-                "temperature": np.ones((10, 5, 5)) * 20.0,
-                "mask": np.ones((5, 5)),
-            },
-            "initial_state": {
-                "biomass": np.ones((5, 5)) * 100.0,
-            },
-            "execution": {
-                "dt": "1d",
-                "time_start": "2000-01-01",
-                "time_end": "2000-01-11",
-            },
-        }
+    return Config(
+        parameters={"growth_rate": xr.DataArray(0.1)},
+        forcings={
+            "temperature": xr.DataArray(np.ones((10, 5, 5)) * 20.0, dims=["T", "Y", "X"]),
+            "mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
+        },
+        initial_state={"biomass": xr.DataArray(np.ones((5, 5)) * 100.0, dims=["Y", "X"])},
+        execution={
+            "dt": "1d",
+            "time_start": "2000-01-01",
+            "time_end": "2000-01-11",
+        },
     )

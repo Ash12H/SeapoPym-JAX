@@ -195,55 +195,53 @@ mask_da = xr.DataArray(mask, dims=["Y", "X"], coords={"Y": lat, "X": lon})
 # ## Compile Model
 
 # %%
-config = Config.from_dict(
-    {
-        "parameters": {
-            "lambda_0": {"value": [TRUE_PARAMS["lambda_0"]] * N_GROUPS},
-            "gamma_lambda": {"value": [TRUE_PARAMS["gamma_lambda"]] * N_GROUPS},
-            "tau_r_0": {"value": [TRUE_PARAMS["tau_r_0"]] * N_GROUPS},
-            "gamma_tau_r": {"value": [TRUE_PARAMS["gamma_tau_r"]] * N_GROUPS},
-            "t_ref": {"value": TRUE_PARAMS["t_ref"]},
-            "efficiency": {"value": [TRUE_PARAMS["efficiency"]] * N_GROUPS},
-            "cohort_ages": {"value": cohort_ages_sec.tolist()},
-            "day_layer": {"value": [0, 1]},
-            "night_layer": {"value": [0, 0]},
-        },
-        "forcings": {
-            "latitude": xr.DataArray(np.full(NY, LATITUDE), dims=["Y"], coords={"Y": lat}),
-            "temperature": temp_da,
-            "primary_production": npp_da,
-            "day_of_year": doy_da,
-            "u": u_da,
-            "v": v_da,
-            "D": DIFFUSIVITY,
-            "dx": dx_da,
-            "dy": dy_da,
-            "face_height": face_height_da,
-            "face_width": face_width_da,
-            "cell_area": cell_area_da,
-            "mask": mask_da,
-            "bc_north": 1,  # OPEN
-            "bc_south": 1,
-            "bc_east": 1,
-            "bc_west": 1,
-        },
-        "initial_state": {
-            "biomass": xr.DataArray(
-                np.zeros((N_GROUPS, NY, NX)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
-            ),
-            "production": xr.DataArray(
-                np.zeros((N_GROUPS, NY, NX, n_cohorts)),
-                dims=["F", "Y", "X", "C"],
-                coords={"Y": lat, "X": lon},
-            ),
-        },
-        "execution": {
-            "time_start": start_date,
-            "time_end": end_date,
-            "dt": DT,
-            "forcing_interpolation": "linear",
-        },
-    }
+config = Config(
+    parameters={
+        "lambda_0": xr.DataArray([TRUE_PARAMS["lambda_0"]] * N_GROUPS, dims=["F"]),
+        "gamma_lambda": xr.DataArray([TRUE_PARAMS["gamma_lambda"]] * N_GROUPS, dims=["F"]),
+        "tau_r_0": xr.DataArray([TRUE_PARAMS["tau_r_0"]] * N_GROUPS, dims=["F"]),
+        "gamma_tau_r": xr.DataArray([TRUE_PARAMS["gamma_tau_r"]] * N_GROUPS, dims=["F"]),
+        "t_ref": xr.DataArray(TRUE_PARAMS["t_ref"]),
+        "efficiency": xr.DataArray([TRUE_PARAMS["efficiency"]] * N_GROUPS, dims=["F"]),
+        "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+        "day_layer": xr.DataArray([0, 1], dims=["F"]),
+        "night_layer": xr.DataArray([0, 0], dims=["F"]),
+    },
+    forcings={
+        "latitude": xr.DataArray(np.full(NY, LATITUDE), dims=["Y"], coords={"Y": lat}),
+        "temperature": temp_da,
+        "primary_production": npp_da,
+        "day_of_year": doy_da,
+        "u": u_da,
+        "v": v_da,
+        "D": xr.DataArray(DIFFUSIVITY),
+        "dx": dx_da,
+        "dy": dy_da,
+        "face_height": face_height_da,
+        "face_width": face_width_da,
+        "cell_area": cell_area_da,
+        "mask": mask_da,
+        "bc_north": xr.DataArray(1),  # OPEN
+        "bc_south": xr.DataArray(1),
+        "bc_east": xr.DataArray(1),
+        "bc_west": xr.DataArray(1),
+    },
+    initial_state={
+        "biomass": xr.DataArray(
+            np.zeros((N_GROUPS, NY, NX)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
+        ),
+        "production": xr.DataArray(
+            np.zeros((N_GROUPS, NY, NX, n_cohorts)),
+            dims=["F", "Y", "X", "C"],
+            coords={"Y": lat, "X": lon},
+        ),
+    },
+    execution={
+        "time_start": start_date,
+        "time_end": end_date,
+        "dt": DT,
+        "forcing_interpolation": "linear",
+    },
 )
 
 print("Compiling model...")

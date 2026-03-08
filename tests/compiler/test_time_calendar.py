@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, ExecutionParams
+from seapopym.blueprint import Blueprint, Config, ConfigValidationError, ExecutionParams
 from seapopym.compiler import compile_model
 from seapopym.compiler.time_grid import TimeGrid
 
@@ -212,7 +212,7 @@ class TestCompileTimeGrid:
         assert model.time_grid.n_timesteps == 10
         assert model.shapes["T"] == 10
         # Interpolation is deferred to runtime — use get_all() to verify
-        all_forcings = model.forcings.get_all()
+        all_forcings = model.forcings.get_all_dynamic()
         assert all_forcings["temp"].shape[0] == 10  # Interpolated at runtime
 
     def test_coords_generation(self, blueprint):
@@ -261,7 +261,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        with pytest.raises(ValueError, match="does not cover simulation range"):
+        with pytest.raises(ConfigValidationError, match="does not cover simulation range"):
             compile_model(blueprint, config)
 
     def test_interpolation_triggered(self, blueprint):
@@ -293,7 +293,7 @@ class TestCompileTimeGrid:
         model = compile_model(blueprint, config)
 
         # Interpolation is deferred to runtime — use get_all() to verify
-        all_forcings = model.forcings.get_all()
+        all_forcings = model.forcings.get_all_dynamic()
         result = np.asarray(all_forcings["temp"]).flatten()
         # xarray interpolates in real time space:
         # source [0, 10] at [Jan 1, Jan 5], target [Jan 1, Jan 2, Jan 3, Jan 4]
@@ -336,7 +336,7 @@ class TestCompileTimeGrid:
         assert model.n_timesteps == 365
 
         # Interpolation is deferred — use get_all() to materialize
-        all_forcings = model.forcings.get_all()
+        all_forcings = model.forcings.get_all_dynamic()
         result = np.asarray(all_forcings["temp"]).flatten()
 
         # Values should be day_of_year from 1 to 365 (first year only)

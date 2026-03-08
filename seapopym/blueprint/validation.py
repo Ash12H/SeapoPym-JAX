@@ -322,6 +322,29 @@ class BlueprintValidator:
                     )
 
 
+def validate_model(blueprint: Blueprint, config: Config) -> ValidationResult:
+    """Validate a Blueprint and Config together.
+
+    Runs the full validation pipeline: blueprint validation (functions,
+    signatures, dimensions, units, tendencies) then config validation
+    (missing data, dimension consistency, temporal coverage, NaN check).
+
+    Args:
+        blueprint: Model definition.
+        config: Experiment configuration.
+
+    Returns:
+        ValidationResult with compute_nodes, data_nodes, tendency_map.
+
+    Raises:
+        BlueprintValidationError: If blueprint validation fails.
+        ConfigValidationError: If config validation fails.
+    """
+    bp_result = validate_blueprint(blueprint)
+    validate_config(config, blueprint)
+    return bp_result
+
+
 def validate_blueprint(blueprint: Blueprint) -> ValidationResult:
     """Validate a Blueprint.
 
@@ -374,7 +397,7 @@ def validate_config(
             continue
 
         param_path = var_path.replace("parameters.", "")
-        param_value = config.get_parameter_value(param_path)
+        param_value = config.parameters.get(param_path)
 
         if param_value is None:
             result.add_error(MissingDataError(var_path, data_type="parameter"))
@@ -388,28 +411,20 @@ def validate_config(
         if forcing_name not in config.forcings:
             result.add_error(MissingDataError(var_path, data_type="forcing"))
 
-    # Check required initial state
+    # Check required initial state (flat dict)
     for var_path, _var_decl in all_vars.items():
         if not var_path.startswith("state."):
             continue
 
-        state_name = var_path.replace("state.", "")
-        parts = state_name.split(".")
-
-        current = config.initial_state
-        found = True
-        for part in parts:
-            if isinstance(current, dict) and part in current:
-                current = current[part]
-            else:
-                found = False
-                break
-
-        if not found:
+        state_name = var_path.removeprefix("state.")
+        if state_name not in config.initial_state:
             result.add_error(MissingDataError(var_path, data_type="initial_state"))
 
     # Check dimension consistency between data and blueprint declarations
     _validate_data_dims(config, all_vars, result)
+
+    # Check temporal coverage of dynamic forcings
+    _validate_temporal_coverage(config, all_vars, result)
 
     if not result.valid:
         raise ConfigValidationError(result.errors, result.warnings)
@@ -423,11 +438,10 @@ def _validate_data_dims(
 ) -> None:
     """Validate that data dimensions match blueprint declarations.
 
-    For forcings and initial_state provided as xr.DataArray, checks that
-    the dimension names match the blueprint declarations (ignoring order).
-    The config's ``dimension_mapping`` is applied to data dims before
-    comparison so that non-canonical names (e.g. ``lat`` → ``Y``) are
-    accepted.
+    All data (parameters, forcings, initial_state) are xr.DataArray, so
+    dimension validation applies uniformly. The config's ``dimension_mapping``
+    is applied to data dims before comparison so that non-canonical names
+    (e.g. ``lat`` → ``Y``) are accepted.
 
     Args:
         config: The Config to validate.
@@ -441,40 +455,75 @@ def _validate_data_dims(
     def _mapped_dims(da: xr.DataArray) -> set[str]:
         return {dim_map.get(str(d), str(d)) for d in da.dims}
 
-    # Validate forcings
+    # (prefix, data_source) — "state." uses initial_state
+    sections: list[tuple[str, dict[str, xr.DataArray]]] = [
+        ("parameters.", config.parameters),
+        ("forcings.", config.forcings),
+        ("state.", config.initial_state),
+    ]
+
+    for prefix, data_source in sections:
+        for var_path, var_decl in all_vars.items():
+            if not var_path.startswith(prefix):
+                continue
+            if var_decl.dims is None:
+                continue
+
+            name = var_path.removeprefix(prefix)
+            source = data_source.get(name)
+            if source is None:
+                continue
+
+            expected = set(var_decl.dims)
+            actual = _mapped_dims(source)
+            if expected != actual:
+                result.add_error(
+                    DimensionMismatchError(var_path, expected=sorted(expected), actual=sorted(actual))
+                )
+
+
+def _validate_temporal_coverage(
+    config: Config,
+    all_vars: dict[str, Any],
+    result: ValidationResult,
+) -> None:
+    """Validate that dynamic forcings cover the simulation time range.
+
+    For each forcing declared with a T dimension, checks that the forcing's
+    temporal range covers [time_start, time_end] from execution params.
+
+    Args:
+        config: The Config to validate.
+        all_vars: All variable declarations from the blueprint.
+        result: ValidationResult to accumulate errors.
+    """
+    import pandas as pd
+
+    time_start = pd.to_datetime(config.execution.time_start)
+    time_end = pd.to_datetime(config.execution.time_end)
+
     for var_path, var_decl in all_vars.items():
         if not var_path.startswith("forcings."):
             continue
-        if var_decl.dims is None:
+        if var_decl.dims is None or "T" not in var_decl.dims:
             continue
 
         forcing_name = var_path.removeprefix("forcings.")
         source = config.forcings.get(forcing_name)
-        if not isinstance(source, xr.DataArray):
+        if source is None or "T" not in source.coords:
             continue
 
-        expected = set(var_decl.dims)
-        actual = _mapped_dims(source)
-        if expected != actual:
+        forcing_coords = source.coords["T"]
+        forcing_start = pd.to_datetime(forcing_coords.values[0])
+        forcing_end = pd.to_datetime(forcing_coords.values[-1])
+
+        if time_start < forcing_start or time_end > forcing_end:
             result.add_error(
-                DimensionMismatchError(var_path, expected=sorted(expected), actual=sorted(actual))
+                ValidationError(
+                    f"Forcing '{forcing_name}' temporal range [{forcing_start}, {forcing_end}] "
+                    f"does not cover simulation range [{time_start}, {time_end}]. "
+                    f"Ensure forcing data spans the entire simulation period."
+                )
             )
 
-    # Validate initial_state
-    for var_path, var_decl in all_vars.items():
-        if not var_path.startswith("state."):
-            continue
-        if var_decl.dims is None:
-            continue
 
-        state_name = var_path.removeprefix("state.")
-        source = config.initial_state.get(state_name)
-        if not isinstance(source, xr.DataArray):
-            continue
-
-        expected = set(var_decl.dims)
-        actual = _mapped_dims(source)
-        if expected != actual:
-            result.add_error(
-                DimensionMismatchError(var_path, expected=sorted(expected), actual=sorted(actual))
-            )

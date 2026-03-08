@@ -95,11 +95,11 @@ Post-finalize (xr.Dataset)        ~109 GB
 
 ### Key Insight: Evolutionary Optimization CAN Use Chunking
 
-The current pattern loads everything via `get_all()`:
+The current pattern loads everything via `get_all_dynamic()`:
 
 ```python
 def run_one(single_free):
-    forcings = model.forcings.get_all()  # ALL in memory
+    forcings = model.forcings.get_all_dynamic()  # ALL in memory
     (_, _), outputs = lax.scan(step_fn, init, forcings)
     return outputs
 jax.vmap(run_one)(free_params)

@@ -7,6 +7,7 @@ Key features:
 - Lazy loading: xr.DataArray forcings are NOT materialized at compile time
 - xarray interpolation: uses scipy (linear) or pandas (nearest/ffill) under the hood
 - Unified chunking API: get_chunk() provides chunked access for all runners
+- Static/dynamic separation: forcings without dim T are static, with dim T are dynamic
 """
 
 from __future__ import annotations
@@ -21,67 +22,81 @@ import xarray as xr
 from seapopym.types import Array
 
 
+def _check_nan(name: str, arr: np.ndarray) -> None:
+    """Raise ValueError if array contains NaN values."""
+    if np.issubdtype(arr.dtype, np.floating) and np.isnan(arr).any():
+        raise ValueError(f"Forcing '{name}' contains NaN values. Handle NaN upstream.")
+
+
 @dataclass
 class ForcingStore:
     """Encapsulates all forcings with lazy loading and chunked access.
 
-    Forcings can be either:
-    - xr.DataArray (lazy): loaded from file, materialized only when accessed
-    - Array (in-memory): already materialized JAX arrays
+    Forcings are separated into:
+    - Static (no T dim): constants across time, stored as xr.DataArray
+    - Dynamic (with T dim): time-varying, stored as xr.DataArray
 
     The store exposes a unified API for chunking and interpolation.
 
     Attributes:
-        _forcings: Raw forcing data (lazy xarray or in-memory arrays).
+        _static: Static forcing data (no time dimension).
+        _dynamic: Dynamic forcing data (with time dimension).
         n_timesteps: Total number of simulation timesteps.
         interp_method: Interpolation method ("constant", "nearest", "linear", "ffill").
-        fill_nan: Value to replace NaN with.
-        _dynamic_forcings: Set of forcing names that have a time dimension.
         _time_coords: Target datetime coordinates for interpolation (from TimeGrid).
     """
 
-    _forcings: dict[str, xr.DataArray | Array] = field(default_factory=dict)
+    _static: dict[str, xr.DataArray] = field(default_factory=dict)
+    _dynamic: dict[str, xr.DataArray] = field(default_factory=dict)
     n_timesteps: int = 1
     interp_method: str = "constant"
-    fill_nan: float = 0.0
-    _dynamic_forcings: set[str] = field(default_factory=set)
     _time_coords: np.ndarray | None = None
 
     def get_chunk(self, start: int, end: int) -> dict[str, Array]:
         """Load and interpolate a temporal chunk [start, end).
 
-        For each forcing:
-        - Static (no time dim): broadcast to chunk length
-        - Dynamic, aligned (shape[0] == n_timesteps): slice directly
-        - Dynamic, needs interpolation: load source window, interpolate
+        Returns only dynamic forcings (with dim T). Static forcings
+        must be accessed separately via get_statics().
 
         Args:
             start: Start timestep (inclusive).
             end: End timestep (exclusive).
 
         Returns:
-            Dict of forcing arrays, all with shape (chunk_len, ...).
+            Dict of dynamic forcing arrays with shape (chunk_len, ...).
         """
-        chunk_len = end - start
         result: dict[str, Array] = {}
 
-        for name, data in self._forcings.items():
-            is_dynamic = name in self._dynamic_forcings
-            arr = self._load_single(name, data, start, end, is_dynamic)
-            arr = jnp.asarray(arr)
-
-            if not is_dynamic:
-                arr = jnp.broadcast_to(arr, (chunk_len,) + arr.shape)
-
-            result[name] = arr
+        for name, data in self._dynamic.items():
+            arr = self._load_dynamic(name, data, start, end)
+            _check_nan(name, np.asarray(arr))
+            result[name] = jnp.asarray(arr)
 
         return result
 
-    def get_all(self) -> dict[str, Array]:
-        """Materialize all forcings for the full simulation.
+    def get_statics(self) -> dict[str, Array]:
+        """Convert all static forcings to JAX arrays.
+
+        Called once by the Runner to capture statics in closure.
 
         Returns:
-            Dict of forcing arrays with full time dimension.
+            Dict of static forcing JAX arrays (no time dimension).
+        """
+        result = {}
+        for name, da in self._static.items():
+            values = da.values
+            _check_nan(name, values)
+            result[name] = jnp.asarray(values)
+        return result
+
+    def get_all_dynamic(self) -> dict[str, Array]:
+        """Materialize all dynamic forcings for the full simulation.
+
+        Returns only dynamic forcings (with dim T), like get_chunk().
+        Static forcings must be accessed via get_statics().
+
+        Returns:
+            Dict of dynamic forcing arrays with full time dimension.
         """
         return self.get_chunk(0, self.n_timesteps)
 
@@ -95,55 +110,84 @@ class ForcingStore:
         Returns:
             Forcing array or default.
         """
-        if name not in self._forcings:
-            return default
+        if name in self._static:
+            return jnp.asarray(self._static[name].values)
+        if name in self._dynamic:
+            return jnp.asarray(self._dynamic[name].values)
+        return default
 
-        data = self._forcings[name]
-        if isinstance(data, xr.DataArray):
-            return jnp.asarray(data.values)
-        return data
+    @classmethod
+    def from_config(
+        cls,
+        forcings: dict[str, xr.DataArray],
+        blueprint_dims: dict[str, list[str] | None],
+        n_timesteps: int,
+        interp_method: str = "constant",
+        time_coords: np.ndarray | None = None,
+    ) -> ForcingStore:
+        """Build a ForcingStore from config forcings.
+
+        Separates forcings into static (no T dim) and dynamic (with T dim)
+        based on blueprint dimension declarations.
+
+        Args:
+            forcings: Forcing data as xr.DataArray (already transposed/mapped).
+            blueprint_dims: Dimension declarations from blueprint (keyed by "forcings.<name>").
+            n_timesteps: Total number of simulation timesteps.
+            interp_method: Interpolation method.
+            time_coords: Target datetime coordinates for interpolation.
+
+        Returns:
+            ForcingStore with separated static/dynamic forcings.
+        """
+        static: dict[str, xr.DataArray] = {}
+        dynamic: dict[str, xr.DataArray] = {}
+
+        for name, da in forcings.items():
+            bp_dims = blueprint_dims.get(f"forcings.{name}")
+            is_dynamic = bp_dims is not None and "T" in bp_dims
+
+            if is_dynamic:
+                dynamic[name] = da
+            else:
+                static[name] = da
+
+        return cls(
+            _static=static,
+            _dynamic=dynamic,
+            n_timesteps=n_timesteps,
+            interp_method=interp_method,
+            _time_coords=time_coords,
+        )
 
     def __contains__(self, name: str) -> bool:
-        return name in self._forcings
+        return name in self._static or name in self._dynamic
 
     def __getitem__(self, name: str) -> Any:
         return self.get(name)
 
-    def _load_single(
+    def _load_dynamic(
         self,
         name: str,
-        data: xr.DataArray | Array,
+        data: xr.DataArray,
         start: int,
         end: int,
-        is_dynamic: bool,
     ) -> Array:
-        """Load a single forcing for the given chunk range.
+        """Load a dynamic forcing for the given chunk range.
 
         Args:
             name: Forcing name.
-            data: Raw forcing (lazy xr.DataArray or in-memory array).
+            data: Dynamic forcing as xr.DataArray (lazy or loaded, with dim T).
             start: Start timestep (inclusive).
             end: End timestep (exclusive).
-            is_dynamic: Whether this forcing has a time dimension.
 
         Returns:
             Array sliced/interpolated for the chunk.
         """
-        # --- In-memory array ---
-        if not isinstance(data, xr.DataArray):
-            arr = np.asarray(data)
-            return arr[start:end] if is_dynamic else arr
-
-        # --- Lazy xr.DataArray — static ---
-        if not is_dynamic:
-            return self._materialize_with_nan(data.values)
-
-        # --- Lazy xr.DataArray — dynamic ---
         source_len = data.sizes["T"]
 
         if source_len == self.n_timesteps or self.interp_method == "constant":
-            chunk = data.isel(T=slice(start, end)).values
-            return self._materialize_with_nan(chunk)
+            return data.isel(T=slice(start, end)).values
 
         # Interpolation needed
         if self._time_coords is None:
@@ -152,8 +196,7 @@ class ForcingStore:
                 f"Provide _time_coords when constructing ForcingStore."
             )
         target_times = self._time_coords[start:end]
-        chunk = self._xarray_interpolate(data, target_times)
-        return self._materialize_with_nan(chunk)
+        return self._xarray_interpolate(data, target_times)
 
     def _xarray_interpolate(self, data: xr.DataArray, target_times: np.ndarray) -> np.ndarray:
         """Interpolate a lazy DataArray to target times via xarray."""
@@ -182,11 +225,3 @@ class ForcingStore:
 
         return data.isel(T=slice(i_start, i_end))
 
-    def _materialize_with_nan(self, arr: Array) -> Array:
-        """Materialize array and replace NaN with fill_nan."""
-        arr = np.asarray(arr)
-        if np.issubdtype(arr.dtype, np.floating):
-            nan_mask = np.isnan(arr)
-            if nan_mask.any():
-                arr = np.where(nan_mask, self.fill_nan, arr)
-        return arr

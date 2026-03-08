@@ -109,50 +109,48 @@ for name, dtype in DTYPES.items():
 
     cast = lambda a: np.array(a, dtype=dtype)  # noqa: E731
 
-    config = Config.from_dict(
-        {
-            "parameters": {
-                "lambda_0": {"value": [cast(param_vals["lambda_0"])]},
-                "gamma_lambda": {"value": [cast(param_vals["gamma_lambda"])]},
-                "tau_r_0": {"value": [cast(param_vals["tau_r_0"])]},
-                "gamma_tau_r": {"value": [cast(param_vals["gamma_tau_r"])]},
-                "t_ref": {"value": cast(param_vals["t_ref"])},
-                "efficiency": {"value": [cast(param_vals["efficiency"])]},
-                "cohort_ages": {"value": cast(cohort_ages_sec).tolist()},
-                "day_layer": {"value": [0]},
-                "night_layer": {"value": [0]},
-            },
-            "forcings": {
-                "latitude": xr.DataArray(cast(np.array([30.0])), dims=["Y"], coords={"Y": lat}),
-                "temperature": xr.DataArray(
-                    cast(temp_4d), dims=["T", "Z", "Y", "X"],
-                    coords={"T": dates, "Z": np.arange(1), "Y": lat, "X": lon},
-                ),
-                "primary_production": xr.DataArray(
-                    cast(npp_3d), dims=["T", "Y", "X"],
-                    coords={"T": dates, "Y": lat, "X": lon},
-                ),
-                "day_of_year": xr.DataArray(
-                    cast(doy_float), dims=["T"],
-                    coords={"T": dates},
-                ),
-            },
-            "initial_state": {
-                "biomass": xr.DataArray(
-                    np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
-                ),
-                "production": xr.DataArray(
-                    np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"],
-                    coords={"Y": lat, "X": lon},
-                ),
-            },
-            "execution": {
-                "time_start": start_date,
-                "time_end": end_date,
-                "dt": dt,
-                "forcing_interpolation": "linear",
-            },
-        }
+    config = Config(
+        parameters={
+            "lambda_0": xr.DataArray([cast(param_vals["lambda_0"])], dims=["F"]),
+            "gamma_lambda": xr.DataArray([cast(param_vals["gamma_lambda"])], dims=["F"]),
+            "tau_r_0": xr.DataArray([cast(param_vals["tau_r_0"])], dims=["F"]),
+            "gamma_tau_r": xr.DataArray([cast(param_vals["gamma_tau_r"])], dims=["F"]),
+            "t_ref": xr.DataArray(cast(param_vals["t_ref"])),
+            "efficiency": xr.DataArray([cast(param_vals["efficiency"])], dims=["F"]),
+            "cohort_ages": xr.DataArray(cast(cohort_ages_sec), dims=["C"]),
+            "day_layer": xr.DataArray([0], dims=["F"]),
+            "night_layer": xr.DataArray([0], dims=["F"]),
+        },
+        forcings={
+            "latitude": xr.DataArray(cast(np.array([30.0])), dims=["Y"], coords={"Y": lat}),
+            "temperature": xr.DataArray(
+                cast(temp_4d), dims=["T", "Z", "Y", "X"],
+                coords={"T": dates, "Z": np.arange(1), "Y": lat, "X": lon},
+            ),
+            "primary_production": xr.DataArray(
+                cast(npp_3d), dims=["T", "Y", "X"],
+                coords={"T": dates, "Y": lat, "X": lon},
+            ),
+            "day_of_year": xr.DataArray(
+                cast(doy_float), dims=["T"],
+                coords={"T": dates},
+            ),
+        },
+        initial_state={
+            "biomass": xr.DataArray(
+                np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
+            ),
+            "production": xr.DataArray(
+                np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"],
+                coords={"Y": lat, "X": lon},
+            ),
+        },
+        execution={
+            "time_start": start_date,
+            "time_end": end_date,
+            "dt": dt,
+            "forcing_interpolation": "linear",
+        },
     )
 
     try:

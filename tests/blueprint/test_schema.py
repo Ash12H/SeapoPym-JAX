@@ -2,13 +2,13 @@
 
 
 import pytest
+import xarray as xr
 
 from seapopym.blueprint import (
     Blueprint,
     Config,
     Declarations,
     ExecutionParams,
-    ParameterValue,
     ProcessStep,
     TendencySource,
     VariableDeclaration,
@@ -37,15 +37,6 @@ class TestVariableDeclaration:
         assert decl.units == "g"
         assert decl.dims == ["Y", "X", "C"]
         assert decl.description == "Biomass field"
-
-
-class TestParameterValue:
-    """Tests for ParameterValue."""
-
-    def test_simple_value(self):
-        """Test creating a simple parameter value."""
-        param = ParameterValue(value=0.1)
-        assert param.value == 0.1
 
 
 class TestProcessStep:
@@ -222,46 +213,41 @@ class TestBlueprint:
 class TestConfig:
     """Tests for Config class."""
 
-    def test_from_dict(self):
-        """Test creating Config from dict."""
-        data = {
-            "parameters": {"growth_rate": {"value": 0.1}},
-            "forcings": {"temperature": "/path/to/temp.nc"},
-            "initial_state": {"biomass": "/path/to/init.nc"},
-            "execution": {
-                "time_start": "2000-01-01",
-                "time_end": "2001-01-01",
-                "dt": "1d",
-            },
-        }
-
-        cfg = Config.from_dict(data)
-        assert cfg.parameters["growth_rate"].value == 0.1
+    def test_creation_with_xr_data(self):
+        """Test creating Config with xr.DataArray data."""
+        cfg = Config(
+            parameters={"growth_rate": xr.DataArray(0.1)},
+            forcings={"temperature": xr.DataArray([20.0, 21.0], dims=["T"])},
+            initial_state={"biomass": xr.DataArray([[1.0]], dims=["Y", "X"])},
+            execution=ExecutionParams(
+                time_start="2000-01-01",
+                time_end="2001-01-01",
+                dt="1d",
+            ),
+        )
+        assert float(cfg.parameters["growth_rate"]) == 0.1
         assert cfg.execution.time_start == "2000-01-01"
         assert cfg.execution.time_end == "2001-01-01"
         assert cfg.execution.dt == "1d"
 
-
-    def test_get_parameter_value(self):
-        """Test getting parameter value by name."""
-        cfg = Config.from_dict(
-            {
-                "parameters": {
-                    "simple": {"value": 0.1},
-                    "vector": {"value": [1.0, 2.0, 3.0]},
-                },
-                "forcings": {},
-                "initial_state": {},
-                "execution": {
-                    "time_start": "2000-01-01",
-                    "time_end": "2001-01-01",
-                },
-            }
+    def test_parameter_access(self):
+        """Test direct parameter access from dict."""
+        cfg = Config(
+            parameters={
+                "simple": xr.DataArray(0.1),
+                "vector": xr.DataArray([1.0, 2.0, 3.0], dims=["C"]),
+            },
+            forcings={},
+            initial_state={},
+            execution=ExecutionParams(
+                time_start="2000-01-01",
+                time_end="2001-01-01",
+            ),
         )
 
-        assert cfg.get_parameter_value("simple").value == 0.1
-        assert cfg.get_parameter_value("vector").value == [1.0, 2.0, 3.0]
-        assert cfg.get_parameter_value("nonexistent") is None
+        assert float(cfg.parameters["simple"]) == 0.1
+        assert list(cfg.parameters["vector"].values) == [1.0, 2.0, 3.0]
+        assert cfg.parameters.get("nonexistent") is None
 
 
 class TestExecutionParams:

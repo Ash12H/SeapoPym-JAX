@@ -93,40 +93,38 @@ npp_sec = (1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)) / 86400.0
 npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny_1, nx_1))
 npp_da_1 = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat_1, "X": lon_1})
 
-config_1x1 = Config.from_dict(
-    {
-        "parameters": {
-            "lambda_0": {"value": [TRUE_PARAMS["lambda_0"]]},
-            "gamma_lambda": {"value": [TRUE_PARAMS["gamma_lambda"]]},
-            "tau_r_0": {"value": [TRUE_PARAMS["tau_r_0"]]},
-            "gamma_tau_r": {"value": [TRUE_PARAMS["gamma_tau_r"]]},
-            "t_ref": {"value": TRUE_PARAMS["t_ref"]},
-            "efficiency": {"value": [TRUE_PARAMS["efficiency"]]},
-            "cohort_ages": {"value": cohort_ages_sec.tolist()},
-            "day_layer": {"value": [0]},
-            "night_layer": {"value": [0]},
-        },
-        "forcings": {
-            "latitude": xr.DataArray(np.full(ny_1, LATITUDE), dims=["Y"], coords={"Y": lat_1}),
-            "temperature": temp_da_1,
-            "primary_production": npp_da_1,
-            "day_of_year": doy_da_1,
-        },
-        "initial_state": {
-            "biomass": xr.DataArray(
-                np.zeros((1, ny_1, nx_1)), dims=["F", "Y", "X"], coords={"Y": lat_1, "X": lon_1}
-            ),
-            "production": xr.DataArray(
-                np.zeros((1, ny_1, nx_1, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat_1, "X": lon_1}
-            ),
-        },
-        "execution": {
-            "time_start": start_date,
-            "time_end": end_date,
-            "dt": DT,
-            "forcing_interpolation": "linear",
-        },
-    }
+config_1x1 = Config(
+    parameters={
+        "lambda_0": xr.DataArray([TRUE_PARAMS["lambda_0"]], dims=["F"]),
+        "gamma_lambda": xr.DataArray([TRUE_PARAMS["gamma_lambda"]], dims=["F"]),
+        "tau_r_0": xr.DataArray([TRUE_PARAMS["tau_r_0"]], dims=["F"]),
+        "gamma_tau_r": xr.DataArray([TRUE_PARAMS["gamma_tau_r"]], dims=["F"]),
+        "t_ref": xr.DataArray(TRUE_PARAMS["t_ref"]),
+        "efficiency": xr.DataArray([TRUE_PARAMS["efficiency"]], dims=["F"]),
+        "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+        "day_layer": xr.DataArray([0], dims=["F"]),
+        "night_layer": xr.DataArray([0], dims=["F"]),
+    },
+    forcings={
+        "latitude": xr.DataArray(np.full(ny_1, LATITUDE), dims=["Y"], coords={"Y": lat_1}),
+        "temperature": temp_da_1,
+        "primary_production": npp_da_1,
+        "day_of_year": doy_da_1,
+    },
+    initial_state={
+        "biomass": xr.DataArray(
+            np.zeros((1, ny_1, nx_1)), dims=["F", "Y", "X"], coords={"Y": lat_1, "X": lon_1}
+        ),
+        "production": xr.DataArray(
+            np.zeros((1, ny_1, nx_1, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat_1, "X": lon_1}
+        ),
+    },
+    execution={
+        "time_start": start_date,
+        "time_end": end_date,
+        "dt": DT,
+        "forcing_interpolation": "linear",
+    },
 )
 
 print("Compiling 1x1 model for vmap benchmark...")
@@ -134,7 +132,7 @@ _model_1x1 = compile_model(blueprint, config_1x1)
 _step_fn_1x1 = build_step_fn(_model_1x1)
 _n_timesteps_1x1 = _model_1x1.n_timesteps
 _initial_state_1x1 = _model_1x1.state
-_forcings_1x1 = _model_1x1.forcings.get_all()
+_forcings_1x1 = _model_1x1.forcings.get_all_dynamic()
 
 
 def run_single_sim(params: dict) -> jnp.ndarray:
@@ -201,38 +199,36 @@ def build_grid_model(ny: int, nx: int):
     npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
     npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
-    config = Config.from_dict(
-        {
-            "parameters": {
-                "lambda_0": {"value": TRUE_PARAMS["lambda_0"]},
-                "gamma_lambda": {"value": TRUE_PARAMS["gamma_lambda"]},
-                "tau_r_0": {"value": TRUE_PARAMS["tau_r_0"]},
-                "gamma_tau_r": {"value": TRUE_PARAMS["gamma_tau_r"]},
-                "t_ref": {"value": TRUE_PARAMS["t_ref"]},
-                "efficiency": {"value": TRUE_PARAMS["efficiency"]},
-                "cohort_ages": {"value": cohort_ages_sec.tolist()},
-                "day_layer": {"value": [0]},
-                "night_layer": {"value": [0]},
-            },
-            "forcings": {
-                "latitude": xr.DataArray(np.full(ny, LATITUDE), dims=["Y"], coords={"Y": lat}),
-                "temperature": temp_da,
-                "primary_production": npp_da,
-                "day_of_year": doy_da,
-            },
-            "initial_state": {
-                "biomass": xr.DataArray(np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}),
-                "production": xr.DataArray(
-                    np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
-                ),
-            },
-            "execution": {
-                "time_start": start_date,
-                "time_end": end_date,
-                "dt": DT,
-                "forcing_interpolation": "linear",
-            },
-        }
+    config = Config(
+        parameters={
+            "lambda_0": xr.DataArray(TRUE_PARAMS["lambda_0"]),
+            "gamma_lambda": xr.DataArray(TRUE_PARAMS["gamma_lambda"]),
+            "tau_r_0": xr.DataArray(TRUE_PARAMS["tau_r_0"]),
+            "gamma_tau_r": xr.DataArray(TRUE_PARAMS["gamma_tau_r"]),
+            "t_ref": xr.DataArray(TRUE_PARAMS["t_ref"]),
+            "efficiency": xr.DataArray(TRUE_PARAMS["efficiency"]),
+            "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+            "day_layer": xr.DataArray([0], dims=["F"]),
+            "night_layer": xr.DataArray([0], dims=["F"]),
+        },
+        forcings={
+            "latitude": xr.DataArray(np.full(ny, LATITUDE), dims=["Y"], coords={"Y": lat}),
+            "temperature": temp_da,
+            "primary_production": npp_da,
+            "day_of_year": doy_da,
+        },
+        initial_state={
+            "biomass": xr.DataArray(np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}),
+            "production": xr.DataArray(
+                np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
+            ),
+        },
+        execution={
+            "time_start": start_date,
+            "time_end": end_date,
+            "dt": DT,
+            "forcing_interpolation": "linear",
+        },
     )
 
     model = compile_model(blueprint, config)
@@ -244,7 +240,7 @@ def run_grid_jit(step_fn, model):
     """Build a JIT-compiled scan simulation for grid model."""
     n_timesteps = model.n_timesteps
     initial_state = model.state
-    forcings = model.forcings.get_all()
+    forcings = model.forcings.get_all_dynamic()
     parameters = model.parameters
 
     @jax.jit

@@ -12,8 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 if TYPE_CHECKING:
     from seapopym.blueprint import Blueprint
     from seapopym.blueprint.schema import TendencySource
@@ -67,11 +65,6 @@ class CompiledModel:
     time_grid: TimeGrid | None = None
 
     @property
-    def mask(self) -> Array | None:
-        """Shortcut to access the mask from forcings."""
-        return self.forcings.get("mask")
-
-    @property
     def n_timesteps(self) -> int:
         """Return the number of timesteps from the time dimension."""
         return self.shapes.get("T", 1)
@@ -81,41 +74,6 @@ class CompiledModel:
         if var_name not in self.state:
             raise KeyError(f"State variable '{var_name}' not found")
         return self.state[var_name].shape
-
-    def to_numpy(self) -> CompiledModel:
-        """Convert all arrays to NumPy (useful for debugging)."""
-        from seapopym.compiler.forcing import ForcingStore
-
-        def convert(arr: Array) -> np.ndarray:
-            if hasattr(arr, "numpy"):
-                return arr.numpy()
-            return np.asarray(arr)
-
-        # Materialize all forcings and convert to numpy
-        all_forcings = self.forcings.get_all()
-        numpy_forcings_dict = {k: convert(v) for k, v in all_forcings.items()}
-        numpy_store = ForcingStore(
-            _forcings=numpy_forcings_dict,
-            n_timesteps=self.n_timesteps,
-            interp_method=self.forcings.interp_method,
-            fill_nan=self.forcings.fill_nan,
-            _dynamic_forcings=set(self.forcings._dynamic_forcings),
-            _time_coords=self.forcings._time_coords,
-        )
-
-        return CompiledModel(
-            blueprint=self.blueprint,
-            compute_nodes=self.compute_nodes,
-            data_nodes=self.data_nodes,
-            tendency_map=self.tendency_map,
-            state={k: convert(v) for k, v in self.state.items()},
-            forcings=numpy_store,
-            parameters={k: convert(v) for k, v in self.parameters.items()},
-            shapes=self.shapes,
-            coords={k: convert(v) for k, v in self.coords.items()},
-            dt=self.dt,
-        )
-
 
 def _default_forcing_store() -> ForcingStore:
     """Create a default empty ForcingStore (avoids circular import at module level)."""

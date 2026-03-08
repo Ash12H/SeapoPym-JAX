@@ -1,6 +1,8 @@
 """Tests for Blueprint validation pipeline."""
 
+import numpy as np
 import pytest
+import xarray as xr
 
 from seapopym.blueprint import (
     Blueprint,
@@ -537,13 +539,11 @@ class TestValidateConfig:
             }
         )
 
-        cfg = Config.from_dict(
-            {
-                "parameters": {"rate": {"value": 0.1}},
-                "forcings": {"temp": "/path/to/temp.nc"},
-                "initial_state": {"biomass": "/path/to/init.nc"},
-                "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31"},
-            }
+        cfg = Config(
+            parameters={"rate": xr.DataArray(0.1)},
+            forcings={"temp": xr.DataArray(np.random.rand(10), dims=["T"])},
+            initial_state={"biomass": xr.DataArray(np.ones(5), dims=["Y"])},
+            execution={"time_start": "2000-01-01", "time_end": "2000-12-31"},
         )
 
         result = validate_config(cfg, bp)

@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
+import xarray as xr
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Self
 
@@ -29,18 +30,6 @@ class VariableDeclaration(BaseModel):
     units: str | None = None
     dims: list[str] | None = None
     description: str | None = None
-
-
-class ParameterValue(BaseModel):
-    """Parameter value specification for Config.
-
-    Attributes:
-        value: The parameter value (scalar or array).
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    value: float | int | list[float] | list[int]
 
 
 # === Process Definitions ===
@@ -337,9 +326,9 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    parameters: dict[str, ParameterValue] = Field(default_factory=dict)
-    forcings: dict[str, Any] = Field(default_factory=dict)
-    initial_state: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, xr.DataArray] = Field(default_factory=dict)
+    forcings: dict[str, xr.DataArray] = Field(default_factory=dict)
+    initial_state: dict[str, xr.DataArray] = Field(default_factory=dict)
     execution: ExecutionParams  # REQUIRED: time_start, time_end are mandatory
     dimension_mapping: dict[str, str] | None = None
 
@@ -366,13 +355,3 @@ class Config(BaseModel):
         """Create Config from a dictionary."""
         return cls.model_validate(data)
 
-    def get_parameter_value(self, path: str) -> ParameterValue | None:
-        """Get a parameter value by name.
-
-        Args:
-            path: Parameter name (e.g. "growth_rate").
-
-        Returns:
-            ParameterValue if found, None otherwise.
-        """
-        return self.parameters.get(path)

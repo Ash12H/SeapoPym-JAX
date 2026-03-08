@@ -33,7 +33,7 @@ import pandas as pd
 import xarray as xr
 
 import seapopym.functions.lmtl  # noqa: F401
-from seapopym.blueprint import Config
+from seapopym.blueprint import Config, ExecutionParams
 from seapopym.compiler import compile_model
 from seapopym.engine import Runner
 from seapopym.models import LMTL_NO_TRANSPORT
@@ -129,40 +129,38 @@ npp_sec = npp_day / 86400.0
 npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
 npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
-config = Config.from_dict(
-    {
-        "parameters": {
-            "lambda_0": {"value": [TRUE_PARAMS["lambda_0"]] * n_groups},
-            "gamma_lambda": {"value": [TRUE_PARAMS["gamma_lambda"]] * n_groups},
-            "tau_r_0": {"value": [TRUE_PARAMS["tau_r_0"]] * n_groups},
-            "gamma_tau_r": {"value": [TRUE_PARAMS["gamma_tau_r"]] * n_groups},
-            "t_ref": {"value": TRUE_PARAMS["t_ref"]},
-            "efficiency": {"value": [TRUE_PARAMS["efficiency"]] * n_groups},
-            "cohort_ages": {"value": cohort_ages_sec.tolist()},
-            "day_layer": {"value": [0, 1]},
-            "night_layer": {"value": [0, 0]},
-        },
-        "forcings": {
-            "latitude": xr.DataArray(np.full(ny, LATITUDE), dims=["Y"], coords={"Y": lat}),
-            "temperature": temp_da,
-            "primary_production": npp_da,
-            "day_of_year": doy_da,
-        },
-        "initial_state": {
-            "biomass": xr.DataArray(
-                np.zeros((n_groups, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
-            ),
-            "production": xr.DataArray(
-                np.zeros((n_groups, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
-            ),
-        },
-        "execution": {
-            "time_start": start_date,
-            "time_end": end_date,
-            "dt": DT,
-            "forcing_interpolation": "linear",
-        },
-    }
+config = Config(
+    parameters={
+        "lambda_0": xr.DataArray([TRUE_PARAMS["lambda_0"]] * n_groups, dims=["F"]),
+        "gamma_lambda": xr.DataArray([TRUE_PARAMS["gamma_lambda"]] * n_groups, dims=["F"]),
+        "tau_r_0": xr.DataArray([TRUE_PARAMS["tau_r_0"]] * n_groups, dims=["F"]),
+        "gamma_tau_r": xr.DataArray([TRUE_PARAMS["gamma_tau_r"]] * n_groups, dims=["F"]),
+        "t_ref": xr.DataArray(TRUE_PARAMS["t_ref"]),
+        "efficiency": xr.DataArray([TRUE_PARAMS["efficiency"]] * n_groups, dims=["F"]),
+        "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+        "day_layer": xr.DataArray([0, 1], dims=["F"]),
+        "night_layer": xr.DataArray([0, 0], dims=["F"]),
+    },
+    forcings={
+        "latitude": xr.DataArray(np.full(ny, LATITUDE), dims=["Y"], coords={"Y": lat}),
+        "temperature": temp_da,
+        "primary_production": npp_da,
+        "day_of_year": doy_da,
+    },
+    initial_state={
+        "biomass": xr.DataArray(
+            np.zeros((n_groups, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
+        ),
+        "production": xr.DataArray(
+            np.zeros((n_groups, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
+        ),
+    },
+    execution=ExecutionParams(
+        time_start=start_date,
+        time_end=end_date,
+        dt=DT,
+        forcing_interpolation="linear",
+    ),
 )
 
 print("Compiling model...")
