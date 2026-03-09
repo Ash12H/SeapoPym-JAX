@@ -1,6 +1,10 @@
 """I/O for streaming output.
 
-Provides DiskWriter for writing simulation outputs synchronously to Zarr stores.
+Provides writers for simulation outputs:
+- WriterRaw: JAX-traceable writer returning raw arrays (optimization, vmap, grad).
+- MemoryWriter: In-memory writer returning xarray Dataset.
+- DiskWriter: Synchronous writer to Zarr stores.
+- build_writer: Factory function to create and initialize the appropriate writer.
 """
 
 from __future__ import annotations
@@ -9,6 +13,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+import jax
 import numpy as np
 
 from seapopym.types import Array
@@ -19,6 +24,7 @@ if TYPE_CHECKING:
     import xarray as xr
 
     from seapopym.blueprint.nodes import DataNode
+    from seapopym.compiler import CompiledModel
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +93,46 @@ class OutputWriter(Protocol):
     def close(self) -> None:
         """Close resources."""
         ...
+
+
+class WriterRaw:
+    """JAX-traceable writer that accumulates raw arrays.
+
+    Stores chunks in a Python list and concatenates on finalize.
+    Because list.append is a trace-time operation, this writer is
+    compatible with ``jax.vmap`` and ``jax.grad``.
+
+    No ``initialize()`` call is needed — append/finalize/close suffice.
+    """
+
+    def __init__(self) -> None:
+        self._chunks: list[dict[str, Array]] = []
+
+    def initialize(
+        self,
+        shapes: dict[str, int],
+        variables: list[str],
+        coords: dict[str, Array] | None = None,
+        var_dims: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        """No-op (kept for Protocol compatibility)."""
+
+    def append(self, data: dict[str, Array]) -> None:
+        """Store a chunk of arrays."""
+        self._chunks.append(data)
+
+    def finalize(self) -> dict[str, Array]:
+        """Concatenate all chunks along axis 0."""
+        import jax.numpy as jnp
+
+        if not self._chunks:
+            return {}
+        if len(self._chunks) == 1:
+            return self._chunks[0]
+        return jax.tree.map(lambda *arrays: jnp.concatenate(arrays, axis=0), *self._chunks)
+
+    def close(self) -> None:
+        """No-op."""
 
 
 class DiskWriter:
@@ -186,8 +232,8 @@ class DiskWriter:
         if not self._initialized:
             raise EngineIOError(str(self.output_path), "Writer not initialized")
 
-        # Convert JAX arrays to numpy
-        data_np = {k: np.asarray(v) for k, v in data.items()}
+        # Transfer JAX arrays to host (numpy)
+        data_np = {k: jax.device_get(v) for k, v in data.items()}
         self._write_zarr_chunk(data_np)
 
     def _write_zarr_chunk(self, data: dict[str, np.ndarray]) -> None:
@@ -314,3 +360,30 @@ class MemoryWriter:
     def close(self) -> None:
         """Release resources (no-op for memory writer)."""
         pass
+
+
+def build_writer(
+    model: CompiledModel,
+    output_path: str | Path | None,
+    export_variables: list[str],
+) -> OutputWriter:
+    """Build and initialize the appropriate output writer.
+
+    Args:
+        model: Compiled model (provides shapes, coords, data_nodes, time_grid).
+        output_path: If not None, creates a DiskWriter; otherwise MemoryWriter.
+        export_variables: Variables to export.
+
+    Returns:
+        Initialized OutputWriter ready for append/finalize/close.
+    """
+    n_timesteps = model.n_timesteps
+    writer_coords = dict(model.coords)
+    if model.time_grid is not None:
+        writer_coords["T"] = model.time_grid.coords[:n_timesteps]
+    var_dims = resolve_var_dims(model.data_nodes, export_variables)
+
+    writer: OutputWriter
+    writer = DiskWriter(output_path) if output_path is not None else MemoryWriter()
+    writer.initialize(model.shapes, export_variables, coords=writer_coords, var_dims=var_dims)
+    return writer

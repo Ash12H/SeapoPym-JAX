@@ -1,16 +1,24 @@
 """Engine package for execution of compiled models.
 
 This package provides:
-- Runner: Composable runner with presets for simulation and optimization
-- Step function builder for time-stepping logic
+- run: Pure execution engine (chunked lax.scan with pluggable writer)
+- simulate: Convenience wrapper (builds step_fn + writer, manages lifecycle)
+- build_step_fn: Step function builder for time-stepping logic
+- Writers: WriterRaw (JAX-traceable), MemoryWriter (xarray), DiskWriter (Zarr)
 
-Example:
-    >>> from seapopym.compiler import compile_model
-    >>> from seapopym.engine import Runner
-    >>>
-    >>> model = compile_model(blueprint, config)
-    >>> runner = Runner.simulation(chunk_size=365)
-    >>> final_state, outputs = runner.run(model, output_path="/results/sim_001/")
+Example::
+
+    from seapopym.compiler import compile_model
+    from seapopym.engine import simulate
+
+    model = compile_model(blueprint, config)
+    final_state, dataset = simulate(model, chunk_size=365)
+
+    # Low-level
+    from seapopym.engine import run, build_step_fn
+
+    step_fn = build_step_fn(model, export_variables=["biomass"])
+    state, outputs = run(step_fn, model, dict(model.state), params)
 """
 
 from .exceptions import (
@@ -18,18 +26,24 @@ from .exceptions import (
     EngineError,
     EngineIOError,
 )
-from .io import DiskWriter
-from .runner import Runner, RunnerConfig
+from .io import DiskWriter, MemoryWriter, WriterRaw, build_writer
+from .run import run, simulate
+from .runner import Runner, RunnerConfig  # Deprecated shim
 from .step import build_step_fn
 
 __all__ = [
-    # Runners
+    # Functions
+    "run",
+    "simulate",
+    "build_step_fn",
+    "build_writer",
+    # Writers
+    "WriterRaw",
+    "MemoryWriter",
+    "DiskWriter",
+    # Deprecated
     "Runner",
     "RunnerConfig",
-    # Step
-    "build_step_fn",
-    # I/O
-    "DiskWriter",
     # Exceptions
     "EngineError",
     "ChunkingError",
