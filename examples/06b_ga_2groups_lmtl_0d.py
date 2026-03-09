@@ -1,0 +1,382 @@
+# %% [markdown]
+# # Genetic Algorithm with 2 Functional Groups on LMTL 0D (Twin Experiment)
+#
+# Demonstrates SimpleGA (evosax) on a 0D LMTL model with 2 functional groups:
+#
+# - Group 0 (surface): stays at surface (day_layer=0, night_layer=0)
+# - Group 1 (DVM):     diel vertical migration (day_layer=1, night_layer=0)
+#
+# Observation model:
+# - Day:   surface sensor sees only group 0
+# - Night: surface sensor sees group 0 + group 1
+#
+# Runs **two experiments** with shared model setup:
+# 1. Clean observations (no noise)
+# 2. Noisy observations (30% Gaussian noise)
+#
+# Visualization focuses on **loss evolution**:
+# - Best-of-generation (best descendant at each generation)
+# - Elite (cumulative minimum — elitism)
+
+# %%
+import logging
+import time
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO)
+
+import jax
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+import seapopym.functions.lmtl  # noqa: F401
+from seapopym.blueprint import Config, ExecutionParams
+from seapopym.compiler import compile_model
+from seapopym.engine import build_step_fn, run
+from seapopym.models import LMTL_NO_TRANSPORT
+from seapopym.optimization import GAOptimizer, Objective
+
+jax.config.update("jax_default_device", jax.devices("cpu")[0])
+print(f"JAX device: {jax.devices('cpu')[0]}")
+
+# %% [markdown]
+# ## Configuration
+
+# %%
+POPSIZE = 64
+N_GENERATIONS = 250
+PATIENCE = 50
+SEED = 42
+
+SPINUP_YEARS = 1
+OPT_YEARS = 2
+DT = "1d"
+OBS_FRACTION = 0.05
+LATITUDE = 30.0
+
+TRUE_PARAMS = {
+    "lambda_0": 1 / 150 / 86400,
+    "gamma_lambda": 0.15,
+    "tau_r_0": 10.38 * 86400,
+    "gamma_tau_r": 0.11,
+    "efficiency": 0.1668,
+    "t_ref": 0.0,
+}
+
+ALL_OPT_PARAMS = ["lambda_0", "gamma_lambda", "tau_r_0", "gamma_tau_r", "efficiency"]
+
+BOUNDS = {
+    "lambda_0": (1e-10, 5 * TRUE_PARAMS["lambda_0"]),
+    "gamma_lambda": (0.01, 5 * TRUE_PARAMS["gamma_lambda"]),
+    "tau_r_0": (0.1 * TRUE_PARAMS["tau_r_0"], 5 * TRUE_PARAMS["tau_r_0"]),
+    "gamma_tau_r": (0.01, 5 * TRUE_PARAMS["gamma_tau_r"]),
+    "efficiency": (0.01, 5 * TRUE_PARAMS["efficiency"]),
+}
+
+FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
+
+NOISE_LEVELS = [0.0, 0.30]
+
+PLOT_FILE = "examples/images/06b_ga_2groups_lmtl_0d.png"
+
+# %% [markdown]
+# ## Forcings & Model Setup
+
+# %%
+blueprint = LMTL_NO_TRANSPORT
+
+max_age_days = int(np.ceil(BOUNDS["tau_r_0"][1] / 86400))  # upper bound covers all optimizer trials
+cohort_ages_sec = np.arange(0, max_age_days + 1) * 86400.0
+n_cohorts = len(cohort_ages_sec)
+
+total_years = SPINUP_YEARS + OPT_YEARS
+start_date = "2000-01-01"
+end_date = str((pd.Timestamp(start_date) + pd.DateOffset(years=total_years)).date())
+
+dates = pd.date_range(
+    start=pd.to_datetime(start_date),
+    periods=(pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 5,
+    freq="D",
+)
+ny, nx = 1, 1
+lat, lon = np.arange(ny), np.arange(nx)
+n_layers = 2
+n_groups = 2
+
+doy = dates.dayofyear.values.astype(float)
+doy_da = xr.DataArray(doy, dims=["T"], coords={"T": dates})
+
+temp_surface = 15.0 + 5.0 * np.sin(2 * np.pi * doy / 365.0)
+temp_deep = 8.0 + 2.0 * np.sin(2 * np.pi * doy / 365.0)
+temp_4d = np.stack(
+    [
+        np.broadcast_to(temp_surface[:, None, None], (len(dates), ny, nx)),
+        np.broadcast_to(temp_deep[:, None, None], (len(dates), ny, nx)),
+    ],
+    axis=1,
+)
+temp_da = xr.DataArray(
+    temp_4d,
+    dims=["T", "Z", "Y", "X"],
+    coords={"T": dates, "Z": np.arange(n_layers), "Y": lat, "X": lon},
+)
+
+npp_day = 1.0 + 0.5 * np.sin(2 * np.pi * doy / 365.0)
+npp_sec = npp_day / 86400.0
+npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
+npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+
+config = Config(
+    parameters={
+        "lambda_0": xr.DataArray([TRUE_PARAMS["lambda_0"]] * n_groups, dims=["F"]),
+        "gamma_lambda": xr.DataArray([TRUE_PARAMS["gamma_lambda"]] * n_groups, dims=["F"]),
+        "tau_r_0": xr.DataArray([TRUE_PARAMS["tau_r_0"]] * n_groups, dims=["F"]),
+        "gamma_tau_r": xr.DataArray([TRUE_PARAMS["gamma_tau_r"]] * n_groups, dims=["F"]),
+        "t_ref": xr.DataArray(TRUE_PARAMS["t_ref"]),
+        "efficiency": xr.DataArray([TRUE_PARAMS["efficiency"]] * n_groups, dims=["F"]),
+        "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+        "day_layer": xr.DataArray([0, 1], dims=["F"]),
+        "night_layer": xr.DataArray([0, 0], dims=["F"]),
+    },
+    forcings={
+        "latitude": xr.DataArray(np.full(ny, LATITUDE), dims=["Y"], coords={"Y": lat}),
+        "temperature": temp_da,
+        "primary_production": npp_da,
+        "day_of_year": doy_da,
+    },
+    initial_state={
+        "biomass": xr.DataArray(
+            np.zeros((n_groups, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
+        ),
+        "production": xr.DataArray(
+            np.zeros((n_groups, n_cohorts, ny, nx)), dims=["F", "C", "Y", "X"], coords={"Y": lat, "X": lon}
+        ),
+    },
+    execution=ExecutionParams(
+        time_start=start_date,
+        time_end=end_date,
+        dt=DT,
+        forcing_interpolation="linear",
+    ),
+)
+
+print("Compiling model...")
+model = compile_model(blueprint, config)
+step_fn = build_step_fn(model, export_variables=["biomass"])
+n_timesteps = model.n_timesteps
+spinup_steps = int(SPINUP_YEARS / total_years * n_timesteps)
+
+# %% [markdown]
+# ## Generate Synthetic Observations
+
+# %%
+print("=" * 60)
+print("Genetic Algorithm with 2 Functional Groups (Twin Experiment)")
+print(f"  Spin-up: {SPINUP_YEARS}y | Optimization: {OPT_YEARS}y | dt: {DT}")
+print(f"  Group 0: surface (day=0, night=0)")
+print(f"  Group 1: DVM     (day=1, night=0)")
+print(f"  Latitude: {LATITUDE}°N")
+print(f"  GA: popsize={POPSIZE}, {N_GENERATIONS} gen, patience={PATIENCE}")
+print(f"  Noise levels: {NOISE_LEVELS}")
+print("=" * 60)
+
+print("\nGenerating observations with TRUE parameters...")
+t0 = time.time()
+true_params_jax = {k: jnp.array([TRUE_PARAMS[k]] * n_groups) for k in ALL_OPT_PARAMS}
+_, outputs_true = run(step_fn, model, dict(model.state), {**model.parameters, **true_params_jax})
+
+biomass_true = outputs_true["biomass"]  # (T, F, Y, X)
+bio_g0_full = jnp.mean(biomass_true[:, 0], axis=tuple(range(1, biomass_true.ndim - 1)))
+bio_g1_full = jnp.mean(biomass_true[:, 1], axis=tuple(range(1, biomass_true.ndim - 1)))
+
+bio_g0 = bio_g0_full[spinup_steps:]
+bio_g1 = bio_g1_full[spinup_steps:]
+n_opt_steps = len(bio_g0)
+
+print(f"  Simulation: {time.time() - t0:.2f}s ({n_timesteps} steps, {spinup_steps} spin-up)")
+print(f"  Group 0 biomass: [{float(jnp.min(bio_g0)):.4f}, {float(jnp.max(bio_g0)):.4f}]")
+print(f"  Group 1 biomass: [{float(jnp.min(bio_g1)):.4f}, {float(jnp.max(bio_g1)):.4f}]")
+
+n_obs = max(2, int(OBS_FRACTION * n_opt_steps))
+rng = np.random.default_rng(SEED)
+obs_local_idx = np.sort(rng.choice(n_opt_steps, size=n_obs, replace=False))
+obs_global_idx = obs_local_idx + spinup_steps
+
+is_day = rng.random(n_obs) < 0.5
+night_weight = (~is_day).astype(float)
+n_day, n_night = int(np.sum(is_day)), int(np.sum(~is_day))
+
+obs_values_clean = np.array(bio_g0[obs_local_idx]) + night_weight * np.array(bio_g1[obs_local_idx])
+print(f"  {n_obs} observations ({n_day} day, {n_night} night), std={float(np.std(obs_values_clean)):.6f}")
+
+# %% [markdown]
+# ## Shared helpers
+
+# %%
+_night_w = jnp.array(night_weight)
+
+
+def extract_predictions(outputs):
+    biomass = outputs["biomass"]  # (T, F, Y, X)
+    g0 = jnp.mean(biomass[:, 0], axis=tuple(range(1, biomass.ndim - 1)))
+    g1 = jnp.mean(biomass[:, 1], axis=tuple(range(1, biomass.ndim - 1)))
+    return g0[obs_global_idx] + _night_w * g1[obs_global_idx]
+
+
+dt_sec = model.dt
+time_days = np.arange(n_opt_steps) * dt_sec / 86400.0
+
+# %% [markdown]
+# ## Run GA for each noise level
+
+# %%
+all_experiment_results = {}
+
+for noise_level in NOISE_LEVELS:
+    label = "clean" if noise_level == 0.0 else f"noise={noise_level:.0%}"
+    print(f"\n{'=' * 60}")
+    print(f"Experiment: {label}")
+    print(f"{'=' * 60}")
+
+    if noise_level > 0:
+        noise_rng = np.random.default_rng(SEED + 1)
+        noise = noise_rng.normal(0, noise_level * np.abs(obs_values_clean), size=obs_values_clean.shape)
+        obs_values = obs_values_clean + noise
+    else:
+        obs_values = obs_values_clean
+
+    objective = Objective(observations=jnp.array(obs_values), transform=extract_predictions)
+    optimizer = GAOptimizer(
+        objectives=[(objective, "nrmse", 1.0)],
+        bounds=BOUNDS,
+        popsize=POPSIZE,
+        seed=SEED,
+        export_variables=["biomass"],
+    )
+
+    print(f"Running GA ({label})...")
+    t0 = time.time()
+    result = optimizer.run(model, n_generations=N_GENERATIONS, patience=PATIENCE, progress_bar=True)
+    elapsed = time.time() - t0
+
+    print(f"  Completed in {elapsed:.1f}s — {result.n_iterations} generations")
+    print(f"  Best loss: {result.loss:.6e}")
+    print(f"  {'Converged' if result.converged else 'Did not converge'}")
+
+    all_experiment_results[noise_level] = {
+        "result": result,
+        "obs_values": obs_values,
+        "elapsed": elapsed,
+    }
+
+    # Print parameter recovery
+    print(f"\n  Parameter recovery (per group):")
+    for p in ALL_OPT_PARAMS:
+        vals = result.params[p]
+        for g in range(n_groups):
+            v = float(vals[g])
+            ratio = v / TRUE_PARAMS[p]
+            print(f"    {p:<14} G{g} = {v:>12.4g}  (ratio = {ratio:.4f})")
+
+# %% [markdown]
+# ## Visualization
+
+# %%
+# Build per-group parameter labels
+param_labels = []
+for p in ALL_OPT_PARAMS:
+    for g in range(n_groups):
+        param_labels.append(f"{p[:10]} G{g}")
+true_vals_flat = np.array([TRUE_PARAMS[p] for p in ALL_OPT_PARAMS for _ in range(n_groups)])
+
+n_experiments = len(NOISE_LEVELS)
+fig, axes = plt.subplots(n_experiments, 4, figsize=(20, 5 * n_experiments))
+if n_experiments == 1:
+    axes = axes[np.newaxis, :]
+
+for row_idx, noise_level in enumerate(NOISE_LEVELS):
+    label = "Clean" if noise_level == 0.0 else f"Noise {noise_level:.0%}"
+    exp = all_experiment_results[noise_level]
+    result = exp["result"]
+    obs_values = exp["obs_values"]
+    loss_history = result.loss_history
+
+    # --- Col 0: Biomass time series ---
+    ax = axes[row_idx, 0]
+    ax.plot(time_days, np.array(bio_g0), "k-", linewidth=2, label="True G0 (surface)", alpha=0.7)
+    ax.plot(time_days, np.array(bio_g1), "k--", linewidth=2, label="True G1 (DVM)", alpha=0.7)
+    ax.scatter(
+        obs_local_idx[is_day] * dt_sec / 86400.0, obs_values[is_day],
+        c="gold", s=25, zorder=5, label="Obs (day)", edgecolors="k", linewidths=0.5,
+    )
+    ax.scatter(
+        obs_local_idx[~is_day] * dt_sec / 86400.0, obs_values[~is_day],
+        c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
+    )
+    _, outputs_best = run(step_fn, model, dict(model.state), {**model.parameters, **result.params})
+    biomass_best = outputs_best["biomass"]
+    bg0_best = jnp.mean(biomass_best[:, 0], axis=tuple(range(1, biomass_best.ndim - 1)))
+    bg1_best = jnp.mean(biomass_best[:, 1], axis=tuple(range(1, biomass_best.ndim - 1)))
+    ax.plot(time_days, np.array(bg0_best[spinup_steps:]), "-", color="orangered",
+            linewidth=1.5, alpha=0.8, label="GA G0")
+    ax.plot(time_days, np.array(bg1_best[spinup_steps:]), "--", color="orangered",
+            linewidth=1.5, alpha=0.8, label="GA G1")
+    ax.set_xlabel("Day")
+    ax.set_ylabel("Biomass (g/m²)")
+    ax.set_title(f"[{label}] Biomass (G0=surface, G1=DVM)")
+    ax.legend(fontsize=7, ncol=2)
+    ax.grid(True, alpha=0.3)
+
+    # --- Col 1: OBS vs PRED scatter ---
+    ax = axes[row_idx, 1]
+    bg0_opt = np.array(bg0_best[spinup_steps:])
+    bg1_opt = np.array(bg1_best[spinup_steps:])
+    pred_best = bg0_opt[obs_local_idx] + night_weight * bg1_opt[obs_local_idx]
+    ax.scatter(obs_values, pred_best, c=np.where(is_day, "gold", "navy"),
+               edgecolors="k", linewidths=0.5, s=30, zorder=5)
+    obs_range = [min(obs_values.min(), pred_best.min()), max(obs_values.max(), pred_best.max())]
+    ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
+    ax.set_xlabel("Observed")
+    ax.set_ylabel("Predicted (GA)")
+    ax.set_title(f"[{label}] Obs vs Pred (gold=day, navy=night)")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # --- Col 2: Parameter recovery (10 individual params) ---
+    ax = axes[row_idx, 2]
+    n_all = len(param_labels)
+    x_pos = np.arange(n_all)
+    vals = np.array([float(result.params[p][g]) for p in ALL_OPT_PARAMS for g in range(n_groups)])
+    ratios = vals / true_vals_flat
+
+    ax.bar(x_pos - 0.15, np.ones(n_all), 0.3, label="True", color="black", alpha=0.3)
+    ax.bar(x_pos + 0.15, ratios, 0.3, label="GA", color="orangered", alpha=0.7)
+    ax.axhline(y=1, color="k", linestyle="--", alpha=0.5)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(param_labels, rotation=45, ha="right", fontsize=7)
+    ax.set_ylabel("Ratio to true value")
+    ax.set_title(f"[{label}] Parameter recovery (per group)")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # --- Col 3: Loss evolution ---
+    ax = axes[row_idx, 3]
+    generations = np.arange(1, len(loss_history) + 1)
+    best_of_gen = np.array(loss_history)
+    elite = np.minimum.accumulate(best_of_gen)
+    ax.semilogy(generations, best_of_gen, color="steelblue", linewidth=0.8, alpha=0.5, label="Best of generation")
+    ax.semilogy(generations, elite, color="orangered", linewidth=2, label="Elite (cumul. min)")
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Loss (NRMSE)")
+    ax.set_title(f"[{label}] Loss evolution")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+fig.suptitle("SimpleGA 2 Groups — Clean vs Noisy", fontsize=13)
+fig.tight_layout()
+Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
+plt.savefig(PLOT_FILE, dpi=150)
+print(f"\nPlot saved to {PLOT_FILE}")

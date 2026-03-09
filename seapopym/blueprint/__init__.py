@@ -44,7 +44,6 @@ from .schema import (
     Config,
     Declarations,
     ExecutionParams,
-    ParameterValue,
     ProcessStep,
     TendencySource,
     VariableDeclaration,
@@ -54,6 +53,7 @@ from .validation import (
     ValidationResult,
     validate_blueprint,
     validate_config,
+    validate_model,
 )
 
 __all__ = [
@@ -62,7 +62,6 @@ __all__ = [
     "Config",
     # Schema classes
     "VariableDeclaration",
-    "ParameterValue",
     "ProcessStep",
     "TendencySource",
     "Declarations",
@@ -76,6 +75,7 @@ __all__ = [
     # Validation
     "validate_blueprint",
     "validate_config",
+    "validate_model",
     "BlueprintValidator",
     "ValidationResult",
     # Nodes

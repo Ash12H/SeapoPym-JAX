@@ -20,7 +20,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Blueprint, Config
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 
 # =============================================================================
 # CONFIGURATION
@@ -280,7 +280,7 @@ config = Config.from_dict(
             "gamma_tau_r": {"value": LMTL_GAMMA_TAU_R},
             "t_ref": {"value": LMTL_T_REF},
             "efficiency": {"value": LMTL_E},
-            "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+            "cohort_ages": {"value": cohort_ages_sec.tolist()},
             "day_layer": {"value": LMTL_DAY_LAYER},
             "night_layer": {"value": LMTL_NIGHT_LAYER},
         },
@@ -321,8 +321,8 @@ model = compile_model(blueprint, config)
 print(f"  Timesteps: {model.n_timesteps}")
 
 print("\nExécution de la simulation...")
-runner = StreamingRunner(model, chunk_size=365)
-state, outputs = runner.run(export_variables=["biomass"])
+runner = Runner.simulation(chunk_size=365)
+state, outputs = runner.run(model, export_variables=["biomass"])
 
 # Extract results
 results_jax = outputs["biomass"].rename("biomass_jax")

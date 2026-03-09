@@ -23,7 +23,7 @@ pip install seapopym
 ```python
 from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 import xarray as xr
 import numpy as np
 
@@ -58,8 +58,8 @@ config = Config.from_dict({
 
 # 4. Compile & Run
 model = compile_model(bp, config)
-runner = StreamingRunner(model)
-state, outputs = runner.run(output_path=None) # In-memory
+runner = Runner.simulation()
+state, outputs = runner.run(model) # In-memory
 
 print(state["biomass"])
 ```

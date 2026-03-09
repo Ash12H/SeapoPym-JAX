@@ -1,195 +1,235 @@
-"""LMTL Model Example - 2D Grid Simulation (no transport).
+# %% [markdown]
+# # LMTL Model — Floating-Point Precision Comparison (no transport)
+#
+# Compares float64, float32, float16, and float8 precision on a 2D grid
+# simulation using the LMTL_NO_TRANSPORT blueprint.
+#
+# Only the **second year** is displayed (year 1 = spin-up).
 
-This script demonstrates the LMTL (Low/Mid Trophic Level) ecosystem model
-using a pre-defined blueprint from the model catalogue with JAX backend.
-
-Processes (from LMTL_NO_TRANSPORT blueprint):
-1. Day length (CBM photoperiod model)
-2. DVM-weighted mean temperature (layer_weighted_mean)
-3. Threshold temperature (max(T, T_ref))
-4. Gillooly temperature normalization
-5. Recruitment age (temperature-dependent)
-6. NPP Injection -> Cohort 0
-7. Aging Flux -> Transfer between cohorts (C -> C+1)
-8. Recruitment Flux -> Transfer from eligible cohorts to Biomass
-9. Natural Mortality -> Loss from Biomass
-"""
-
+# %%
 import time
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import ml_dtypes
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-# Import LMTL functions (registers them with @functional decorator)
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import simulate
 from seapopym.models import LMTL_NO_TRANSPORT
 
-# =============================================================================
-# 1. PARAMETERS
-# =============================================================================
+jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_default_device", jax.devices("cpu")[0])
+print(f"JAX device: {jax.devices('cpu')[0]}")
 
-# LMTL Biological Parameters
+# %% [markdown]
+# ## Parameters
+
+# %%
 LMTL_E = 0.1668
 LMTL_LAMBDA_0 = 1 / 150  # 1/day
 LMTL_GAMMA_LAMBDA = 0.15  # 1/degC
 LMTL_TAU_R_0 = 10.38  # days
 LMTL_GAMMA_TAU_R = 0.11  # 1/degC
 LMTL_T_REF = 0.0  # degC
-LATITUDE = 30.0  # degrees N
+
+DTYPES = {
+    "float64": np.float64,
+    "float32": np.float32,
+    "float16": np.float16,
+    "float8": ml_dtypes.float8_e5m2,
+}
 
 PLOT_FILE = "examples/images/01_lmtl_no_transport.png"
 
-# =============================================================================
-# 2. BLUEPRINT
-# =============================================================================
+# %% [markdown]
+# ## Common Setup
 
+# %%
 blueprint = LMTL_NO_TRANSPORT
 
 max_age_days = int(np.ceil(LMTL_TAU_R_0))
 cohort_ages_sec = np.arange(0, max_age_days + 1) * 86400.0
 n_cohorts = len(cohort_ages_sec)
 
-# =============================================================================
-# 3. CONFIGURATION (2D Grid Simulation)
-# =============================================================================
-
-# Simulation Time
 start_date = "2000-01-01"
-end_date = "2002-01-01"  # 2 years
+end_date = "2002-01-01"  # 2 years (year 1 = spin-up)
 dt = "3h"
 
-# Generate dates covering [start, end] inclusive
 start_pd = pd.to_datetime(start_date)
 end_pd = pd.to_datetime(end_date)
-n_days = (end_pd - start_pd).days + 5  # Add margin to cover end_date safely
-
+n_days = (end_pd - start_pd).days + 5
 dates = pd.date_range(start=start_pd, periods=n_days, freq="D")
 
-# Grid (2D)
-grid_size = (180, 360)
-# grid_size = (1, 1)
+grid_size = (1, 1)
 ny, nx = grid_size
 lat = np.arange(ny)
 lon = np.arange(nx)
 
-# Forcing Data Generation
 day_of_year = dates.dayofyear.values
 
-# Day of year forcing (T, Y, X)
-doy_float = day_of_year.astype(float)
-doy_3d = np.broadcast_to(doy_float[:, None, None], (len(dates), ny, nx))
-doy_da = xr.DataArray(doy_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
+# Base forcing arrays (float64)
+doy_float = day_of_year.astype(np.float64)
 
-# Temperature: 15C mean, +/- 5C seasonal amplitude (T, Z=1, Y, X)
 temp_c = 15.0 + 5.0 * np.sin(2 * np.pi * day_of_year / 365.0)
 temp_4d = np.broadcast_to(temp_c[:, None, None, None], (len(dates), 1, ny, nx))
-temp_da = xr.DataArray(
-    temp_4d,
-    dims=["T", "Z", "Y", "X"],
-    coords={"T": dates, "Z": np.arange(1), "Y": lat, "X": lon},
-)
 
-# NPP: 1.0 mean, +/- 0.5 seasonal amplitude (g/m^2/day)
 npp_day = 1.0 + 0.5 * np.sin(2 * np.pi * day_of_year / 365.0)
 npp_sec = npp_day / 86400.0
 npp_3d = np.broadcast_to(npp_sec[:, None, None], (len(dates), ny, nx))
-npp_da = xr.DataArray(npp_3d, dims=["T", "Y", "X"], coords={"T": dates, "Y": lat, "X": lon})
 
+# Parameter values (float64)
+param_vals = {
+    "lambda_0": LMTL_LAMBDA_0 / 86400.0,
+    "gamma_lambda": LMTL_GAMMA_LAMBDA,
+    "tau_r_0": LMTL_TAU_R_0 * 86400.0,
+    "gamma_tau_r": LMTL_GAMMA_TAU_R,
+    "t_ref": LMTL_T_REF,
+    "efficiency": LMTL_E,
+}
 
-config = Config.from_dict(
-    {
-        "parameters": {
-            "lambda_0": {"value": LMTL_LAMBDA_0 / 86400.0},
-            "gamma_lambda": {"value": LMTL_GAMMA_LAMBDA},
-            "tau_r_0": {"value": LMTL_TAU_R_0 * 86400.0},
-            "gamma_tau_r": {"value": LMTL_GAMMA_TAU_R},
-            "t_ref": {"value": LMTL_T_REF},
-            "efficiency": {"value": LMTL_E},
-            "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+# %% [markdown]
+# ## Run for each precision
+
+# %%
+results = {}
+
+for name, dtype in DTYPES.items():
+    info = jnp.finfo(dtype)
+    print(f"\n{'=' * 50}")
+    print(f"Running with {name} (eps={float(info.eps):.2e}, max={float(info.max):.2e})")
+    print(f"{'=' * 50}")
+
+    cast = lambda a: np.array(a, dtype=dtype)  # noqa: E731
+
+    config = Config(
+        parameters={
+            "lambda_0": xr.DataArray([cast(param_vals["lambda_0"])], dims=["F"]),
+            "gamma_lambda": xr.DataArray([cast(param_vals["gamma_lambda"])], dims=["F"]),
+            "tau_r_0": xr.DataArray([cast(param_vals["tau_r_0"])], dims=["F"]),
+            "gamma_tau_r": xr.DataArray([cast(param_vals["gamma_tau_r"])], dims=["F"]),
+            "t_ref": xr.DataArray(cast(param_vals["t_ref"])),
+            "efficiency": xr.DataArray([cast(param_vals["efficiency"])], dims=["F"]),
+            "cohort_ages": xr.DataArray(cast(cohort_ages_sec), dims=["C"]),
             "day_layer": xr.DataArray([0], dims=["F"]),
             "night_layer": xr.DataArray([0], dims=["F"]),
-            "latitude": {"value": LATITUDE},
         },
-        "forcings": {
-            "temperature": temp_da,
-            "primary_production": npp_da,
-            "day_of_year": doy_da,
-        },
-        "initial_state": {
-            "biomass": xr.DataArray(np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}),
-            "production": xr.DataArray(
-                np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
+        forcings={
+            "latitude": xr.DataArray(cast(np.array([30.0])), dims=["Y"], coords={"Y": lat}),
+            "temperature": xr.DataArray(
+                cast(temp_4d), dims=["T", "Z", "Y", "X"],
+                coords={"T": dates, "Z": np.arange(1), "Y": lat, "X": lon},
+            ),
+            "primary_production": xr.DataArray(
+                cast(npp_3d), dims=["T", "Y", "X"],
+                coords={"T": dates, "Y": lat, "X": lon},
+            ),
+            "day_of_year": xr.DataArray(
+                cast(doy_float), dims=["T"],
+                coords={"T": dates},
             ),
         },
-        "execution": {
+        initial_state={
+            "biomass": xr.DataArray(
+                np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
+            ),
+            "production": xr.DataArray(
+                np.zeros((1, n_cohorts, ny, nx)), dims=["F", "C", "Y", "X"],
+                coords={"Y": lat, "X": lon},
+            ),
+        },
+        execution={
             "time_start": start_date,
             "time_end": end_date,
             "dt": dt,
             "forcing_interpolation": "linear",
-            "chunk_size": 800,
         },
-    }
-)
+    )
 
-# =============================================================================
-# 4. EXECUTION
-# =============================================================================
+    try:
+        model = compile_model(blueprint, config)
+        t0 = time.time()
+        state, outputs = simulate(model, chunk_size=800, export_variables=["biomass"])
+        elapsed = time.time() - t0
 
-if __name__ == "__main__":
-    jax.config.update("jax_default_device", jax.devices("cpu")[0])
-    print(f"Compiling model ({blueprint.id})...")
-    model = compile_model(blueprint, config)
+        biomass = outputs["biomass"]  # xarray
+        biomass_mean = biomass.mean(dim=("Y", "X"))
+        plot_dates = biomass_mean.coords["T"].values
 
-    runner = StreamingRunner(model)
-    print(f"Running simulation on {grid_size} grid for {len(dates)} days...")
-    t_start = time.time()
-    state, outputs = runner.run(export_variables=["biomass"])
-    t_end = time.time()
-    print(f"Simulation completed in {t_end - t_start:.2f} seconds.")
+        # Filter to year 2 only
+        year2_mask = plot_dates >= np.datetime64("2001-01-01")
+        results[name] = {
+            "dates": plot_dates[year2_mask],
+            "biomass": biomass_mean.values[year2_mask],
+            "elapsed": elapsed,
+        }
+        bmin = float(np.nanmin(results[name]["biomass"]))
+        bmax = float(np.nanmax(results[name]["biomass"]))
+        print(f"  Done in {elapsed:.2f}s — biomass range: [{bmin:.6f}, {bmax:.6f}]")
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        results[name] = None
 
-    # =============================================================================
-    # 5. VISUALIZATION
-    # =============================================================================
+# %% [markdown]
+# ## Visualization
 
-    # Calculate mean biomass over the grid (using xarray dimensions)
-    biomass_mean = outputs["biomass"].mean(dim=("Y", "X"))  # Mean over Y, X
+# %%
+dtype_colors = {"float64": "black", "float32": "tab:blue", "float16": "tab:orange", "float8": "tab:red"}
+dtype_names = list(DTYPES.keys())
+ref = results.get("float64")
+ref_bio = ref["biomass"].astype(np.float64) if ref is not None else None
 
-    print(f"Number of timesteps: {len(biomass_mean)}")
+n_dtypes = len(dtype_names)
+fig, axes = plt.subplots(n_dtypes, 1, figsize=(12, 3 * n_dtypes), sharex=True)
 
-    # Use time coordinates from the Dataset
-    plot_dates = biomass_mean.coords["T"].values
+for idx, name in enumerate(dtype_names):
+    ax = axes[idx]
+    res = results[name]
+    color = dtype_colors[name]
 
-    # Interpolate temperature data to match simulation timesteps
-    # (temp_c is daily, simulation is at dt="3h")
-    temp_da_plot = temp_da.isel(Z=0).interp(T=plot_dates, method="linear")
-    temp_c_plot = temp_da_plot.mean(dim=("Y", "X")).values
+    # Always draw float64 reference in light grey
+    if ref is not None:
+        ax.plot(ref["dates"], ref_bio, color="lightgrey", linewidth=4, label="float64 ref", zorder=1)
 
-    # Plot results
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+    if res is None:
+        ax.text(0.5, 0.5, "FAILED", transform=ax.transAxes, ha="center", va="center",
+                fontsize=20, color=color, fontweight="bold", alpha=0.6)
+        status = "failed"
+    else:
+        bio = res["biomass"].astype(np.float64)
+        has_nan = np.any(np.isnan(bio))
+        if has_nan:
+            ax.text(0.5, 0.5, "NaN (overflow)", transform=ax.transAxes, ha="center", va="center",
+                    fontsize=16, color=color, fontweight="bold", alpha=0.6)
+            status = "NaN"
+        else:
+            ax.plot(res["dates"], bio, color=color, linewidth=1.5, label=name, zorder=2)
+            if ref_bio is not None and name != "float64":
+                max_err = float(np.max(np.abs(bio - ref_bio) / (np.abs(ref_bio) + 1e-30)))
+                status = f"max rel. error = {max_err:.2e}"
+                ax.text(0.98, 0.95, status, transform=ax.transAxes, ha="right", va="top",
+                        fontsize=9, color=color, fontstyle="italic",
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            else:
+                status = "reference"
 
-    color = "tab:green"
-    ax1.set_xlabel("Date")
-    ax1.set_ylabel("Mean Biomass (g/m²)", color=color)
-    ax1.plot(plot_dates, biomass_mean, color=color, linewidth=2, label="Biomass")
-    ax1.tick_params(axis="y", labelcolor=color)
-    ax1.grid(True, alpha=0.3)
+    info = jnp.finfo(DTYPES[name])
+    elapsed_str = f" — {res['elapsed']:.2f}s" if res is not None else ""
+    ax.set_title(f"{name}  (eps={float(info.eps):.1e}, max={float(info.max):.1e}{elapsed_str})",
+                 loc="left", fontsize=10, color=color, fontweight="bold")
+    ax.set_ylabel("Biomass (g/m²)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8, loc="upper left")
 
-    # Add Temperature on twin axis
-    ax2 = ax1.twinx()
-    color = "tab:red"
-    ax2.set_ylabel("Temperature (°C)", color=color)
-    ax2.plot(plot_dates, temp_c_plot, color=color, linestyle="--", alpha=0.5, label="Temp")
-    ax2.tick_params(axis="y", labelcolor=color)
-
-    plt.title("LMTL Model - 2D Simulation Results (no transport)")
-    fig.tight_layout()
-    Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(f"{PLOT_FILE}")
-    print(f"Plot saved to {PLOT_FILE}")
+axes[-1].set_xlabel("Date (year 2)")
+fig.suptitle("LMTL 0D — Floating-Point Precision Comparison", fontsize=13, fontweight="bold")
+fig.tight_layout()
+Path(PLOT_FILE).parent.mkdir(parents=True, exist_ok=True)
+plt.savefig(PLOT_FILE, dpi=150)
+print(f"\nPlot saved to {PLOT_FILE}")

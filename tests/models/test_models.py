@@ -17,7 +17,7 @@ class TestLoadPrebuiltModels:
         """LMTL loads correctly with expected id and step count."""
         assert isinstance(LMTL, Blueprint)
         assert LMTL.id == "seapodym-lmtl"
-        assert len(LMTL.process) == 15
+        assert len(LMTL.process) == 14
 
     def test_load_lmtl_no_transport(self):
         """LMTL_NO_TRANSPORT loads correctly with expected id and step count."""

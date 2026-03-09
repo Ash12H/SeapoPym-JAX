@@ -2,16 +2,20 @@
 
 import numpy as np
 import pytest
+import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, clear_registry
+from seapopym.blueprint import Blueprint, Config
+from seapopym.blueprint.registry import REGISTRY
 
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    """Clear registry before each test."""
-    clear_registry()
+    """Save registry, clear for test, restore after."""
+    saved = dict(REGISTRY)
+    REGISTRY.clear()
     yield
-    clear_registry()
+    REGISTRY.clear()
+    REGISTRY.update(saved)
 
 
 @pytest.fixture
@@ -66,22 +70,16 @@ def simple_blueprint():
 @pytest.fixture
 def simple_config():
     """Create a simple config for testing (10 timesteps, 5x5 grid)."""
-    return Config.from_dict(
-        {
-            "parameters": {
-                "growth_rate": {"value": 0.1},
-            },
-            "forcings": {
-                "temperature": np.ones((10, 5, 5)) * 20.0,
-                "mask": np.ones((5, 5)),
-            },
-            "initial_state": {
-                "biomass": np.ones((5, 5)) * 100.0,
-            },
-            "execution": {
-                "dt": "1d",
-                "time_start": "2000-01-01",
-                "time_end": "2000-01-11",
-            },
-        }
+    return Config(
+        parameters={"growth_rate": xr.DataArray(0.1)},
+        forcings={
+            "temperature": xr.DataArray(np.ones((10, 5, 5)) * 20.0, dims=["T", "Y", "X"]),
+            "mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
+        },
+        initial_state={"biomass": xr.DataArray(np.ones((5, 5)) * 100.0, dims=["Y", "X"])},
+        execution={
+            "dt": "1d",
+            "time_start": "2000-01-01",
+            "time_end": "2000-01-11",
+        },
     )

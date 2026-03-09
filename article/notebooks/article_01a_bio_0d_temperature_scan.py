@@ -23,7 +23,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Blueprint, Config
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 
 # =============================================================================
 # CONFIGURATION
@@ -323,7 +323,7 @@ for i, T in enumerate(TEMPERATURES):
                 "gamma_tau_r": {"value": params_dict["gamma_tau_r"]},
                 "t_ref": {"value": params_dict["t_ref"]},
                 "efficiency": {"value": LMTL_E},
-                "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+                "cohort_ages": {"value": cohort_ages_sec.tolist()},
             },
             "forcings": {"temperature": temp_da, "primary_production": npp_da},
             "initial_state": {
@@ -343,12 +343,12 @@ for i, T in enumerate(TEMPERATURES):
 
     # Compile and run
     model = compile_model(blueprint, config)
-    runner = StreamingRunner(model)
+    runner = Runner.simulation()
 
     if i % 10 == 0:
         print(f"  T={T}°C (dt={dt_int}s, Durée={duration_days:.1f}d, Steps={n_steps})...")
 
-    state, outputs = runner.run(export_variables=["biomass"])
+    state, outputs = runner.run(model, export_variables=["biomass"])
 
     # Extract final biomass
     biomass_final = float(outputs["biomass"].values[-1, 0, 0])

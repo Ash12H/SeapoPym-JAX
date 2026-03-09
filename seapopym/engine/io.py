@@ -1,6 +1,10 @@
 """I/O for streaming output.
 
-Provides DiskWriter for writing simulation outputs synchronously to Zarr stores.
+Provides writers for simulation outputs:
+- WriterRaw: JAX-traceable writer returning raw arrays (optimization, vmap, grad).
+- MemoryWriter: In-memory writer returning xarray Dataset.
+- DiskWriter: Synchronous writer to Zarr stores.
+- build_writer: Factory function to create and initialize the appropriate writer.
 """
 
 from __future__ import annotations
@@ -9,6 +13,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+import jax
 import numpy as np
 
 from seapopym.types import Array
@@ -90,6 +95,46 @@ class OutputWriter(Protocol):
         ...
 
 
+class WriterRaw:
+    """JAX-traceable writer that accumulates raw arrays.
+
+    Stores chunks in a Python list and concatenates on finalize.
+    Because list.append is a trace-time operation, this writer is
+    compatible with ``jax.vmap`` and ``jax.grad``.
+
+    No ``initialize()`` call is needed — append/finalize/close suffice.
+    """
+
+    def __init__(self) -> None:
+        self._chunks: list[dict[str, Array]] = []
+
+    def initialize(
+        self,
+        shapes: dict[str, int],
+        variables: list[str],
+        coords: dict[str, Array] | None = None,
+        var_dims: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        """No-op (kept for Protocol compatibility)."""
+
+    def append(self, data: dict[str, Array]) -> None:
+        """Store a chunk of arrays."""
+        self._chunks.append(data)
+
+    def finalize(self) -> dict[str, Array]:
+        """Concatenate all chunks along axis 0."""
+        import jax.numpy as jnp
+
+        if not self._chunks:
+            return {}
+        if len(self._chunks) == 1:
+            return self._chunks[0]
+        return jax.tree.map(lambda *arrays: jnp.concatenate(arrays, axis=0), *self._chunks)
+
+    def close(self) -> None:
+        """No-op."""
+
+
 class DiskWriter:
     """Synchronous writer for simulation outputs to a Zarr store.
 
@@ -145,7 +190,7 @@ class DiskWriter:
         if coords is not None:
             for dim_name, coord_arr in coords.items():
                 coord_np = np.asarray(coord_arr)
-                ds = self.store.create_dataset(
+                ds = self.store.create_array(
                     dim_name,
                     shape=coord_np.shape,
                     dtype=coord_np.dtype,
@@ -166,7 +211,7 @@ class DiskWriter:
             var_shape = (0,) + tuple(shapes.get(d, 1) for d in spatial_dims)
             chunks = (1,) + var_shape[1:]
 
-            ds = self.store.create_dataset(
+            ds = self.store.create_array(
                 var_name,
                 shape=var_shape,
                 chunks=chunks,
@@ -187,8 +232,8 @@ class DiskWriter:
         if not self._initialized:
             raise EngineIOError(str(self.output_path), "Writer not initialized")
 
-        # Convert JAX arrays to numpy
-        data_np = {k: np.asarray(v) for k, v in data.items()}
+        # Transfer JAX arrays to host (numpy)
+        data_np = {k: jax.device_get(v) for k, v in data.items()}
         self._write_zarr_chunk(data_np)
 
     def _write_zarr_chunk(self, data: dict[str, np.ndarray]) -> None:
@@ -223,16 +268,12 @@ class DiskWriter:
 class MemoryWriter:
     """In-memory writer that builds an xarray Dataset from chunks."""
 
-    def __init__(self, model: CompiledModel) -> None:
-        """Initialize memory writer.
-
-        Args:
-            model: Compiled model (needed for metadata: graph, coords, etc.)
-        """
-        self.model = model
+    def __init__(self) -> None:
+        """Initialize memory writer."""
         self.variables: list[str] = []
-        self._accumulator: dict[str, list[np.ndarray]] = {}
+        self._accumulator: dict[str, list[Array]] = {}
         self._coords: dict[str, Array] = {}
+        self._var_dims: dict[str, tuple[str, ...]] = {}
 
     def initialize(
         self,
@@ -249,44 +290,45 @@ class MemoryWriter:
             coords: Coordinate arrays for dimensions (includes accumulated timestamps).
             var_dims: Mapping from variable name to its dims (unused, kept for protocol compatibility).
         """
-        del shapes, var_dims  # Unused, kept for protocol compatibility
+        del shapes  # Unused, kept for protocol compatibility
         self.variables = variables
         for var in variables:
             self._accumulator[var] = []
 
-        # Store coords (fallback to model coords if not provided)
+        if var_dims is not None:
+            self._var_dims = var_dims
+
         if coords is not None:
             self._coords = {k: np.asarray(v) for k, v in coords.items()}
-        else:
-            self._coords = {k: np.asarray(v) for k, v in self.model.coords.items()}
 
     def append(self, data: dict[str, Array]) -> None:
-        """Append chunk to memory."""
-        # We accumulate specific variables
+        """Append chunk to memory (keeps raw JAX arrays until finalize)."""
         for var_name in self.variables:
             if var_name in data:
-                # Ensure numpy array
-                arr = np.asarray(data[var_name])
-                self._accumulator[var_name].append(arr)
+                self._accumulator[var_name].append(data[var_name])
 
     def finalize(self) -> xr.Dataset | None:
         """Construct and return the xarray Dataset."""
         if not self.variables:
             return None
 
+        import jax.numpy as jnp
         import xarray as xr
 
         from seapopym.dims import get_canonical_order
 
-        # 1. Concatenate arrays along time axis
+        # 1. Concatenate arrays along time axis, then convert to numpy once
         merged_data = {}
         for var_name, chunks in self._accumulator.items():
             if not chunks:
                 continue
-            merged_data[var_name] = np.concatenate(chunks, axis=0)
+            if len(chunks) == 1:
+                merged_data[var_name] = np.asarray(chunks[0])
+            else:
+                merged_data[var_name] = np.asarray(jnp.concatenate(chunks, axis=0))
 
-        # 2. Resolve dimensions from graph
-        var_dims = self._resolve_variable_dims()
+        # 2. Use stored var_dims
+        var_dims = self._var_dims
 
         # 3. Use stored coords (includes real accumulated timestamps)
         coords = self._coords
@@ -319,6 +361,29 @@ class MemoryWriter:
         """Release resources (no-op for memory writer)."""
         pass
 
-    def _resolve_variable_dims(self) -> dict[str, tuple[str, ...]]:
-        """Resolve dimensions for all requested variables using data_nodes."""
-        return resolve_var_dims(self.model.data_nodes, self.variables)
+
+def build_writer(
+    model: CompiledModel,
+    output_path: str | Path | None,
+    export_variables: list[str],
+) -> OutputWriter:
+    """Build and initialize the appropriate output writer.
+
+    Args:
+        model: Compiled model (provides shapes, coords, data_nodes, time_grid).
+        output_path: If not None, creates a DiskWriter; otherwise MemoryWriter.
+        export_variables: Variables to export.
+
+    Returns:
+        Initialized OutputWriter ready for append/finalize/close.
+    """
+    n_timesteps = model.n_timesteps
+    writer_coords = dict(model.coords)
+    if model.time_grid is not None:
+        writer_coords["T"] = model.time_grid.coords[:n_timesteps]
+    var_dims = resolve_var_dims(model.data_nodes, export_variables)
+
+    writer: OutputWriter
+    writer = DiskWriter(output_path) if output_path is not None else MemoryWriter()
+    writer.initialize(model.shapes, export_variables, coords=writer_coords, var_dims=var_dims)
+    return writer

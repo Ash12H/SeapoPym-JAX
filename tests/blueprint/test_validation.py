@@ -1,24 +1,27 @@
 """Tests for Blueprint validation pipeline."""
 
+import numpy as np
 import pytest
+import xarray as xr
 
 from seapopym.blueprint import (
     Blueprint,
     BlueprintValidationError,
     Config,
     ConfigValidationError,
-    clear_registry,
     functional,
     validate_blueprint,
     validate_config,
 )
+from seapopym.blueprint.registry import REGISTRY
 from seapopym.blueprint.validation import BlueprintValidator
 
 
 @pytest.fixture(autouse=True)
 def setup_registry():
-    """Setup test functions in registry."""
-    clear_registry()
+    """Save registry, register test functions, restore after."""
+    saved = dict(REGISTRY)
+    REGISTRY.clear()
 
     @functional(name="test:simple")
     def simple(x):
@@ -51,7 +54,8 @@ def setup_registry():
         return temp
 
     yield
-    clear_registry()
+    REGISTRY.clear()
+    REGISTRY.update(saved)
 
 
 class TestValidateBlueprint:
@@ -535,13 +539,11 @@ class TestValidateConfig:
             }
         )
 
-        cfg = Config.from_dict(
-            {
-                "parameters": {"rate": {"value": 0.1}},
-                "forcings": {"temp": "/path/to/temp.nc"},
-                "initial_state": {"biomass": "/path/to/init.nc"},
-                "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31"},
-            }
+        cfg = Config(
+            parameters={"rate": xr.DataArray(0.1)},
+            forcings={"temp": xr.DataArray(np.random.rand(10), dims=["T"])},
+            initial_state={"biomass": xr.DataArray(np.ones(5), dims=["Y"])},
+            execution={"time_start": "2000-01-01", "time_end": "2000-12-31"},
         )
 
         result = validate_config(cfg, bp)

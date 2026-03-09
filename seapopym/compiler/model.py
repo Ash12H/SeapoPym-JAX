@@ -10,15 +10,13 @@ The CompiledModel contains all data structures ready for JAX execution:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from seapopym.blueprint import Blueprint
     from seapopym.blueprint.schema import TendencySource
-    from seapopym.compiler.time_grid import TimeGrid
     from seapopym.compiler.forcing import ForcingStore
+    from seapopym.compiler.time_grid import TimeGrid
 
 from seapopym.blueprint.nodes import ComputeNode, DataNode
 from seapopym.types import Array
@@ -42,9 +40,7 @@ class CompiledModel:
         shapes: Resolved dimension sizes {"Y": 180, "X": 360, ...}.
         coords: Coordinate arrays for each dimension.
         dt: Timestep in seconds.
-        trainable_params: List of parameter names that can be optimized.
         time_grid: Temporal grid (start, end, n_timesteps, coords). None if not using calendar.
-        chunk_size: Number of timesteps per temporal chunk. None = process all at once.
     """
 
     # Source
@@ -65,17 +61,8 @@ class CompiledModel:
     coords: dict[str, Array] = field(default_factory=dict)
     dt: float = 86400.0  # Default: 1 day in seconds
 
-    # Configuration
-    trainable_params: list[str] = field(default_factory=list)
-
     # Temporal configuration
     time_grid: TimeGrid | None = None
-    chunk_size: int | None = None
-
-    @property
-    def mask(self) -> Array | None:
-        """Shortcut to access the mask from forcings."""
-        return self.forcings.get("mask")
 
     @property
     def n_timesteps(self) -> int:
@@ -87,42 +74,6 @@ class CompiledModel:
         if var_name not in self.state:
             raise KeyError(f"State variable '{var_name}' not found")
         return self.state[var_name].shape
-
-    def to_numpy(self) -> CompiledModel:
-        """Convert all arrays to NumPy (useful for debugging)."""
-        from seapopym.compiler.forcing import ForcingStore
-
-        def convert(arr: Array) -> np.ndarray:
-            if hasattr(arr, "numpy"):
-                return arr.numpy()
-            return np.asarray(arr)
-
-        # Materialize all forcings and convert to numpy
-        all_forcings = self.forcings.get_all()
-        numpy_forcings_dict = {k: convert(v) for k, v in all_forcings.items()}
-        numpy_store = ForcingStore(
-            _forcings=numpy_forcings_dict,
-            n_timesteps=self.n_timesteps,
-            interp_method=self.forcings.interp_method,
-            fill_nan=self.forcings.fill_nan,
-            _dynamic_forcings=set(self.forcings._dynamic_forcings),
-            _time_coords=self.forcings._time_coords,
-        )
-
-        return CompiledModel(
-            blueprint=self.blueprint,
-            compute_nodes=self.compute_nodes,
-            data_nodes=self.data_nodes,
-            tendency_map=self.tendency_map,
-            state={k: convert(v) for k, v in self.state.items()},
-            forcings=numpy_store,
-            parameters={k: convert(v) for k, v in self.parameters.items()},
-            shapes=self.shapes,
-            coords={k: convert(v) for k, v in self.coords.items()},
-            dt=self.dt,
-            trainable_params=self.trainable_params,
-        )
-
 
 def _default_forcing_store() -> ForcingStore:
     """Create a default empty ForcingStore (avoids circular import at module level)."""

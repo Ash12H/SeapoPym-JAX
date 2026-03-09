@@ -1,40 +1,24 @@
 """Tests for MemoryWriter."""
 
-from unittest.mock import MagicMock
-
 import numpy as np
 import pytest
 import xarray as xr
 
-from seapopym.blueprint.nodes import DataNode
-from seapopym.compiler import CompiledModel
 from seapopym.engine.io import MemoryWriter
 
 
-@pytest.fixture
-def mock_model():
-    # Create a mock CompiledModel
-    model = MagicMock(spec=CompiledModel)
-
-    # Mock coords — use canonical dim names
-    model.coords = {"T": np.arange(10), "Y": np.arange(5), "X": np.arange(5)}
-
-    # Mock data_nodes with canonical dims
-    model.data_nodes = {
-        "biomass": DataNode(name="biomass", dims=("Y", "X")),
-        "production": DataNode(name="production", dims=("Y", "X")),
-        "hidden": DataNode(name="hidden", dims=("Y", "X")),
-    }
-
-    return model
-
-
-def test_memory_writer_lifecycle(mock_model):
-    writer = MemoryWriter(mock_model)
+def test_memory_writer_lifecycle():
+    writer = MemoryWriter()
 
     # Initialize requesting only biomass
     variables = ["biomass"]
-    writer.initialize({}, variables)
+    coords = {"T": np.arange(10), "Y": np.arange(5), "X": np.arange(5)}
+    var_dims = {
+        "biomass": ("Y", "X"),
+        "production": ("Y", "X"),
+        "hidden": ("Y", "X"),
+    }
+    writer.initialize({}, variables, coords=coords, var_dims=var_dims)
 
     # Simulate 2 chunks
     # Chunk 1: time 0-5

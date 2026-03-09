@@ -2,7 +2,7 @@
 """Simulation SeapoPym - Pacifique (Transport vs No-Transport).
 
 Version JAX utilisant:
-- Blueprint/Config/compile_model/StreamingRunner architecture
+- Blueprint/Config/compile_model/Runner architecture
 - seapopym.functions.lmtl pour la biologie
 - seapopym.functions.transport pour l'advection/diffusion
 
@@ -23,7 +23,7 @@ import seapopym.functions.lmtl  # noqa: F401
 import seapopym.functions.transport  # noqa: F401
 from seapopym.blueprint import Blueprint, Config
 from seapopym.compiler import compile_model
-from seapopym.engine import StreamingRunner
+from seapopym.engine import Runner
 
 # =============================================================================
 # CONFIGURATION
@@ -128,12 +128,7 @@ ocean_mask = xr.where(
     0.0,
 )
 
-# Diffusion coefficient (constant)
-D_da = xr.DataArray(
-    np.full((ny, nx), D_HORIZONTAL),
-    dims=["Y", "X"],
-    coords={"Y": lat, "X": lon},
-)
+# Diffusion coefficient (scalar constant)
 
 print(f"dx range: {dx_2d.min():.0f} - {dx_2d.max():.0f} m")
 print(f"dy: {dy_m:.0f} m")
@@ -436,7 +431,7 @@ common_params = {
     "gamma_tau_r": {"value": LMTL_GAMMA_TAU_R},
     "t_ref": {"value": LMTL_T_REF},
     "efficiency": {"value": LMTL_E},
-    "cohort_ages": xr.DataArray(cohort_ages_sec, dims=["C"]),
+    "cohort_ages": {"value": cohort_ages_sec.tolist()},
 }
 
 # Common initial state
@@ -470,7 +465,7 @@ config_no_transport = Config.from_dict(
 # Config for TRANSPORT
 transport_params = {
     **common_params,
-    "D": D_da,
+    "D": D_HORIZONTAL,
     "dx": dx_da,
     "dy": dy_da,
     "face_height": face_height_da,
@@ -514,10 +509,10 @@ if __name__ == "__main__":
     print("Compiling model (no transport)...")
     model_no = compile_model(blueprint_no, config_no_transport)
 
-    runner_no = StreamingRunner(model_no)
+    runner_no = Runner.simulation()
     print(f"Running simulation ({START_DATE} to {END_DATE}, dt={DT})...")
     t0 = time.perf_counter()
-    state_no, outputs_no = runner_no.run(export_variables=["biomass"])
+    state_no, outputs_no = runner_no.run(model_no, export_variables=["biomass"])
     t_no = time.perf_counter() - t0
     print(f"Simulation completed in {t_no:.1f}s")
 
@@ -534,10 +529,10 @@ if __name__ == "__main__":
     print("Compiling model (with transport)...")
     model_tr = compile_model(blueprint_tr, config_transport)
 
-    runner_tr = StreamingRunner(model_tr)
+    runner_tr = Runner.simulation()
     print(f"Running simulation ({START_DATE} to {END_DATE}, dt={DT})...")
     t0 = time.perf_counter()
-    state_tr, outputs_tr = runner_tr.run(export_variables=["biomass"])
+    state_tr, outputs_tr = runner_tr.run(model_tr, export_variables=["biomass"])
     t_tr = time.perf_counter() - t0
     print(f"Simulation completed in {t_tr:.1f}s")
 

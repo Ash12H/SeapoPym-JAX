@@ -1,21 +1,20 @@
 """Tests for Blueprint and Config schema classes."""
 
-from pathlib import Path
 
 import pytest
+import xarray as xr
 
 from seapopym.blueprint import (
     Blueprint,
     Config,
     Declarations,
     ExecutionParams,
-    ParameterValue,
     ProcessStep,
     TendencySource,
     VariableDeclaration,
 )
 
-FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
+
 
 
 class TestVariableDeclaration:
@@ -38,28 +37,6 @@ class TestVariableDeclaration:
         assert decl.units == "g"
         assert decl.dims == ["Y", "X", "C"]
         assert decl.description == "Biomass field"
-
-
-class TestParameterValue:
-    """Tests for ParameterValue."""
-
-    def test_simple_value(self):
-        """Test creating a simple parameter value."""
-        param = ParameterValue(value=0.1)
-        assert param.value == 0.1
-        assert param.trainable is False
-        assert param.bounds is None
-
-    def test_trainable_with_bounds(self):
-        """Test creating a trainable parameter with bounds."""
-        param = ParameterValue(value=0.1, trainable=True, bounds=(0.01, 0.5))
-        assert param.trainable is True
-        assert param.bounds == (0.01, 0.5)
-
-    def test_bounds_validation(self):
-        """Test that invalid bounds raise error."""
-        with pytest.raises(ValueError):
-            ParameterValue(value=0.1, bounds=(1, 2, 3))  # type: ignore
 
 
 class TestProcessStep:
@@ -178,15 +155,6 @@ class TestBlueprint:
         assert len(bp.process) == 1
         assert "biomass" in bp.tendencies
 
-    def test_load_from_yaml(self):
-        """Test loading Blueprint from YAML file."""
-        yaml_path = FIXTURES_DIR / "toy_model.yaml"
-        if not yaml_path.exists():
-            pytest.skip("Fixture file not found")
-
-        bp = Blueprint.load(yaml_path)
-        assert bp.id == "toy-growth"
-        assert bp.version == "0.1.0"
 
     def test_get_variable(self):
         """Test getting variable by path."""
@@ -245,56 +213,41 @@ class TestBlueprint:
 class TestConfig:
     """Tests for Config class."""
 
-    def test_from_dict(self):
-        """Test creating Config from dict."""
-        data = {
-            "parameters": {"growth_rate": {"value": 0.1}},
-            "forcings": {"temperature": "/path/to/temp.nc"},
-            "initial_state": {"biomass": "/path/to/init.nc"},
-            "execution": {
-                "time_start": "2000-01-01",
-                "time_end": "2001-01-01",
-                "dt": "1d",
-            },
-        }
-
-        cfg = Config.from_dict(data)
-        assert cfg.parameters["growth_rate"].value == 0.1
+    def test_creation_with_xr_data(self):
+        """Test creating Config with xr.DataArray data."""
+        cfg = Config(
+            parameters={"growth_rate": xr.DataArray(0.1)},
+            forcings={"temperature": xr.DataArray([20.0, 21.0], dims=["T"])},
+            initial_state={"biomass": xr.DataArray([[1.0]], dims=["Y", "X"])},
+            execution=ExecutionParams(
+                time_start="2000-01-01",
+                time_end="2001-01-01",
+                dt="1d",
+            ),
+        )
+        assert float(cfg.parameters["growth_rate"]) == 0.1
         assert cfg.execution.time_start == "2000-01-01"
         assert cfg.execution.time_end == "2001-01-01"
         assert cfg.execution.dt == "1d"
 
-    def test_load_from_yaml(self):
-        """Test loading Config from YAML file."""
-        yaml_path = FIXTURES_DIR / "toy_config.yaml"
-        if not yaml_path.exists():
-            pytest.skip("Fixture file not found")
-
-        cfg = Config.load(yaml_path)
-        assert cfg.execution.dt == "1d"
-        assert cfg.parameters["growth_rate"].value == 0.1
-
-    def test_get_parameter_value(self):
-        """Test getting parameter value by name."""
-        cfg = Config.from_dict(
-            {
-                "parameters": {
-                    "simple": {"value": 0.1},
-                    "vector": {"value": [1.0, 2.0, 3.0], "trainable": True, "bounds": [0.0, 5.0]},
-                },
-                "forcings": {},
-                "initial_state": {},
-                "execution": {
-                    "time_start": "2000-01-01",
-                    "time_end": "2001-01-01",
-                },
-            }
+    def test_parameter_access(self):
+        """Test direct parameter access from dict."""
+        cfg = Config(
+            parameters={
+                "simple": xr.DataArray(0.1),
+                "vector": xr.DataArray([1.0, 2.0, 3.0], dims=["C"]),
+            },
+            forcings={},
+            initial_state={},
+            execution=ExecutionParams(
+                time_start="2000-01-01",
+                time_end="2001-01-01",
+            ),
         )
 
-        assert cfg.get_parameter_value("simple").value == 0.1
-        assert cfg.get_parameter_value("vector").value == [1.0, 2.0, 3.0]
-        assert cfg.get_parameter_value("vector").trainable is True
-        assert cfg.get_parameter_value("nonexistent") is None
+        assert float(cfg.parameters["simple"]) == 0.1
+        assert list(cfg.parameters["vector"].values) == [1.0, 2.0, 3.0]
+        assert cfg.parameters.get("nonexistent") is None
 
 
 class TestExecutionParams:
@@ -304,7 +257,6 @@ class TestExecutionParams:
         """Test default values for optional fields."""
         params = ExecutionParams(time_start="2000-01-01", time_end="2001-01-01")
         assert params.dt == "1d"
-        assert params.chunk_size is None
         assert params.forcing_interpolation == "constant"
 
     def test_time_fields(self):
@@ -329,12 +281,6 @@ class TestExecutionParams:
         """Test that unparseable datetime raises ValueError."""
         with pytest.raises(ValueError, match="Invalid datetime format"):
             ExecutionParams(time_start="not-a-date", time_end="2001-01-01")
-
-    @pytest.mark.parametrize("chunk_size", [0, -1])
-    def test_non_positive_chunk_size_rejected(self, chunk_size):
-        """Test that non-positive chunk_size raises ValueError."""
-        with pytest.raises(ValueError, match="chunk_size must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2001-01-01", chunk_size=chunk_size)
 
     def test_inverted_time_range_rejected(self):
         """Test that time_end < time_start raises ValueError."""

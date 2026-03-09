@@ -140,10 +140,12 @@ class TestTruncatedNormal:
 
 class TestPriorSet:
     def setup_method(self):
-        self.prior_set = PriorSet({
-            "alpha": Uniform(0.0, 1.0),
-            "beta": Normal(loc=0.0, scale=1.0),
-        })
+        self.prior_set = PriorSet(
+            {
+                "alpha": Uniform(0.0, 1.0),
+                "beta": Normal(loc=0.0, scale=1.0),
+            }
+        )
         self.params = {
             "alpha": jnp.array(0.5),
             "beta": jnp.array(0.0),
@@ -151,9 +153,8 @@ class TestPriorSet:
 
     def test_log_prob_is_sum(self):
         joint_lp = self.prior_set.log_prob(self.params)
-        individual_sum = (
-            Uniform(0.0, 1.0).log_prob(jnp.array(0.5))
-            + Normal(loc=0.0, scale=1.0).log_prob(jnp.array(0.0))
+        individual_sum = Uniform(0.0, 1.0).log_prob(jnp.array(0.5)) + Normal(loc=0.0, scale=1.0).log_prob(
+            jnp.array(0.0)
         )
         assert float(joint_lp) == pytest.approx(float(individual_sum), abs=1e-5)
 

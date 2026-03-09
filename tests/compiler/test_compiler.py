@@ -4,15 +4,17 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, clear_registry, functional
+from seapopym.blueprint import Blueprint, Config, functional
+from seapopym.blueprint.registry import REGISTRY
 from seapopym.compiler import CompiledModel, compile_model
 from seapopym.dims import CANONICAL_DIMS
 
 
 @pytest.fixture(autouse=True)
 def setup_registry():
-    """Register test functions before each test."""
-    clear_registry()
+    """Save registry, register test functions, restore after."""
+    saved = dict(REGISTRY)
+    REGISTRY.clear()
 
     @functional(name="test:simple_growth")
     def simple_growth(biomass, rate, temp):
@@ -20,7 +22,8 @@ def setup_registry():
         return biomass * rate * (temp / 20.0)
 
     yield
-    clear_registry()
+    REGISTRY.clear()
+    REGISTRY.update(saved)
 
 
 class TestCompiler:
@@ -67,31 +70,29 @@ class TestCompiler:
     @pytest.fixture
     def toy_config(self):
         """Create a toy config for testing."""
-        return Config.from_dict(
-            {
-                "parameters": {"growth_rate": {"value": 0.1}},
-                "forcings": {
-                    "temperature": xr.DataArray(
-                        np.random.uniform(15, 25, (30, 10, 10)),
-                        dims=["T", "Y", "X"],
-                    ),
-                    "mask": xr.DataArray(
-                        np.ones((10, 10)),
-                        dims=["Y", "X"],
-                    ),
-                },
-                "initial_state": {
-                    "biomass": xr.DataArray(
-                        np.ones((10, 10)) * 100.0,
-                        dims=["Y", "X"],
-                    ),
-                },
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-31",  # 30 days
-                },
-            }
+        return Config(
+            parameters={"growth_rate": xr.DataArray(0.1)},
+            forcings={
+                "temperature": xr.DataArray(
+                    np.random.uniform(15, 25, (30, 10, 10)),
+                    dims=["T", "Y", "X"],
+                ),
+                "mask": xr.DataArray(
+                    np.ones((10, 10)),
+                    dims=["Y", "X"],
+                ),
+            },
+            initial_state={
+                "biomass": xr.DataArray(
+                    np.ones((10, 10)) * 100.0,
+                    dims=["Y", "X"],
+                ),
+            },
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-31",
+            },
         )
 
     def test_compile_basic(self, toy_blueprint, toy_config):
@@ -137,13 +138,6 @@ class TestCompiler:
 
         assert compiled.dt == 86400.0  # 1 day in seconds
 
-    def test_compile_mask_property(self, toy_blueprint, toy_config):
-        """Test that mask property works."""
-        compiled = compile_model(toy_blueprint, toy_config)
-
-        assert compiled.mask is not None
-        assert compiled.mask.shape == (10, 10)
-
     def test_compile_nodes_exist(self, toy_blueprint, toy_config):
         """Test that compute_nodes and data_nodes are included."""
         compiled = compile_model(toy_blueprint, toy_config)
@@ -166,29 +160,27 @@ class TestCompiler:
         # Check arrays are JAX arrays
         assert hasattr(compiled.state["biomass"], "device")
 
-    def test_compile_trainable_params(self, toy_blueprint):
-        """Test that trainable params are identified."""
-        config = Config.from_dict(
-            {
-                "parameters": {"growth_rate": {"value": 0.1, "trainable": True}},
-                "forcings": {
-                    "temperature": xr.DataArray(np.random.rand(10, 5, 5), dims=["T", "Y", "X"]),
-                    "mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
-                },
-                "initial_state": {
-                    "biomass": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
-                },
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-11",  # 10 days
-                },
-            }
+    def test_compile_parameters_jax(self, toy_blueprint):
+        """Test that parameters are compiled as JAX arrays."""
+        config = Config(
+            parameters={"growth_rate": xr.DataArray(0.1)},
+            forcings={
+                "temperature": xr.DataArray(np.random.rand(10, 5, 5), dims=["T", "Y", "X"]),
+                "mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
+            },
+            initial_state={
+                "biomass": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
+            },
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-11",
+            },
         )
 
         compiled = compile_model(toy_blueprint, config)
 
-        assert "growth_rate" in compiled.trainable_params
+        assert "growth_rate" in compiled.parameters
 
 
 class TestCompileModelFunction:
@@ -209,17 +201,15 @@ class TestCompileModelFunction:
             }
         )
 
-        config = Config.from_dict(
-            {
-                "parameters": {"a": {"value": 1.0}},
-                "forcings": {"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
-                "initial_state": {"x": xr.DataArray(np.ones((3, 4)), dims=["Y", "X"])},
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-06",  # 5 days
-                },
-            }
+        config = Config(
+            parameters={"a": xr.DataArray(1.0)},
+            forcings={"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
+            initial_state={"x": xr.DataArray(np.ones((3, 4)), dims=["Y", "X"])},
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-06",
+            },
         )
 
         compiled = compile_model(blueprint, config)
@@ -243,16 +233,14 @@ class TestCompiledModel:
             }
         )
 
-        config = Config.from_dict(
-            {
-                "forcings": {"f": xr.DataArray(np.ones((10, 5, 5)), dims=["T", "Y", "X"])},
-                "initial_state": {"x": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"])},
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-11",
-                },
-            }
+        config = Config(
+            forcings={"f": xr.DataArray(np.ones((10, 5, 5)), dims=["T", "Y", "X"])},
+            initial_state={"x": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"])},
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-11",
+            },
         )
 
         return compile_model(blueprint, config)
@@ -271,33 +259,69 @@ class TestCompiledModel:
         with pytest.raises(KeyError):
             compiled_model.get_state_shape("nonexistent")
 
-    def test_to_numpy(self):
-        """Test to_numpy conversion."""
-        blueprint = Blueprint.from_dict(
+
+class TestNaNValidation:
+    """Tests for NaN detection at compile time (state/parameters)."""
+
+    @pytest.fixture
+    def toy_blueprint(self):
+        return Blueprint.from_dict(
             {
                 "id": "test",
                 "version": "0.1.0",
-                "declarations": {"state": {"x": {"dims": ["Y", "X"]}}},
+                "declarations": {
+                    "state": {"x": {"dims": ["Y", "X"]}},
+                    "parameters": {"a": {}},
+                    "forcings": {"f": {"dims": ["T", "Y", "X"]}},
+                },
                 "process": [],
             }
         )
 
-        config = Config.from_dict(
+    def test_nan_in_initial_state_raises(self, toy_blueprint):
+        """NaN in initial state raises ValueError at compile time."""
+        state_data = np.ones((3, 4))
+        state_data[1, 1] = np.nan
+        config = Config(
+            parameters={"a": xr.DataArray(1.0)},
+            forcings={"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
+            initial_state={"x": xr.DataArray(state_data, dims=["Y", "X"])},
+            execution={"dt": "1d", "time_start": "2000-01-01", "time_end": "2000-01-06"},
+        )
+        with pytest.raises(ValueError, match="NaN"):
+            compile_model(toy_blueprint, config)
+
+    def test_nan_in_parameter_raises(self, toy_blueprint):
+        """NaN in parameter raises ValueError at compile time."""
+        config = Config(
+            parameters={"a": xr.DataArray(float("nan"))},
+            forcings={"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
+            initial_state={"x": xr.DataArray(np.ones((3, 4)), dims=["Y", "X"])},
+            execution={"dt": "1d", "time_start": "2000-01-01", "time_end": "2000-01-06"},
+        )
+        with pytest.raises(ValueError, match="NaN"):
+            compile_model(toy_blueprint, config)
+
+    def test_integer_state_no_nan_check(self, toy_blueprint):
+        """Integer state arrays pass without NaN check."""
+        bp = Blueprint.from_dict(
             {
-                "forcings": {"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
-                "initial_state": {"x": xr.DataArray(np.ones((3, 4)), dims=["Y", "X"])},
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-06",
+                "id": "test",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"x": {"dims": ["Y", "X"]}},
+                    "forcings": {"f": {"dims": ["T", "Y", "X"]}},
                 },
+                "process": [],
             }
         )
-
-        compiled = compile_model(blueprint, config)
-        numpy_model = compiled.to_numpy()
-
-        assert isinstance(numpy_model.state["x"], np.ndarray)
+        config = Config(
+            forcings={"f": xr.DataArray(np.ones((5, 3, 4)), dims=["T", "Y", "X"])},
+            initial_state={"x": xr.DataArray(np.ones((3, 4), dtype=np.int32), dims=["Y", "X"])},
+            execution={"dt": "1d", "time_start": "2000-01-01", "time_end": "2000-01-06"},
+        )
+        compiled = compile_model(bp, config)
+        assert "x" in compiled.state
 
 
 class TestDimensionMapping:
@@ -318,28 +342,26 @@ class TestDimensionMapping:
         )
 
         # Data has non-canonical dimension names
-        config = Config.from_dict(
-            {
-                "forcings": {
-                    "f": xr.DataArray(
-                        np.ones((5, 3, 4)),
-                        dims=["time", "lat", "lon"],
-                    ),
-                },
-                "initial_state": {
-                    "x": xr.DataArray(np.ones((3, 4)), dims=["lat", "lon"]),
-                },
-                "dimension_mapping": {
-                    "time": "T",
-                    "lat": "Y",
-                    "lon": "X",
-                },
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-06",
-                },
-            }
+        config = Config(
+            forcings={
+                "f": xr.DataArray(
+                    np.ones((5, 3, 4)),
+                    dims=["time", "lat", "lon"],
+                ),
+            },
+            initial_state={
+                "x": xr.DataArray(np.ones((3, 4)), dims=["lat", "lon"]),
+            },
+            dimension_mapping={
+                "time": "T",
+                "lat": "Y",
+                "lon": "X",
+            },
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-06",
+            },
         )
 
         compiled = compile_model(blueprint, config)
@@ -369,20 +391,18 @@ class TestCanonicalDims:
         )
 
         # Data in wrong order (X, Y, T instead of T, Y, X)
-        config = Config.from_dict(
-            {
-                "forcings": {
-                    "f": xr.DataArray(
-                        np.arange(60).reshape(4, 3, 5),  # X=4, Y=3, T=5
-                        dims=["X", "Y", "T"],
-                    ),
-                },
-                "execution": {
-                    "dt": "1d",
-                    "time_start": "2000-01-01",
-                    "time_end": "2000-01-06",
-                },
-            }
+        config = Config(
+            forcings={
+                "f": xr.DataArray(
+                    np.arange(60).reshape(4, 3, 5),  # X=4, Y=3, T=5
+                    dims=["X", "Y", "T"],
+                ),
+            },
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-06",
+            },
         )
 
         compiled = compile_model(blueprint, config)

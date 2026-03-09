@@ -216,7 +216,7 @@ def _compute_advection_fluxes(
 
 def _compute_diffusion_fluxes(
     state: jnp.ndarray,
-    D: jnp.ndarray,
+    D: float,
     dx: jnp.ndarray,
     dy: jnp.ndarray,
     face_height: jnp.ndarray,
@@ -234,7 +234,7 @@ def _compute_diffusion_fluxes(
 
     Args:
         state: Concentration field (Y, X)
-        D: Diffusion coefficient [m²/s] (Y, X)
+        D: Diffusion coefficient [m²/s] (scalar, uniform)
         dx: Distance between cell centers in X [m] (Y, X)
         dy: Distance between cell centers in Y [m] (Y, X)
         face_height: Height of E/W faces [m] (Y, X)
@@ -254,11 +254,6 @@ def _compute_diffusion_fluxes(
     state_north = _get_neighbor(state, "north", bc_north)
     state_south = _get_neighbor(state, "south", bc_south)
 
-    D_east = _get_neighbor(D, "east", bc_east)
-    D_west = _get_neighbor(D, "west", bc_west)
-    D_north = _get_neighbor(D, "north", bc_north)
-    D_south = _get_neighbor(D, "south", bc_south)
-
     dx_east = _get_neighbor(dx, "east", bc_east)
     dx_west = _get_neighbor(dx, "west", bc_west)
     dy_north = _get_neighbor(dy, "north", bc_north)
@@ -276,32 +271,27 @@ def _compute_diffusion_fluxes(
     bc_mask_s = _get_boundary_mask(ny, nx, "south", bc_south)
 
     # --- EAST FACE ---
-    # Diffusion coefficient at face (harmonic mean for heterogeneous D)
-    D_face_e = 0.5 * (D + D_east)
     # Distance between cell centers
     dx_face_e = 0.5 * (dx + dx_east)
     # Gradient (positive = increasing eastward)
     grad_e = (state_east - state) / dx_face_e
     # Flux = -D * gradient * face_area * masks
-    flux_east = -D_face_e * grad_e * face_height * mask * mask_east * bc_mask_e
+    flux_east = -D * grad_e * face_height * mask * mask_east * bc_mask_e
 
     # --- WEST FACE ---
-    D_face_w = 0.5 * (D_west + D)
     dx_face_w = 0.5 * (dx_west + dx)
     grad_w = (state - state_west) / dx_face_w
-    flux_west = -D_face_w * grad_w * face_height * mask * mask_west * bc_mask_w
+    flux_west = -D * grad_w * face_height * mask * mask_west * bc_mask_w
 
     # --- NORTH FACE ---
-    D_face_n = 0.5 * (D + D_north)
     dy_face_n = 0.5 * (dy + dy_north)
     grad_n = (state_north - state) / dy_face_n
-    flux_north = -D_face_n * grad_n * face_width * mask * mask_north * bc_mask_n
+    flux_north = -D * grad_n * face_width * mask * mask_north * bc_mask_n
 
     # --- SOUTH FACE ---
-    D_face_s = 0.5 * (D_south + D)
     dy_face_s = 0.5 * (dy_south + dy)
     grad_s = (state - state_south) / dy_face_s
-    flux_south = -D_face_s * grad_s * face_width * mask * mask_south * bc_mask_s
+    flux_south = -D * grad_s * face_width * mask * mask_south * bc_mask_s
 
     return flux_east, flux_west, flux_north, flux_south
 
@@ -317,7 +307,6 @@ def _compute_diffusion_fluxes(
         "state": ["Y", "X"],
         "u": ["Y", "X"],
         "v": ["Y", "X"],
-        "D": ["Y", "X"],
         "dx": ["Y", "X"],
         "dy": ["Y", "X"],
         "face_height": ["Y", "X"],
@@ -346,7 +335,7 @@ def transport_tendency(
     state: jnp.ndarray,
     u: jnp.ndarray,
     v: jnp.ndarray,
-    D: jnp.ndarray,
+    D: float,
     dx: jnp.ndarray,
     dy: jnp.ndarray,
     face_height: jnp.ndarray,
@@ -371,7 +360,7 @@ def transport_tendency(
         state: Concentration field [units] (Y, X)
         u: Zonal (eastward) velocity [m/s] (Y, X)
         v: Meridional (northward) velocity [m/s] (Y, X)
-        D: Diffusion coefficient [m²/s] (Y, X)
+        D: Diffusion coefficient [m²/s] (scalar, uniform)
         dx: Distance between cell centers in X direction [m] (Y, X)
         dy: Distance between cell centers in Y direction [m] (Y, X)
         face_height: Height of E/W faces [m] (Y, X)
@@ -399,7 +388,7 @@ def transport_tendency(
         >>> state = jnp.ones((ny, nx))
         >>> u = jnp.full((ny, nx), 0.1)  # 0.1 m/s eastward
         >>> v = jnp.zeros((ny, nx))
-        >>> D = jnp.full((ny, nx), 100.0)  # 100 m²/s
+        >>> D = 100.0  # 100 m²/s
         >>> dx = jnp.full((ny, nx), 1000.0)  # 1 km
         >>> dy = jnp.full((ny, nx), 1000.0)
         >>> cell_area = dx * dy

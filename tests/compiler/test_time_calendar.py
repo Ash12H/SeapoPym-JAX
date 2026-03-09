@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, ExecutionParams
+from seapopym.blueprint import Blueprint, Config, ConfigValidationError, ExecutionParams
 from seapopym.compiler import compile_model
 from seapopym.compiler.time_grid import TimeGrid
 
@@ -109,14 +109,12 @@ class TestExecutionParams:
             time_start="2000-01-01",
             time_end="2020-12-31",
             dt="1d",
-            chunk_size=1000,
             forcing_interpolation="linear",
         )
 
         assert params.time_start == "2000-01-01"
         assert params.time_end == "2020-12-31"
         assert params.dt == "1d"
-        assert params.chunk_size == 1000
         assert params.forcing_interpolation == "linear"
 
     def test_minimal_params(self):
@@ -124,7 +122,6 @@ class TestExecutionParams:
         params = ExecutionParams(time_start="2000-01-01", time_end="2000-12-31")
 
         assert params.dt == "1d"  # default
-        assert params.chunk_size is None  # default
         assert params.forcing_interpolation == "constant"  # default
 
     def test_missing_time_start_error(self):
@@ -156,16 +153,6 @@ class TestExecutionParams:
         """Test error with invalid datetime format for time_end."""
         with pytest.raises(ValueError, match="Invalid datetime format"):
             ExecutionParams(time_start="2000-01-01", time_end="not-a-date")
-
-    def test_negative_chunk_size_error(self):
-        """Test error when chunk_size is negative."""
-        with pytest.raises(ValueError, match="must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", chunk_size=-100)
-
-    def test_zero_chunk_size_error(self):
-        """Test error when chunk_size is zero."""
-        with pytest.raises(ValueError, match="must be positive"):
-            ExecutionParams(time_start="2000-01-01", time_end="2020-01-01", chunk_size=0)
 
     def test_invalid_forcing_interpolation(self):
         """Test error with invalid forcing_interpolation method."""
@@ -225,7 +212,7 @@ class TestCompileTimeGrid:
         assert model.time_grid.n_timesteps == 10
         assert model.shapes["T"] == 10
         # Interpolation is deferred to runtime — use get_all() to verify
-        all_forcings = model.forcings.get_all()
+        all_forcings = model.forcings.get_all_dynamic()
         assert all_forcings["temp"].shape[0] == 10  # Interpolated at runtime
 
     def test_coords_generation(self, blueprint):
@@ -265,7 +252,8 @@ class TestCompileTimeGrid:
                     "temp": xr.DataArray(
                         np.zeros((10, 1, 1)),
                         dims=["T", "Y", "X"],
-                        coords={"T": pd.date_range("2000-01-05", periods=10, freq="1d")},
+
+                        coords={"T": pd.date_range("2000-01-05", periods=10, freq="1D")},
                     )
                 },
                 "execution": {"time_start": "2000-01-01", "time_end": "2000-01-10", "dt": "1d"},
@@ -273,7 +261,7 @@ class TestCompileTimeGrid:
             }
         )
 
-        with pytest.raises(ValueError, match="does not cover simulation range"):
+        with pytest.raises(ConfigValidationError, match="does not cover simulation range"):
             compile_model(blueprint, config)
 
     def test_interpolation_triggered(self, blueprint):
@@ -305,7 +293,7 @@ class TestCompileTimeGrid:
         model = compile_model(blueprint, config)
 
         # Interpolation is deferred to runtime — use get_all() to verify
-        all_forcings = model.forcings.get_all()
+        all_forcings = model.forcings.get_all_dynamic()
         result = np.asarray(all_forcings["temp"]).flatten()
         # xarray interpolates in real time space:
         # source [0, 10] at [Jan 1, Jan 5], target [Jan 1, Jan 2, Jan 3, Jan 4]
@@ -317,7 +305,7 @@ class TestCompileTimeGrid:
         """Test that forcings are sliced to simulation temporal range before interpolation."""
         forcing_start = "2001-01-01"
         forcing_end = "2021-01-01"
-        forcing_dates = pd.date_range(forcing_start, forcing_end, freq="1d", inclusive="left")
+        forcing_dates = pd.date_range(forcing_start, forcing_end, freq="1D", inclusive="left")
 
         # Create a forcing with a clear pattern: value = day_of_year
         forcing_values = np.array([d.dayofyear for d in forcing_dates], dtype=float)
@@ -348,7 +336,7 @@ class TestCompileTimeGrid:
         assert model.n_timesteps == 365
 
         # Interpolation is deferred — use get_all() to materialize
-        all_forcings = model.forcings.get_all()
+        all_forcings = model.forcings.get_all_dynamic()
         result = np.asarray(all_forcings["temp"]).flatten()
 
         # Values should be day_of_year from 1 to 365 (first year only)

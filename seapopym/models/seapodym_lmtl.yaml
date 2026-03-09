@@ -8,21 +8,26 @@ declarations:
       dims: [F, Y, X]
     production:
       units: "g/m^2"
-      dims: [F, Y, X, C]
+      dims: [F, C, Y, X]
 
   parameters:
     lambda_0:
       units: "1/s"
+      dims: [F]
     gamma_lambda:
       units: "1/delta_degC"
+      dims: [F]
     tau_r_0:
       units: "s"
+      dims: [F]
     gamma_tau_r:
       units: "1/delta_degC"
+      dims: [F]
     t_ref:
       units: "degC"
     efficiency:
       units: "dimensionless"
+      dims: [F]
     cohort_ages:
       units: "s"
       dims: [C]
@@ -32,10 +37,11 @@ declarations:
     night_layer:
       units: "dimensionless"
       dims: [F]
-    latitude:
-      units: "degrees"
 
   forcings:
+    latitude:
+      units: "degrees"
+      dims: [Y]
     temperature:
       units: "degC"
       dims: [T, Z, Y, X]
@@ -44,7 +50,7 @@ declarations:
       dims: [T, Y, X]
     day_of_year:
       units: "dimensionless"
-      dims: [T, Y, X]
+      dims: [T]
     # Transport forcings
     u:
       units: "m/s"
@@ -54,7 +60,6 @@ declarations:
       dims: [T, Z, Y, X]
     D:
       units: "m^2/s"
-      dims: [T, Z, Y, X]
     dx:
       units: "m"
       dims: [Y, X]
@@ -73,12 +78,20 @@ declarations:
     mask:
       units: "dimensionless"
       dims: [Y, X]
+    bc_north:
+      units: "dimensionless"
+    bc_south:
+      units: "dimensionless"
+    bc_east:
+      units: "dimensionless"
+    bc_west:
+      units: "dimensionless"
 
 process:
   # --- Environment ---
   - func: "lmtl:day_length"
     inputs:
-      latitude: parameters.latitude
+      latitude: forcings.latitude
       day_of_year: forcings.day_of_year
     outputs:
       return: derived.day_length
@@ -177,28 +190,23 @@ process:
     outputs:
       return: derived.mean_v
 
-  - func: "lmtl:layer_weighted_mean"
-    inputs:
-      forcing: forcings.D
-      day_length: derived.day_length
-      day_layer: parameters.day_layer
-      night_layer: parameters.night_layer
-    outputs:
-      return: derived.mean_D
-
   # --- Transport (biomass) ---
   - func: "phys:transport_tendency"
     inputs:
       state: state.biomass
       u: derived.mean_u
       v: derived.mean_v
-      D: derived.mean_D
+      D: forcings.D
       dx: forcings.dx
       dy: forcings.dy
       face_height: forcings.face_height
       face_width: forcings.face_width
       cell_area: forcings.cell_area
       mask: forcings.mask
+      bc_north: forcings.bc_north
+      bc_south: forcings.bc_south
+      bc_east: forcings.bc_east
+      bc_west: forcings.bc_west
     outputs:
       advection_rate: derived.biomass_advection
       diffusion_rate: derived.biomass_diffusion
@@ -209,13 +217,17 @@ process:
       state: state.production
       u: derived.mean_u
       v: derived.mean_v
-      D: derived.mean_D
+      D: forcings.D
       dx: forcings.dx
       dy: forcings.dy
       face_height: forcings.face_height
       face_width: forcings.face_width
       cell_area: forcings.cell_area
       mask: forcings.mask
+      bc_north: forcings.bc_north
+      bc_south: forcings.bc_south
+      bc_east: forcings.bc_east
+      bc_west: forcings.bc_west
     outputs:
       advection_rate: derived.production_advection
       diffusion_rate: derived.production_diffusion

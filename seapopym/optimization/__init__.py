@@ -1,29 +1,22 @@
-"""Optimization module for parameter estimation.
+"""Optimization module for model calibration.
 
-This module provides tools for optimizing model parameters by minimizing
-the difference between simulated outputs and observations.
+**Optimizer classes** (1 algorithm = 1 class):
+- :class:`GradientOptimizer` — Optax (adam/sgd/rmsprop/adagrad)
+- :class:`CMAESOptimizer` — evosax CMA-ES (requires evosax)
+- :class:`GAOptimizer` — evosax SimpleGA (requires evosax)
+- :class:`IPOPCMAESOptimizer` — IPOP multi-restart CMA-ES (requires evosax)
 
-Main components:
-- Loss functions (RMSE, NRMSE) with support for sparse observations
-- Optimizer wrapper for Optax algorithms (gradient-based)
-- GradientRunner for differentiable model execution
-- EvolutionaryOptimizer for CMA-ES optimization (requires evosax)
-- HybridOptimizer for combined CMA-ES + gradient optimization (requires evosax)
-
-Evolutionary optimizers require the optional evosax dependency:
-    pip install seapopym[optimization]
+**Building blocks**:
+- :class:`Objective` / :class:`PreparedObjective` — observation data + extraction
+- Loss functions: :func:`mse`, :func:`rmse`, :func:`nrmse`
+- Prior distributions: :class:`Uniform`, :class:`Normal`, etc.
 """
 
 from __future__ import annotations
 
-from seapopym.optimization.gradient import GradientRunner, SparseObservations
-from seapopym.optimization.likelihood import (
-    GaussianLikelihood,
-    make_log_posterior,
-    reparameterize_log_posterior,
-)
+from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.loss import mse, nrmse, rmse
-from seapopym.optimization.optimizer import Optimizer, OptimizeResult
+from seapopym.optimization.objective import Objective, PreparedObjective
 from seapopym.optimization.prior import (
     HalfNormal,
     LogNormal,
@@ -34,49 +27,39 @@ from seapopym.optimization.prior import (
 )
 
 __all__ = [
+    # Optimizers (always available)
+    "GradientOptimizer",
+    "OptimizeResult",
+    # Objectives
+    "Objective",
+    "PreparedObjective",
+    # Loss functions
     "rmse",
     "nrmse",
     "mse",
-    "Optimizer",
-    "OptimizeResult",
-    "GradientRunner",
-    "SparseObservations",
+    # Priors
     "Uniform",
     "Normal",
     "LogNormal",
     "HalfNormal",
     "TruncatedNormal",
     "PriorSet",
-    "GaussianLikelihood",
-    "make_log_posterior",
-    "reparameterize_log_posterior",
 ]
 
 # Optional imports (require evosax)
 try:
-    from seapopym.optimization.evolutionary import EvolutionaryOptimizer
-    from seapopym.optimization.hybrid import HybridOptimizer
-    from seapopym.optimization.ipop import IPOPResult, run_ipop, run_ipop_cmaes
+    from seapopym.optimization.cmaes import CMAESOptimizer
+    from seapopym.optimization.ga import GAOptimizer
+    from seapopym.optimization.ipop import IPOPCMAESOptimizer, IPOPResult
 
-    __all__ += ["EvolutionaryOptimizer", "HybridOptimizer", "IPOPResult", "run_ipop", "run_ipop_cmaes"]
+    __all__ += ["CMAESOptimizer", "GAOptimizer", "IPOPCMAESOptimizer", "IPOPResult"]
     _HAS_EVOSAX = True
 except (ImportError, KeyError):
     _HAS_EVOSAX = False
 
-# Optional imports (require blackjax)
-try:
-    from seapopym.optimization.nuts import NUTSResult, run_nuts
-
-    __all__ += ["NUTSResult", "run_nuts"]
-    _HAS_BLACKJAX = True
-except ImportError:
-    _HAS_BLACKJAX = False
-
 
 def __getattr__(name: str):
     """Provide helpful error message for optional dependencies."""
-    if name in ("EvolutionaryOptimizer", "HybridOptimizer", "IPOPResult", "run_ipop", "run_ipop_cmaes") and not _HAS_EVOSAX:
+    if name in ("CMAESOptimizer", "GAOptimizer", "IPOPCMAESOptimizer", "IPOPResult") and not _HAS_EVOSAX:
         raise ImportError(f"{name} requires the evosax package. Install it with: pip install seapopym[optimization]")
-    if name in ("NUTSResult", "run_nuts") and not _HAS_BLACKJAX:
-        raise ImportError(f"{name} requires the blackjax package. Install it with: pip install seapopym[optimization]")
     raise AttributeError(f"module 'seapopym.optimization' has no attribute '{name}'")
