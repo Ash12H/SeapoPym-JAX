@@ -28,7 +28,6 @@ from .exceptions import (
 )
 from .io import DiskWriter, MemoryWriter, WriterRaw, build_writer
 from .run import run, simulate
-from .runner import Runner, RunnerConfig  # Deprecated shim
 from .step import build_step_fn
 
 __all__ = [
@@ -41,9 +40,6 @@ __all__ = [
     "WriterRaw",
     "MemoryWriter",
     "DiskWriter",
-    # Deprecated
-    "Runner",
-    "RunnerConfig",
     # Exceptions
     "EngineError",
     "ChunkingError",

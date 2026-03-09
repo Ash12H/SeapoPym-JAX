@@ -130,10 +130,7 @@ class Objective:
         if isinstance(self.observations, pd.DataFrame):
             return self._setup_dataframe(model_coords)
 
-        msg = (
-            f"target mode requires xarray.DataArray or pandas.DataFrame, "
-            f"got {type(self.observations).__name__}"
-        )
+        msg = f"target mode requires xarray.DataArray or pandas.DataFrame, got {type(self.observations).__name__}"
         raise TypeError(msg)
 
     def _setup_xarray(self, model_coords: dict[str, Array]) -> PreparedObjective:
@@ -168,9 +165,7 @@ class Objective:
 
         # All columns except target are coordinate dimensions.
         # .to_numpy() ensures plain ndarray (not ExtensionArray).
-        dim_coords = {
-            col: df[col].to_numpy() for col in df.columns if col != target_name
-        }
+        dim_coords = {col: df[col].to_numpy() for col in df.columns if col != target_name}
         indices = coords_to_indices(model_coords, sel_kwargs=None, **dim_coords)
 
         idx = tuple(jnp.asarray(i, dtype=jnp.int32) for i in indices)
@@ -187,9 +182,7 @@ class Objective:
     # Transform mode
     # ------------------------------------------------------------------
 
-    def _setup_transform(
-        self, dummy_outputs: dict[str, Array] | None
-    ) -> PreparedObjective:
+    def _setup_transform(self, dummy_outputs: dict[str, Array] | None) -> PreparedObjective:
         """Validate shape and wrap the user-provided transform."""
         obs_array = jnp.asarray(self.observations)
         transform = self.transform  # guaranteed not None by __init__
@@ -200,10 +193,7 @@ class Objective:
         if dummy_outputs is not None:
             pred_shape = jax.eval_shape(transform, dummy_outputs).shape
             if pred_shape != obs_array.shape:
-                msg = (
-                    f"transform output shape {pred_shape} != "
-                    f"observations shape {obs_array.shape}"
-                )
+                msg = f"transform output shape {pred_shape} != observations shape {obs_array.shape}"
                 raise ValueError(msg)
 
         return PreparedObjective(

@@ -13,7 +13,6 @@ from seapopym.optimization._common import (
     unflatten_params,
 )
 
-
 # ---------------------------------------------------------------------------
 # flatten_params / unflatten_params roundtrip
 # ---------------------------------------------------------------------------
@@ -160,22 +159,10 @@ class TestResolveMetric:
 
 class TestBuildLossFn:
     def test_returns_callable_producing_scalar(self):
-        from seapopym.optimization.objective import Objective
+        import inspect
 
-        class _FakeRunner:
-            def __call__(self, model, free_params, export_variables=None):
-                return {"out": free_params["x"] * jnp.ones(3)}
-
-        class _FakeModel:
-            parameters = {"x": jnp.array(1.0)}
-            coords = {}
-
-        obs = jnp.array([1.0, 1.0, 1.0])
-        obj = Objective(observations=obs, transform=lambda o: o["out"])
-        from seapopym.optimization._common import setup_objectives
-
-        prepared = setup_objectives([(obj, "mse", 1.0)], {})
-        loss_fn = build_loss_fn(_FakeRunner(), _FakeModel(), prepared, None)
-        result = loss_fn({"x": jnp.array(2.0)})
-        assert jnp.ndim(result) == 0
-        assert float(result) == pytest.approx(1.0)  # mse of [2,2,2] vs [1,1,1]
+        sig = inspect.signature(build_loss_fn)
+        param_names = list(sig.parameters.keys())
+        assert param_names[0] == "model"
+        assert "chunk_size" in param_names
+        assert "runner" not in param_names

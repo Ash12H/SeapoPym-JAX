@@ -8,7 +8,8 @@ import xarray as xr
 from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.blueprint.registry import REGISTRY
 from seapopym.compiler import compile_model
-from seapopym.engine.runner import Runner
+from seapopym.engine import run
+from seapopym.engine.step import build_step_fn
 
 _TEST_FUNC_NAME = "test:growth_rwp"
 
@@ -71,14 +72,21 @@ def _build_toy_model(n_days=10, ny=3, nx=3, growth_rate=0.0001):
     return compile_model(blueprint, config)
 
 
+def _eval_model(model, free_params):
+    """Evaluate model with free params using the functional API."""
+    step_fn = build_step_fn(model)
+    merged = {**model.parameters, **free_params}
+    _, outputs = run(step_fn, model, dict(model.state), merged)
+    return outputs
+
+
 class TestOptimizationRunnerNominal:
-    """Tests for basic Runner.optimization() behavior."""
+    """Tests for run() used in optimization context."""
 
     def test_returns_outputs_dict(self):
-        """Runner.optimization() should return outputs dict."""
+        """run() should return outputs dict."""
         model = _build_toy_model()
-        runner = Runner.optimization()
-        outputs = runner(model, dict(model.parameters))
+        outputs = _eval_model(model, dict(model.parameters))
 
         assert isinstance(outputs, dict)
         assert len(outputs) > 0
@@ -86,16 +94,14 @@ class TestOptimizationRunnerNominal:
     def test_outputs_contain_variables(self):
         """Outputs should contain output arrays."""
         model = _build_toy_model()
-        runner = Runner.optimization()
-        outputs = runner(model, dict(model.parameters))
+        outputs = _eval_model(model, dict(model.parameters))
 
         assert len(outputs) > 0
 
     def test_biomass_grows_with_positive_rate(self):
         """Biomass should increase with positive growth rate."""
         model = _build_toy_model(growth_rate=0.001)
-        runner = Runner.optimization()
-        outputs = runner(model, dict(model.parameters))
+        outputs = _eval_model(model, dict(model.parameters))
 
         # Last timestep biomass should be > initial (100.0)
         assert jnp.all(outputs["biomass"][-1] > 100.0)
@@ -103,13 +109,12 @@ class TestOptimizationRunnerNominal:
     def test_different_params_give_different_results(self):
         """Different parameter values should produce different outputs."""
         model = _build_toy_model()
-        runner = Runner.optimization()
 
         params_low = {"growth_rate": jnp.array(0.0001)}
         params_high = {"growth_rate": jnp.array(0.01)}
 
-        outputs_low = runner(model, params_low)
-        outputs_high = runner(model, params_high)
+        outputs_low = _eval_model(model, params_low)
+        outputs_high = _eval_model(model, params_high)
 
         # Higher growth rate should give higher biomass
         assert jnp.mean(outputs_high["biomass"][-1]) > jnp.mean(outputs_low["biomass"][-1])

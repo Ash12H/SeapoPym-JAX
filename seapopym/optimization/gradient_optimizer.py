@@ -19,7 +19,6 @@ from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
-    from seapopym.engine.runner import Runner
     from seapopym.optimization.objective import Objective
     from seapopym.optimization.prior import PriorSet
 
@@ -55,7 +54,6 @@ class GradientOptimizer:
     normalization.
 
     Args:
-        runner: Execution strategy (from :class:`Runner`).
         objectives: List of ``(Objective, metric, weight)`` tuples.
         bounds: Optional parameter bounds as ``{name: (min, max)}``.
         priors: Optional prior distributions. When ``None``, defaults to
@@ -66,11 +64,11 @@ class GradientOptimizer:
             - ``"none"``: No scaling (default)
             - ``"bounds"``: Normalize to [0,1] using bounds (requires bounds)
             - ``"log"``: Log-space for positive parameters
+        chunk_size: Optional chunk size for time-stepping.
 
     Example::
 
         optimizer = GradientOptimizer(
-            runner=Runner.optimization(),
             objectives=[(Objective(observations=obs, transform=fn), "nrmse", 1.0)],
             bounds={"rate": (0.0, 1.0)},
             algorithm="adam",
@@ -89,7 +87,6 @@ class GradientOptimizer:
 
     def __init__(
         self,
-        runner: Runner,
         objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]] | None = None,
         priors: PriorSet | None = None,
@@ -97,6 +94,7 @@ class GradientOptimizer:
         learning_rate: float = 0.01,
         scaling: Literal["none", "bounds", "log"] = "none",
         export_variables: list[str] | None = None,
+        chunk_size: int | None = None,
         **kwargs: Any,
     ) -> None:
         if algorithm not in self.ALGORITHMS:
@@ -105,7 +103,6 @@ class GradientOptimizer:
         if scaling == "bounds" and not bounds:
             raise ValueError("scaling='bounds' requires bounds to be provided")
 
-        self.runner = runner
         self.objectives = objectives
         self.bounds = bounds or {}
         self.priors = priors
@@ -113,6 +110,7 @@ class GradientOptimizer:
         self.learning_rate = learning_rate
         self.scaling = scaling
         self.export_variables = export_variables
+        self.chunk_size = chunk_size
 
         optimizer_fn = self.ALGORITHMS[algorithm]
         self._optimizer = optimizer_fn(learning_rate, **kwargs)
@@ -143,7 +141,7 @@ class GradientOptimizer:
             priors = build_default_priors(self.bounds)
 
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(self.runner, model, prepared, priors, self.export_variables)
+        loss_fn = build_loss_fn(model, prepared, priors, self.export_variables, self.chunk_size)
         initial_params = {k: model.parameters[k] for k in self.bounds} if self.bounds else dict(model.parameters)
 
         return self._run_loss_fn(loss_fn, initial_params, n_steps, tolerance, progress_bar)

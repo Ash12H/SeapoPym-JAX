@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 import jax
 import jax.numpy as jnp
 
+from seapopym.engine.run import run
+from seapopym.engine.step import build_step_fn
 from seapopym.optimization.loss import mse, nrmse, rmse
 from seapopym.optimization.objective import Objective, PreparedObjective
 from seapopym.optimization.prior import PriorSet, Uniform
@@ -22,7 +24,6 @@ from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
-    from seapopym.engine.runner import Runner
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +75,19 @@ def setup_objectives(
 
 
 def build_loss_fn(
-    runner: Runner,
     model: CompiledModel,
     prepared_objectives: list[tuple[PreparedObjective, Callable, float]],
     priors: PriorSet | None,
     export_variables: list[str] | None = None,
+    chunk_size: int | None = None,
 ) -> Callable[[Params], Array]:
     """Build composite loss: sum(w_i * metric_i) + prior_penalty."""
+    step_fn = build_step_fn(model, export_variables=export_variables)
 
     def loss_fn(free_params: Params) -> Array:
-        outputs = runner(model, free_params, export_variables=export_variables)
+        merged = {**model.parameters, **free_params}
+        state = dict(model.state)
+        _, outputs = run(step_fn, model, state, merged, chunk_size=chunk_size)
 
         total = jnp.array(0.0)
         for p, metric_fn, weight in prepared_objectives:
@@ -220,20 +224,26 @@ def run_evolution_strategy(
             converged = True
             logger.info(
                 "Converged at generation %d: no improvement over %d generations (best_loss=%.6e)",
-                gen, patience, best_loss,
+                gen,
+                patience,
+                best_loss,
             )
             break
 
         if gen % 50 == 0:
             logger.info(
                 "gen %d/%d: best_loss=%.6e, stall=%d/%d",
-                gen, n_generations, best_loss, stall_count, patience,
+                gen,
+                n_generations,
+                best_loss,
+                stall_count,
+                patience,
             )
 
         if progress_bar:
             print_rate = max(1, n_generations // 20)
             if gen % print_rate == 0 or gen == n_generations - 1:
-                print(f"\r  [{gen+1}/{n_generations}] loss={best_loss:.4e}", end="", flush=True)
+                print(f"\r  [{gen + 1}/{n_generations}] loss={best_loss:.4e}", end="", flush=True)
 
     if progress_bar:
         print()

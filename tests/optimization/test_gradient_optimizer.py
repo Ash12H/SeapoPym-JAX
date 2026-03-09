@@ -7,29 +7,16 @@ from seapopym.optimization.gradient_optimizer import GradientOptimizer, Optimize
 from seapopym.optimization.objective import Objective
 
 
-class _FakeRunner:
-    def __call__(self, model, free_params):
-        return {"out": jnp.array([0.0])}
-
-
-class _FakeModel:
-    def __init__(self, params):
-        self.parameters = params
-        self.coords = {}
-
-
 class TestGradientOptimizerInit:
     def test_invalid_algorithm_raises(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         with pytest.raises(ValueError, match="Unknown algorithm 'bad'"):
-            GradientOptimizer(runner, [(obj, "mse", 1.0)], algorithm="bad")
+            GradientOptimizer([(obj, "mse", 1.0)], algorithm="bad")
 
     def test_bounds_scaling_without_bounds_raises(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         with pytest.raises(ValueError, match="scaling='bounds' requires bounds"):
-            GradientOptimizer(runner, [(obj, "mse", 1.0)], scaling="bounds")
+            GradientOptimizer([(obj, "mse", 1.0)], scaling="bounds")
 
 
 class TestGradientOptimizerRunLossFn:
@@ -40,10 +27,9 @@ class TestGradientOptimizerRunLossFn:
             x = params["x"]
             return (x - 3.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GradientOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (0.0, 10.0)},
             algorithm="adam",
             learning_rate=0.1,
@@ -63,10 +49,9 @@ class TestGradientOptimizerRunLossFn:
             x = params["x"]
             return (x - 5.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GradientOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (0.0, 10.0)},
             algorithm="adam",
             learning_rate=0.05,
@@ -84,10 +69,9 @@ class TestGradientOptimizerRunLossFn:
             # Loss that wants to push x far negative
             return params["x"]
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GradientOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (0.0, 10.0)},
             algorithm="adam",
             learning_rate=0.5,
@@ -105,10 +89,9 @@ class TestGradientOptimizerRunLossFn:
             x = params["x"]
             return (x - 2.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GradientOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             algorithm="adam",
             learning_rate=0.05,
             scaling="log",
@@ -124,10 +107,9 @@ class TestGradientOptimizerRunLossFn:
         def loss_fn(params):
             return jnp.array(1.0)  # constant → converges immediately
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GradientOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             algorithm="adam",
             learning_rate=0.01,
             scaling="none",
@@ -144,10 +126,9 @@ class TestGradientOptimizerRunLossFn:
         def loss_fn(params):
             return (params["x"] - 1.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = GradientOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             algorithm="adam",
             learning_rate=0.01,
             scaling="none",

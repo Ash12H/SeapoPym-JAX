@@ -3,15 +3,15 @@
 Tests the complete pipeline: Blueprint → Compile → Run
 """
 
+import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 import xarray as xr
 
 from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
-from seapopym.engine import Runner
-from seapopym.engine.runner import RunnerConfig
+from seapopym.engine import run, simulate
+from seapopym.engine.step import build_step_fn
 
 
 class TestE2EBasicSimulation:
@@ -64,9 +64,7 @@ class TestE2EBasicSimulation:
         config = Config(
             parameters={"growth_rate": xr.DataArray(0.0001)},
             forcings={
-                "temperature": xr.DataArray(
-                    np.random.uniform(15, 25, (n_days, ny, nx)), dims=["T", "Y", "X"]
-                ),
+                "temperature": xr.DataArray(np.random.uniform(15, 25, (n_days, ny, nx)), dims=["T", "Y", "X"]),
                 "mask": xr.DataArray(np.ones((ny, nx)), dims=["Y", "X"]),
             },
             initial_state={
@@ -80,14 +78,13 @@ class TestE2EBasicSimulation:
         )
 
         model = compile_model(blueprint, config)
-        runner = Runner.simulation(chunk_size=10)
-        final_state, _ = runner.run(model, output_path=str(tmp_path / "output"))
+        final_state, _ = simulate(model, chunk_size=10, output_path=str(tmp_path / "output"))
 
         assert "biomass" in final_state
         assert jnp.all(final_state["biomass"] >= 100.0)
 
-    def test_e2e_optimization_runner(self):
-        """Test complete workflow: Blueprint → Compile → Runner.optimization()."""
+    def test_e2e_optimization_run(self):
+        """Test complete workflow: Blueprint → Compile → run() for optimization."""
 
         blueprint = Blueprint.from_dict(
             {
@@ -134,9 +131,7 @@ class TestE2EBasicSimulation:
         config = Config(
             parameters={"growth_rate": xr.DataArray(0.0001)},
             forcings={
-                "temperature": xr.DataArray(
-                    np.ones((n_days, ny, nx)) * 20.0, dims=["T", "Y", "X"]
-                ),
+                "temperature": xr.DataArray(np.ones((n_days, ny, nx)) * 20.0, dims=["T", "Y", "X"]),
                 "mask": xr.DataArray(np.ones((ny, nx)), dims=["Y", "X"]),
             },
             initial_state={
@@ -150,8 +145,8 @@ class TestE2EBasicSimulation:
         )
 
         model = compile_model(blueprint, config)
-        runner = Runner.optimization()
-        outputs = runner(model, dict(model.parameters))
+        step_fn = build_step_fn(model)
+        _, outputs = run(step_fn, model, dict(model.state), dict(model.parameters))
 
         assert "biomass" in outputs
         # Biomass should have grown (output is per-timestep)
@@ -209,9 +204,7 @@ class TestE2EMaskBehavior:
         config = Config(
             parameters={"growth_rate": xr.DataArray(0.0001)},
             forcings={
-                "temperature": xr.DataArray(
-                    np.ones((20, 10, 10)) * 20.0, dims=["T", "Y", "X"]
-                ),
+                "temperature": xr.DataArray(np.ones((20, 10, 10)) * 20.0, dims=["T", "Y", "X"]),
                 "mask": xr.DataArray(mask, dims=["Y", "X"]),
             },
             initial_state={
@@ -225,8 +218,7 @@ class TestE2EMaskBehavior:
         )
 
         model = compile_model(blueprint, config)
-        runner = Runner.simulation(chunk_size=10)
-        final_state, _ = runner.run(model, output_path=str(tmp_path / "output"))
+        final_state, _ = simulate(model, chunk_size=10, output_path=str(tmp_path / "output"))
 
         # Masked regions should be zero
         np.testing.assert_array_equal(np.asarray(final_state["biomass"][:3, :]), 0.0)
@@ -302,9 +294,7 @@ class TestE2EMultiProcess:
                 "mortality_rate": xr.DataArray(0.0001),
             },
             forcings={
-                "temperature": xr.DataArray(
-                    np.ones((30, 5, 5)) * 20.0, dims=["T", "Y", "X"]
-                ),
+                "temperature": xr.DataArray(np.ones((30, 5, 5)) * 20.0, dims=["T", "Y", "X"]),
                 "mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"]),
             },
             initial_state={
@@ -318,8 +308,7 @@ class TestE2EMultiProcess:
         )
 
         model = compile_model(blueprint, config)
-        runner = Runner.simulation(chunk_size=15)
-        final_state, _ = runner.run(model, output_path=str(tmp_path / "output"))
+        final_state, _ = simulate(model, chunk_size=15, output_path=str(tmp_path / "output"))
 
         # Net growth rate is positive (0.0002 - 0.0001 = 0.0001)
         # So biomass should increase
@@ -366,9 +355,7 @@ class TestE2EChunkedVmap:
         config = Config(
             parameters={"growth_rate": xr.DataArray(0.0001)},
             forcings={
-                "temperature": xr.DataArray(
-                    np.ones((n_days, ny, nx)) * 20.0, dims=["T", "Y", "X"]
-                ),
+                "temperature": xr.DataArray(np.ones((n_days, ny, nx)) * 20.0, dims=["T", "Y", "X"]),
                 "mask": xr.DataArray(np.ones((ny, nx)), dims=["Y", "X"]),
             },
             initial_state={
@@ -383,14 +370,23 @@ class TestE2EChunkedVmap:
         model = compile_model(blueprint, config)
 
         population = {"growth_rate": jnp.array([0.00005, 0.0001, 0.00015])}
+        step_fn = build_step_fn(model, export_variables=["biomass"])
+
+        def eval_one(single_free):
+            merged = {**model.parameters, **single_free}
+            _, outputs = run(step_fn, model, dict(model.state), merged)
+            return outputs
+
+        def eval_one_chunked(single_free):
+            merged = {**model.parameters, **single_free}
+            _, outputs = run(step_fn, model, dict(model.state), merged, chunk_size=5)
+            return outputs
 
         # Full vmap (no chunking)
-        runner_full = Runner(RunnerConfig(vmap_params=True, output_mode="raw"))
-        outputs_full = runner_full(model, population, export_variables=["biomass"])
+        outputs_full = jax.vmap(eval_one)(population)
 
         # Chunked+vmap
-        runner_chunked = Runner(RunnerConfig(vmap_params=True, chunk_size=5, output_mode="raw"))
-        outputs_chunked = runner_chunked(model, population, export_variables=["biomass"])
+        outputs_chunked = jax.vmap(eval_one_chunked)(population)
 
         # Results must match
         np.testing.assert_allclose(

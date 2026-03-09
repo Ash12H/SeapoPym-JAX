@@ -8,11 +8,6 @@ from seapopym.optimization.ipop import IPOPCMAESOptimizer, IPOPResult, _is_new_m
 from seapopym.optimization.objective import Objective
 
 
-class _FakeRunner:
-    def __call__(self, model, free_params):
-        return {"out": jnp.array([0.0])}
-
-
 class TestParamsDistance:
     def test_identical_params(self):
         a = {"x": jnp.array(0.5)}
@@ -51,10 +46,10 @@ class TestIsNewMode:
 
 class TestIPOPCMAESOptimizerInit:
     def test_default_init(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)},
+            [(obj, "mse", 1.0)],
+            bounds={"x": (0.0, 10.0)},
         )
         assert opt.n_restarts == 5
         assert opt.initial_popsize == 32
@@ -63,12 +58,15 @@ class TestIPOPCMAESOptimizerInit:
         assert opt.seed == 0
 
     def test_custom_init(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)},
-            n_restarts=3, initial_popsize=8, n_generations=50,
-            distance_threshold=0.2, seed=42,
+            [(obj, "mse", 1.0)],
+            bounds={"x": (0.0, 10.0)},
+            n_restarts=3,
+            initial_popsize=8,
+            n_generations=50,
+            distance_threshold=0.2,
+            seed=42,
         )
         assert opt.n_restarts == 3
         assert opt.initial_popsize == 8
@@ -84,12 +82,14 @@ class TestIPOPCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return (params["x"] - 3.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (-5.0, 10.0)},
-            n_restarts=2, initial_popsize=8, n_generations=30, seed=42,
+            n_restarts=2,
+            initial_popsize=8,
+            n_generations=30,
+            seed=42,
         )
 
         result = opt._run_loss_fn(loss_fn, {"x": jnp.array(0.0)})
@@ -106,12 +106,14 @@ class TestIPOPCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return (params["x"] - 5.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (-10.0, 10.0)},
-            n_restarts=3, initial_popsize=8, n_generations=20, seed=42,
+            n_restarts=3,
+            initial_popsize=8,
+            n_generations=20,
+            seed=42,
         )
 
         result = opt._run_loss_fn(loss_fn, {"x": jnp.array(0.0)})
@@ -130,12 +132,14 @@ class TestIPOPCMAESOptimizerRunLossFn:
                     popsizes.append(self.initial_popsize * (2**i))
                 return super()._run_loss_fn(loss_fn, initial_params, progress_bar)
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = TrackingCMAES(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (0.0, 10.0)},
-            n_restarts=3, initial_popsize=8, n_generations=5, seed=42,
+            n_restarts=3,
+            initial_popsize=8,
+            n_generations=5,
+            seed=42,
         )
 
         opt._run_loss_fn(lambda p: p["x"] ** 2, {"x": jnp.array(5.0)})

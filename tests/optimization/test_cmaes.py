@@ -9,51 +9,27 @@ from seapopym.optimization.objective import Objective
 from seapopym.optimization.prior import PriorSet, Uniform
 
 
-class _FakeRunner:
-    """Simple callable that returns outputs from a loss-like function."""
-
-    def __init__(self, output_fn=None):
-        self.output_fn = output_fn
-
-    def __call__(self, model, free_params):
-        if self.output_fn is not None:
-            return self.output_fn(free_params)
-        return {"out": jnp.array([0.0])}
-
-
-class _FakeModel:
-    """Minimal model stub."""
-
-    def __init__(self, params):
-        self.parameters = params
-        self.coords = {}
-
-
 class TestCMAESOptimizerInit:
     def test_default_init(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
         assert opt.popsize == 32
         assert opt.seed == 0
 
     def test_odd_popsize_rounded_up(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=31)
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=31)
         assert opt.popsize == 32
 
     def test_no_default_priors(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
         assert opt.priors is None
 
     def test_custom_priors(self):
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         priors = PriorSet({"x": Uniform(1.0, 5.0)})
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, priors=priors)
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, priors=priors)
         assert opt.priors is priors
 
 
@@ -65,9 +41,8 @@ class TestCMAESOptimizerRunLossFn:
             x = params["x"]
             return (x - 3.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (-5.0, 10.0)}, popsize=16, seed=42)
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (-5.0, 10.0)}, popsize=16, seed=42)
 
         result = opt._run_loss_fn(loss_fn, {"x": jnp.array(0.0)}, n_generations=50)
 
@@ -79,9 +54,8 @@ class TestCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return params["x"] ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=8, seed=42)
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=8, seed=42)
 
         result = opt._run_loss_fn(loss_fn, {"x": jnp.array(10.0)}, n_generations=20)
 
@@ -92,9 +66,8 @@ class TestCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return -(params["x"] ** 2)
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (-1.0, 1.0)}, popsize=16, seed=42)
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (-1.0, 1.0)}, popsize=16, seed=42)
 
         result = opt._run_loss_fn(loss_fn, {"x": jnp.array(0.0)}, n_generations=30)
 
@@ -104,16 +77,18 @@ class TestCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return (params["x"] - 1.0) ** 2 + (params["y"] - 2.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = CMAESOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (-5.0, 5.0), "y": (-5.0, 5.0)},
-            popsize=32, seed=42,
+            popsize=32,
+            seed=42,
         )
 
         result = opt._run_loss_fn(
-            loss_fn, {"x": jnp.array(0.0), "y": jnp.array(0.0)}, n_generations=100,
+            loss_fn,
+            {"x": jnp.array(0.0), "y": jnp.array(0.0)},
+            n_generations=100,
         )
 
         assert float(result.params["x"]) == pytest.approx(1.0, abs=0.5)
@@ -123,10 +98,9 @@ class TestCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return params["x"] ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt1 = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=8, seed=123)
-        opt2 = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=8, seed=123)
+        opt1 = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=8, seed=123)
+        opt2 = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=8, seed=123)
 
         result1 = opt1._run_loss_fn(loss_fn, {"x": jnp.array(5.0)}, n_generations=10)
         result2 = opt2._run_loss_fn(loss_fn, {"x": jnp.array(5.0)}, n_generations=10)
@@ -140,12 +114,12 @@ class TestCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return jnp.array(1.0)  # constant → never improves
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = CMAESOptimizer(
-            runner, [(obj, "mse", 1.0)],
+            [(obj, "mse", 1.0)],
             bounds={"x": (0.0, 10.0)},
-            popsize=8, seed=42,
+            popsize=8,
+            seed=42,
         )
 
         result = opt._run_loss_fn(loss_fn, {"x": jnp.array(5.0)}, n_generations=200, patience=5)
@@ -157,9 +131,8 @@ class TestCMAESOptimizerRunLossFn:
         def loss_fn(params):
             return (params["x"] - 5.0) ** 2
 
-        runner = _FakeRunner()
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer(runner, [(obj, "mse", 1.0)], bounds={"x": (-10.0, 20.0)}, popsize=32, seed=42)
+        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (-10.0, 20.0)}, popsize=32, seed=42)
 
         result = opt._run_loss_fn(loss_fn, {"x": jnp.array(-8.0)}, n_generations=30)
 

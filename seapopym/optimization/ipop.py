@@ -28,7 +28,6 @@ from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
-    from seapopym.engine.runner import Runner
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +74,7 @@ def _is_new_mode(
     bounds: dict[str, tuple[float, float]],
 ) -> bool:
     """Check if candidate is far enough from all existing modes (in normalized space)."""
-    return all(
-        _params_distance(candidate.params, mode.params, bounds) >= distance_threshold for mode in existing_modes
-    )
+    return all(_params_distance(candidate.params, mode.params, bounds) >= distance_threshold for mode in existing_modes)
 
 
 class IPOPCMAESOptimizer:
@@ -88,7 +85,6 @@ class IPOPCMAESOptimizer:
     filtering on Euclidean distance in parameter space.
 
     Args:
-        runner: Execution strategy (from :class:`Runner`).
         objectives: List of ``(Objective, metric, weight)`` tuples.
         bounds: Parameter bounds as ``{name: (min, max)}``.
         priors: Optional prior distributions. When ``None``, defaults to
@@ -98,11 +94,11 @@ class IPOPCMAESOptimizer:
         n_generations: Number of generations per restart.
         distance_threshold: Minimum Euclidean distance between modes.
         seed: Random seed for reproducibility.
+        chunk_size: Optional chunk size for time-stepping.
 
     Example::
 
         optimizer = IPOPCMAESOptimizer(
-            runner=Runner.optimization(),
             objectives=[(Objective(observations=obs, transform=fn), "nrmse", 1.0)],
             bounds=BOUNDS,
             n_restarts=5,
@@ -114,7 +110,6 @@ class IPOPCMAESOptimizer:
 
     def __init__(
         self,
-        runner: Runner,
         objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]],
         priors: PriorSet | None = None,
@@ -124,12 +119,13 @@ class IPOPCMAESOptimizer:
         distance_threshold: float = 0.1,
         seed: int = 0,
         export_variables: list[str] | None = None,
+        chunk_size: int | None = None,
     ) -> None:
-        self.runner = runner
         self.objectives = objectives
         self.bounds = bounds
         self.priors = priors
         self.export_variables = export_variables
+        self.chunk_size = chunk_size
         self.n_restarts = n_restarts
         self.initial_popsize = initial_popsize
         self.n_generations = n_generations
@@ -151,7 +147,7 @@ class IPOPCMAESOptimizer:
             IPOPResult with distinct modes sorted by loss.
         """
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(self.runner, model, prepared, self.priors, self.export_variables)
+        loss_fn = build_loss_fn(model, prepared, self.priors, self.export_variables, self.chunk_size)
         initial_params = {k: model.parameters[k] for k in self.bounds}
 
         return self._run_loss_fn(loss_fn, initial_params, progress_bar)
@@ -181,7 +177,6 @@ class IPOPCMAESOptimizer:
                     start_params[name] = jax.random.uniform(subkey, shape=shape, minval=low, maxval=high)
 
             optimizer = CMAESOptimizer(
-                runner=self.runner,
                 objectives=self.objectives,
                 bounds=self.bounds,
                 priors=self.priors,
@@ -191,12 +186,16 @@ class IPOPCMAESOptimizer:
 
             logger.info(
                 "Restart %d/%d (CMA-ES): popsize=%d, %d generations",
-                i + 1, self.n_restarts, popsize, self.n_generations,
+                i + 1,
+                self.n_restarts,
+                popsize,
+                self.n_generations,
             )
             t0 = time.time()
 
             result = optimizer._run_loss_fn(
-                loss_fn, start_params,
+                loss_fn,
+                start_params,
                 n_generations=self.n_generations,
                 progress_bar=progress_bar,
             )
@@ -209,7 +208,11 @@ class IPOPCMAESOptimizer:
             actual_gens = result.n_iterations
             logger.info(
                 "  -> loss=%.6e, %d gens, modes=%d, elapsed=%.1fs (%.3f s/gen)",
-                result.loss, actual_gens, len(modes), elapsed, elapsed / max(actual_gens, 1),
+                result.loss,
+                actual_gens,
+                len(modes),
+                elapsed,
+                elapsed / max(actual_gens, 1),
             )
 
         modes.sort(key=lambda r: r.loss)

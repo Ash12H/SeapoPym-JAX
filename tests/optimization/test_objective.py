@@ -43,8 +43,10 @@ class TestObjectiveInit:
 
     def test_transform_mode(self):
         obs = jnp.zeros(3)
+
         def fn(o):
             return o["biomass"].sum(axis=0).ravel()[:3]
+
         obj = Objective(observations=obs, transform=fn)
         assert obj.target is None
         assert obj.transform is fn
@@ -82,10 +84,12 @@ class TestSetupXarray:
         outputs = _model_outputs()
 
         # Observe T=[0,2], Y=[10,30], X=[100,120]
-        obs_data = np.array([
-            [[1.0, 2.0], [3.0, 4.0]],
-            [[5.0, 6.0], [7.0, 8.0]],
-        ])
+        obs_data = np.array(
+            [
+                [[1.0, 2.0], [3.0, 4.0]],
+                [[5.0, 6.0], [7.0, 8.0]],
+            ]
+        )
         obs_xr = xr.DataArray(
             obs_data,
             dims=["T", "Y", "X"],
@@ -102,9 +106,7 @@ class TestSetupXarray:
         # outputs["biomass"] shape (4,3,5)
         # T=[0,2] → idx [0,2], Y=[10,30] → idx [0,2], X=[100,120] → idx [0,2]
         # jnp.ix_([0,2],[0,2],[0,2]) extracts a (2,2,2) subgrid
-        expected = outputs["biomass"][jnp.ix_(
-            jnp.array([0, 2]), jnp.array([0, 2]), jnp.array([0, 2])
-        )]
+        expected = outputs["biomass"][jnp.ix_(jnp.array([0, 2]), jnp.array([0, 2]), jnp.array([0, 2]))]
         np.testing.assert_array_equal(np.asarray(pred), np.asarray(expected))
 
     def test_single_dim_xarray(self):
@@ -138,20 +140,20 @@ class TestSetupDataFrame:
         coords = _model_coords()
         outputs = _model_outputs()
 
-        df = pd.DataFrame({
-            "T": [0, 2],
-            "Y": [10.0, 30.0],
-            "X": [100.0, 120.0],
-            "biomass": [99.0, 88.0],
-        })
+        df = pd.DataFrame(
+            {
+                "T": [0, 2],
+                "Y": [10.0, 30.0],
+                "X": [100.0, 120.0],
+                "biomass": [99.0, 88.0],
+            }
+        )
 
         obj = Objective(observations=df, target="biomass")
         prepared = obj.setup(coords)
 
         assert prepared.obs_array.shape == (2,)
-        np.testing.assert_array_almost_equal(
-            np.asarray(prepared.obs_array), [99.0, 88.0]
-        )
+        np.testing.assert_array_almost_equal(np.asarray(prepared.obs_array), [99.0, 88.0])
 
         pred = prepared.extract_fn(outputs)
         # Point (T=0,Y=0,X=0) → outputs["biomass"][0,0,0] = 0.0
@@ -185,6 +187,7 @@ class TestSetupTransform:
     def test_transform_wraps_callable(self):
         """Transform mode wraps the user callable as extract_fn."""
         obs = jnp.array([1.0, 2.0, 3.0])
+
         def fn(o):
             return o["biomass"][:3, 0, 0]
 
@@ -201,6 +204,7 @@ class TestSetupTransform:
     def test_shape_validation_pass(self):
         """Shape validation passes when transform output matches obs."""
         obs = jnp.zeros((4, 3))
+
         def fn(o):
             return o["biomass"][:, :, 0]  # (4, 3)
 
@@ -212,6 +216,7 @@ class TestSetupTransform:
     def test_shape_validation_mismatch(self):
         """Shape validation fails when transform output doesn't match obs."""
         obs = jnp.zeros((4, 5))  # Wrong shape
+
         def fn(o):
             return o["biomass"][:, :, 0]  # (4, 3)
 

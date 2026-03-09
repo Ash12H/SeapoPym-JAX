@@ -31,7 +31,6 @@ from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
-    from seapopym.engine.runner import Runner
 
 
 class GAOptimizer:
@@ -41,7 +40,6 @@ class GAOptimizer:
     objective setup, loss building, and parameter normalization.
 
     Args:
-        runner: Execution strategy (from :class:`Runner`).
         objectives: List of ``(Objective, metric, weight)`` tuples.
         bounds: Parameter bounds as ``{name: (min, max)}``.
         priors: Optional prior distributions. When ``None``, defaults to
@@ -50,11 +48,11 @@ class GAOptimizer:
         crossover_rate: Crossover rate for SimpleGA (in [0, 1]).
         mutation_std: Mutation standard deviation in normalized [0, 1] space.
         seed: Random seed for reproducibility.
+        chunk_size: Optional chunk size for time-stepping.
 
     Example::
 
         optimizer = GAOptimizer(
-            runner=Runner.optimization(),
             objectives=[(Objective(observations=obs, transform=fn), "nrmse", 1.0)],
             bounds={"x": (0.0, 10.0)},
             popsize=64,
@@ -64,7 +62,6 @@ class GAOptimizer:
 
     def __init__(
         self,
-        runner: Runner,
         objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]],
         priors: PriorSet | None = None,
@@ -73,12 +70,13 @@ class GAOptimizer:
         mutation_std: float = 0.05,
         seed: int = 0,
         export_variables: list[str] | None = None,
+        chunk_size: int | None = None,
     ) -> None:
-        self.runner = runner
         self.objectives = objectives
         self.bounds = bounds
         self.priors = priors
         self.export_variables = export_variables
+        self.chunk_size = chunk_size
         self.popsize = popsize
         self.crossover_rate = crossover_rate
         self.mutation_std = mutation_std
@@ -105,7 +103,7 @@ class GAOptimizer:
             OptimizeResult with optimized parameters and diagnostics.
         """
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(self.runner, model, prepared, self.priors, self.export_variables)
+        loss_fn = build_loss_fn(model, prepared, self.priors, self.export_variables, self.chunk_size)
         initial_params = {k: model.parameters[k] for k in self.bounds}
 
         return self._run_loss_fn(loss_fn, initial_params, n_generations, tol_fun, patience, progress_bar)

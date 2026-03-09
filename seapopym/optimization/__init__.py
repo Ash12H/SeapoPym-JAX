@@ -60,12 +60,6 @@ except (ImportError, KeyError):
 
 def __getattr__(name: str):
     """Provide helpful error message for optional dependencies."""
-    if (
-        name in ("CMAESOptimizer", "GAOptimizer", "IPOPCMAESOptimizer", "IPOPResult")
-        and not _HAS_EVOSAX
-    ):
-        raise ImportError(
-            f"{name} requires the evosax package. "
-            "Install it with: pip install seapopym[optimization]"
-        )
+    if name in ("CMAESOptimizer", "GAOptimizer", "IPOPCMAESOptimizer", "IPOPResult") and not _HAS_EVOSAX:
+        raise ImportError(f"{name} requires the evosax package. Install it with: pip install seapopym[optimization]")
     raise AttributeError(f"module 'seapopym.optimization' has no attribute '{name}'")
