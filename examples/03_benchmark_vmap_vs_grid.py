@@ -23,6 +23,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
+from seapopym.engine import run, simulate
 from seapopym.engine.step import build_step_fn
 from seapopym.models import LMTL_NO_TRANSPORT
 
@@ -116,7 +117,7 @@ config_1x1 = Config(
             np.zeros((1, ny_1, nx_1)), dims=["F", "Y", "X"], coords={"Y": lat_1, "X": lon_1}
         ),
         "production": xr.DataArray(
-            np.zeros((1, ny_1, nx_1, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat_1, "X": lon_1}
+            np.zeros((1, n_cohorts, ny_1, nx_1)), dims=["F", "C", "Y", "X"], coords={"Y": lat_1, "X": lon_1}
         ),
     },
     execution={
@@ -129,36 +130,19 @@ config_1x1 = Config(
 
 print("Compiling 1x1 model for vmap benchmark...")
 _model_1x1 = compile_model(blueprint, config_1x1)
-_step_fn_1x1 = build_step_fn(_model_1x1)
-_n_timesteps_1x1 = _model_1x1.n_timesteps
-_initial_state_1x1 = _model_1x1.state
-_forcings_1x1 = _model_1x1.forcings.get_all_dynamic()
+_step_fn_1x1 = build_step_fn(_model_1x1, export_variables=["biomass"])
 
 
-def run_single_sim(params: dict) -> jnp.ndarray:
+def _eval_one(free_params: dict) -> jnp.ndarray:
     """Run a single 1x1 simulation, return final mean biomass."""
-    full_params = {**params, **{k: jnp.array(v) for k, v in FIXED_PARAMS.items()}}
-    full_params["cohort_ages"] = _model_1x1.parameters["cohort_ages"]
-    full_params["day_layer"] = _model_1x1.parameters["day_layer"]
-    full_params["night_layer"] = _model_1x1.parameters["night_layer"]
-    # latitude is now a forcing, not a parameter
-
-    def scan_body(carry, t):
-        state, p = carry
-        forcings_t = {
-            name: (arr[t] if arr.ndim > 0 and arr.shape[0] == _n_timesteps_1x1 else arr)
-            for name, arr in _forcings_1x1.items()
-        }
-        (new_state, p), outputs = _step_fn_1x1((state, p), forcings_t)
-        return (new_state, p), jnp.mean(outputs["biomass"])
-
-    _, biomass = jax.lax.scan(scan_body, (_initial_state_1x1, full_params), jnp.arange(_n_timesteps_1x1))
-    return biomass[-1]
+    merged = {**_model_1x1.parameters, **free_params}
+    state, outputs = run(_step_fn_1x1, _model_1x1, dict(_model_1x1.state), merged)
+    return jnp.mean(outputs["biomass"][-1])
 
 
 _in_axes: dict = {k: None for k in OPT_PARAMS}
 _in_axes["efficiency"] = 0
-_run_batch = jax.jit(jax.vmap(run_single_sim, in_axes=(_in_axes,)))
+_run_batch = jax.jit(jax.vmap(_eval_one, in_axes=(_in_axes,)))
 
 
 def benchmark_vmap(n_sims: int, device_name: str, n_repeats: int = 1) -> tuple[float, float]:
@@ -220,7 +204,7 @@ def build_grid_model(ny: int, nx: int):
         initial_state={
             "biomass": xr.DataArray(np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}),
             "production": xr.DataArray(
-                np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
+                np.zeros((1, n_cohorts, ny, nx)), dims=["F", "C", "Y", "X"], coords={"Y": lat, "X": lon}
             ),
         },
         execution={
@@ -231,51 +215,24 @@ def build_grid_model(ny: int, nx: int):
         },
     )
 
-    model = compile_model(blueprint, config)
-    step_fn = build_step_fn(model)
-    return model, step_fn
-
-
-def run_grid_jit(step_fn, model):
-    """Build a JIT-compiled scan simulation for grid model."""
-    n_timesteps = model.n_timesteps
-    initial_state = model.state
-    forcings = model.forcings.get_all_dynamic()
-    parameters = model.parameters
-
-    @jax.jit
-    def _run():
-        def scan_body(carry, t):
-            state, params = carry
-            forcings_t = {
-                name: (arr[t] if arr.ndim > 0 and arr.shape[0] == n_timesteps else arr)
-                for name, arr in forcings.items()
-            }
-            (new_state, params), outputs = step_fn((state, params), forcings_t)
-            return (new_state, params), jnp.mean(outputs["biomass"])
-
-        _, biomass = jax.lax.scan(scan_body, (initial_state, parameters), jnp.arange(n_timesteps))
-        return biomass[-1]
-
-    return _run
+    return compile_model(blueprint, config)
 
 
 def benchmark_grid(ny: int, nx: int, device_name: str, n_repeats: int = 1) -> tuple[float, float]:
     """Benchmark a single simulation on (ny, nx) grid. Returns (mean, std)."""
     dev = jax.devices(device_name)[0]
     with jax.default_device(dev):
-        model, step_fn = build_grid_model(ny, nx)
-        run_fn = run_grid_jit(step_fn, model)
+        model = build_grid_model(ny, nx)
 
-        result = run_fn()
-        jax.block_until_ready(result)
+        # Warmup
+        simulate(model, export_variables=["biomass"])
 
         times = []
         for _ in range(n_repeats):
             t0 = time.time()
-            result = run_fn()
-            jax.block_until_ready(result)
-            times.append(time.time() - t0)
+            simulate(model, export_variables=["biomass"])
+            elapsed = time.time() - t0
+            times.append(elapsed)
 
         return float(np.mean(times)), float(np.std(times))
 

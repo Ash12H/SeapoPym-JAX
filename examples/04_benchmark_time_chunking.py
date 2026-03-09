@@ -2,7 +2,7 @@
 # # Benchmark LMTL: GPU execution time vs temporal chunk size
 #
 # Fixes a spatial grid and total simulation length, then varies the number
-# of timesteps processed per `jax.lax.scan` call (chunk size) using Runner.
+# of timesteps processed per `jax.lax.scan` call (chunk size).
 #
 # Output: `examples/images/04_benchmark_time_chunking.png`
 
@@ -19,7 +19,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine.runner import Runner
+from seapopym.engine import simulate
 from seapopym.models import LMTL_NO_TRANSPORT
 
 # %% [markdown]
@@ -38,14 +38,14 @@ TRUE_PARAMS = {
 LATITUDE = 30.0
 
 # Grid size
-GRID_SIDE = 10
+GRID_SIDE = 100
 
 # Total simulation: use a power of 2 so all chunk sizes divide evenly
-SIM_DAYS = 32
+SIM_DAYS = 512
 DT = "1d"
 
 # Chunk sizes to benchmark (must divide SIM_DAYS)
-CHUNK_SIZES = [1, 2, 4, 8, 16, 32]
+CHUNK_SIZES = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 
 N_REPEATS = 1
 
@@ -106,7 +106,7 @@ config = Config(
     initial_state={
         "biomass": xr.DataArray(np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}),
         "production": xr.DataArray(
-            np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
+            np.zeros((1, n_cohorts, ny, nx)), dims=["F", "C", "Y", "X"], coords={"Y": lat, "X": lon}
         ),
     },
     execution={
@@ -166,6 +166,18 @@ total_forcings = forcings_per_step * n_timesteps
 total_bytes += total_forcings
 print(f"\n  {'TOTAL':>22s}  {'':>25s}  {_fmt_size(total_bytes)}")
 print(f"  {'Forcings/chunk(C)':>22s}  {'':>25s}  C × {_fmt_size(forcings_per_step)}")
+
+# Compute per-chunk memory: state (carry) + forcings slice + scan outputs
+state_bytes = sum(arr.nbytes for arr in model.state.values())
+params_bytes = sum(arr.nbytes for arr in model.parameters.values())
+outputs_per_step = state_bytes  # simulate exports all state variables by default
+
+print("\n  Memory per chunk (carry + forcings + scan outputs):")
+chunk_memory: dict[int, int] = {}
+for cs in CHUNK_SIZES:
+    mem = state_bytes + params_bytes + cs * forcings_per_step + cs * outputs_per_step
+    chunk_memory[cs] = mem
+    print(f"    chunk_size={cs:<6d}  {_fmt_size(mem)}")
 print()
 
 # %% [markdown]
@@ -173,7 +185,7 @@ print()
 
 # %%
 def benchmark_chunk(chunk_size: int, device_name: str, n_repeats: int = 1) -> tuple[float, float]:
-    """Benchmark the full simulation via Runner on a given device.
+    """Benchmark the full simulation on a given device.
 
     Returns (mean_time, std_time) in seconds.
     """
@@ -181,9 +193,8 @@ def benchmark_chunk(chunk_size: int, device_name: str, n_repeats: int = 1) -> tu
     times = []
     for i in range(n_repeats + 1):
         with jax.default_device(dev):
-            runner = Runner.simulation(chunk_size=chunk_size)
             t0 = time.time()
-            runner.run(model)
+            simulate(model, chunk_size=chunk_size)
             elapsed = time.time() - t0
 
         if i > 0:  # skip first run (warmup / JIT)
@@ -241,7 +252,7 @@ print(f"\n{'='*70}")
 print(f"SUMMARY  (mean ± std over {N_REPEATS} runs)")
 print(f"{'='*70}")
 
-header = f"{'Chunk':>6} {'Chunks':>6}"
+header = f"{'Chunk':>6} {'Chunks':>6} {'Memory':>10}"
 for dev_name in devices:
     header += f"  {dev_name.upper() + ' (s)':>18}"
 print(header)
@@ -251,7 +262,7 @@ for cs in CHUNK_SIZES:
     n_chunks = n_timesteps // cs
     remainder = n_timesteps % cs
     total_chunks = n_chunks + (1 if remainder else 0)
-    row = f"{cs:>6} {total_chunks:>6}"
+    row = f"{cs:>6} {total_chunks:>6} {_fmt_size(chunk_memory.get(cs, 0)):>10}"
     for dev_name in devices:
         if cs in results[dev_name]:
             m, s = results[dev_name][cs]
@@ -284,8 +295,21 @@ ax.set_ylabel("Execution time (s)")
 ax.set_title(f"LMTL — Chunk size vs execution time ({ny}x{nx} grid, {SIM_DAYS} days, n={N_REPEATS})")
 ax.set_xticks(CHUNK_SIZES)
 ax.set_xticklabels([str(cs) for cs in CHUNK_SIZES])
-ax.legend()
 ax.grid(True, alpha=0.3, which="both")
+
+# Secondary axis: chunk memory
+ax2 = ax.twinx()
+mem_cs = sorted(chunk_memory.keys())
+mem_mb = [chunk_memory[cs] / 1024**2 for cs in mem_cs]
+ax2.bar(mem_cs, mem_mb, width=[cs * 0.4 for cs in mem_cs], alpha=0.15, color="gray", label="Chunk memory")
+ax2.set_ylabel("Chunk memory (MB)")
+ax2.set_yscale("log")
+
+# Combined legend
+lines1, labels1 = ax.get_legend_handles_labels()
+lines2, labels2 = ax2.get_legend_handles_labels()
+ax.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
+
 fig.tight_layout()
 
 plot_path = IMAGE_DIR / "04_benchmark_time_chunking.png"

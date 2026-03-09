@@ -21,7 +21,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine import Runner
+from seapopym.engine import simulate
 from seapopym.models import LMTL_NO_TRANSPORT
 
 jax.config.update("jax_enable_x64", True)
@@ -98,7 +98,6 @@ param_vals = {
 # ## Run for each precision
 
 # %%
-runner = Runner.simulation(chunk_size=800)
 results = {}
 
 for name, dtype in DTYPES.items():
@@ -141,7 +140,7 @@ for name, dtype in DTYPES.items():
                 np.zeros((1, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
             ),
             "production": xr.DataArray(
-                np.zeros((1, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"],
+                np.zeros((1, n_cohorts, ny, nx)), dims=["F", "C", "Y", "X"],
                 coords={"Y": lat, "X": lon},
             ),
         },
@@ -156,7 +155,7 @@ for name, dtype in DTYPES.items():
     try:
         model = compile_model(blueprint, config)
         t0 = time.time()
-        state, outputs = runner.run(model, export_variables=["biomass"])
+        state, outputs = simulate(model, chunk_size=800, export_variables=["biomass"])
         elapsed = time.time() - t0
 
         biomass = outputs["biomass"]  # xarray

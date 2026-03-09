@@ -38,7 +38,7 @@ import xarray as xr
 import seapopym.functions.lmtl  # noqa: F401
 from seapopym.blueprint import Config, ExecutionParams
 from seapopym.compiler import compile_model
-from seapopym.engine import Runner
+from seapopym.engine import build_step_fn, run
 from seapopym.models import LMTL_NO_TRANSPORT
 from seapopym.optimization import IPOPCMAESOptimizer, Objective
 
@@ -158,7 +158,7 @@ config = Config(
             np.zeros((n_groups, ny, nx)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
         ),
         "production": xr.DataArray(
-            np.zeros((n_groups, ny, nx, n_cohorts)), dims=["F", "Y", "X", "C"], coords={"Y": lat, "X": lon}
+            np.zeros((n_groups, n_cohorts, ny, nx)), dims=["F", "C", "Y", "X"], coords={"Y": lat, "X": lon}
         ),
     },
     execution=ExecutionParams(
@@ -171,7 +171,7 @@ config = Config(
 
 print("Compiling model...")
 model = compile_model(blueprint, config)
-runner = Runner.optimization()
+step_fn = build_step_fn(model, export_variables=["biomass"])
 n_timesteps = model.n_timesteps
 spinup_steps = int(SPINUP_YEARS / total_years * n_timesteps)
 
@@ -192,7 +192,7 @@ print("=" * 60)
 print("\nGenerating observations with TRUE parameters...")
 t0 = time.time()
 true_params_jax = {k: jnp.array([TRUE_PARAMS[k]] * n_groups) for k in ALL_OPT_PARAMS}
-outputs_true = runner(model, true_params_jax, export_variables=["biomass"])
+_, outputs_true = run(step_fn, model, dict(model.state), {**model.parameters, **true_params_jax})
 
 biomass_true = outputs_true["biomass"]  # (T, F, Y, X)
 bio_g0_full = jnp.mean(biomass_true[:, 0], axis=tuple(range(1, biomass_true.ndim - 1)))
@@ -256,7 +256,6 @@ for noise_level in NOISE_LEVELS:
 
     objective = Objective(observations=jnp.array(obs_values), transform=extract_predictions)
     optimizer = IPOPCMAESOptimizer(
-        runner=runner,
         objectives=[(objective, "nrmse", 1.0)],
         bounds=BOUNDS,
         n_restarts=N_RESTARTS,
@@ -264,6 +263,7 @@ for noise_level in NOISE_LEVELS:
         n_generations=N_GENERATIONS,
         distance_threshold=DISTANCE_THRESHOLD,
         seed=SEED,
+        export_variables=["biomass"],
     )
 
     print(f"Running IPOP-CMA-ES ({label})...")
@@ -345,7 +345,7 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
         c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
     )
     for i, mode in enumerate(result.modes):
-        outputs_mode = runner(model, mode.params, export_variables=["biomass"])
+        _, outputs_mode = run(step_fn, model, dict(model.state), {**model.parameters, **mode.params})
         biomass_mode = outputs_mode["biomass"]
         bg0_m = jnp.mean(biomass_mode[:, 0], axis=tuple(range(1, biomass_mode.ndim - 1)))
         bg1_m = jnp.mean(biomass_mode[:, 1], axis=tuple(range(1, biomass_mode.ndim - 1)))
@@ -361,7 +361,7 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
 
     # --- Col 1: OBS vs PRED scatter ---
     ax = axes[row_idx, 1]
-    outputs_best = runner(model, best.params, export_variables=["biomass"])
+    _, outputs_best = run(step_fn, model, dict(model.state), {**model.parameters, **best.params})
     biomass_best = outputs_best["biomass"]
     bg0_best = jnp.mean(biomass_best[:, 0], axis=tuple(range(1, biomass_best.ndim - 1)))
     bg1_best = jnp.mean(biomass_best[:, 1], axis=tuple(range(1, biomass_best.ndim - 1)))

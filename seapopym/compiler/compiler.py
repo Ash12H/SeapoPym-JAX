@@ -120,20 +120,28 @@ def _check_nan(name: str, arr: np.ndarray, category: str) -> None:
         raise ValueError(f"{category} '{name}' contains NaN values. Handle NaN upstream.")
 
 
-def _prepare_state(config: Config) -> dict[str, Array]:
-    """Prepare initial state arrays (flat dict, DataArray → JAX)."""
+def _prepare_state(config: Config, dim_mapping: dict[str, str] | None) -> dict[str, Array]:
+    """Prepare initial state arrays (transpose to canonical order, DataArray → JAX)."""
+    from .transpose import apply_dimension_mapping, transpose_canonical
+
     result = {}
     for name, da in config.initial_state.items():
+        da = apply_dimension_mapping(da, dim_mapping)
+        da = transpose_canonical(da)
         values = da.values
         _check_nan(name, values, "Initial state")
         result[name] = jnp.asarray(values)
     return result
 
 
-def _prepare_parameters(config: Config) -> dict[str, Array]:
-    """Prepare parameter arrays (DataArray → JAX)."""
+def _prepare_parameters(config: Config, dim_mapping: dict[str, str] | None) -> dict[str, Array]:
+    """Prepare parameter arrays (transpose to canonical order, DataArray → JAX)."""
+    from .transpose import apply_dimension_mapping, transpose_canonical
+
     result = {}
     for name, da in config.parameters.items():
+        da = apply_dimension_mapping(da, dim_mapping)
+        da = transpose_canonical(da)
         values = da.values
         _check_nan(name, values, "Parameter")
         result[name] = jnp.asarray(values)
@@ -191,10 +199,10 @@ def compile_model(
     forcings, coords = _prepare_forcings(config, dim_mapping, shapes, time_grid, blueprint_dims)
 
     # Step 6: Prepare initial state
-    state = _prepare_state(config)
+    state = _prepare_state(config, dim_mapping)
 
     # Step 7: Prepare parameters
-    parameters = _prepare_parameters(config)
+    parameters = _prepare_parameters(config, dim_mapping)
 
     # Step 8: Build CompiledModel
     return CompiledModel(

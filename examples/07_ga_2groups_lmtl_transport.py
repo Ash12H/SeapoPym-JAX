@@ -30,7 +30,7 @@ import seapopym.functions.lmtl  # noqa: F401
 import seapopym.functions.transport  # noqa: F401
 from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
-from seapopym.engine import Runner
+from seapopym.engine import build_step_fn, run
 from seapopym.models import LMTL
 from seapopym.optimization import GAOptimizer, Objective
 
@@ -231,8 +231,8 @@ config = Config(
             np.zeros((N_GROUPS, NY, NX)), dims=["F", "Y", "X"], coords={"Y": lat, "X": lon}
         ),
         "production": xr.DataArray(
-            np.zeros((N_GROUPS, NY, NX, n_cohorts)),
-            dims=["F", "Y", "X", "C"],
+            np.zeros((N_GROUPS, n_cohorts, NY, NX)),
+            dims=["F", "C", "Y", "X"],
             coords={"Y": lat, "X": lon},
         ),
     },
@@ -246,7 +246,7 @@ config = Config(
 
 print("Compiling model...")
 model = compile_model(blueprint, config)
-runner = Runner.optimization()
+step_fn = build_step_fn(model, export_variables=["biomass"])
 n_timesteps = model.n_timesteps
 spinup_steps = int(SPINUP_YEARS / total_years * n_timesteps)
 
@@ -268,7 +268,7 @@ print("=" * 60)
 print("\nGenerating observations with TRUE parameters...")
 t0 = time.time()
 true_params_jax = {k: jnp.array([TRUE_PARAMS[k]] * N_GROUPS) for k in ALL_OPT_PARAMS}
-outputs_true = runner(model, true_params_jax, export_variables=["biomass"])
+_, outputs_true = run(step_fn, model, dict(model.state), {**model.parameters, **true_params_jax})
 
 biomass_true = outputs_true["biomass"]  # (T, F, Y, X)
 bio_g0_full = biomass_true[:, 0, OBS_Y, OBS_X]
@@ -366,11 +366,11 @@ for noise_level in NOISE_LEVELS:
 
     objective = Objective(observations=jnp.array(obs_values), transform=extract_predictions)
     optimizer = GAOptimizer(
-        runner=runner,
         objectives=[(objective, "nrmse", 1.0)],
         bounds=BOUNDS,
         popsize=POPSIZE,
         seed=SEED,
+        export_variables=["biomass"],
     )
 
     print(f"Running GA ({label})...")
@@ -432,7 +432,7 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
         obs_local_idx[~is_day] * dt_sec / 86400.0, obs_values[~is_day],
         c="navy", s=25, zorder=5, label="Obs (night)", edgecolors="k", linewidths=0.5,
     )
-    outputs_best = runner(model, result.params, export_variables=["biomass"])
+    _, outputs_best = run(step_fn, model, dict(model.state), {**model.parameters, **result.params})
     biomass_best = outputs_best["biomass"]
     bg0_best = biomass_best[:, 0, OBS_Y, OBS_X]
     bg1_best = biomass_best[:, 1, OBS_Y, OBS_X]
