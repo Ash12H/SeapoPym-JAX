@@ -11,6 +11,7 @@ import xarray as xr
 from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
 from seapopym.engine import Runner
+from seapopym.engine.runner import RunnerConfig
 
 
 class TestE2EBasicSimulation:
@@ -160,13 +161,6 @@ class TestE2EBasicSimulation:
 class TestE2EMaskBehavior:
     """Tests for mask handling in E2E workflow."""
 
-    @pytest.mark.xfail(
-        reason="get_chunk() no longer includes statics (mask). The Runner and step_fn "
-        "must be updated to use get_statics() for static forcings (workflow Runner). "
-        "NOTE: all E2E tests with mask are silently affected — step.py falls back to "
-        "mask=1.0 (no masking) when mask is absent from forcings_t. This is the only "
-        "test that catches it because it explicitly asserts masked regions stay at zero."
-    )
     def test_mask_zeros_state(self, tmp_path):
         """Test that masked regions stay at zero."""
         blueprint = Blueprint.from_dict(
@@ -330,3 +324,77 @@ class TestE2EMultiProcess:
         # Net growth rate is positive (0.0002 - 0.0001 = 0.0001)
         # So biomass should increase
         assert np.all(np.asarray(final_state["biomass"]) > 100.0)
+
+
+class TestE2EChunkedVmap:
+    """Tests for chunked + vmap combination."""
+
+    def test_chunked_vmap_matches_full_vmap(self):
+        """Chunked+vmap produces the same results as full vmap."""
+        blueprint = Blueprint.from_dict(
+            {
+                "id": "toy-growth",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"biomass": {"units": "g", "dims": ["Y", "X"]}},
+                    "parameters": {"growth_rate": {"units": "1/d"}},
+                    "forcings": {
+                        "temperature": {"units": "degC", "dims": ["T", "Y", "X"]},
+                        "mask": {"dims": ["Y", "X"]},
+                    },
+                },
+                "process": [
+                    {
+                        "func": "biol:chunked_growth",
+                        "inputs": {
+                            "biomass": "state.biomass",
+                            "rate": "parameters.growth_rate",
+                            "temp": "forcings.temperature",
+                        },
+                        "outputs": {"tendency": "derived.growth_flux"},
+                    }
+                ],
+                "tendencies": {"biomass": [{"source": "derived.growth_flux"}]},
+            }
+        )
+
+        @functional(name="biol:chunked_growth")
+        def chunked_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        n_days, ny, nx = 10, 3, 3
+        config = Config(
+            parameters={"growth_rate": xr.DataArray(0.0001)},
+            forcings={
+                "temperature": xr.DataArray(
+                    np.ones((n_days, ny, nx)) * 20.0, dims=["T", "Y", "X"]
+                ),
+                "mask": xr.DataArray(np.ones((ny, nx)), dims=["Y", "X"]),
+            },
+            initial_state={
+                "biomass": xr.DataArray(np.ones((ny, nx)) * 100.0, dims=["Y", "X"]),
+            },
+            execution={
+                "dt": "1d",
+                "time_start": "2000-01-01",
+                "time_end": "2000-01-11",
+            },
+        )
+        model = compile_model(blueprint, config)
+
+        population = {"growth_rate": jnp.array([0.00005, 0.0001, 0.00015])}
+
+        # Full vmap (no chunking)
+        runner_full = Runner(RunnerConfig(vmap_params=True, output_mode="raw"))
+        outputs_full = runner_full(model, population, export_variables=["biomass"])
+
+        # Chunked+vmap
+        runner_chunked = Runner(RunnerConfig(vmap_params=True, chunk_size=5, output_mode="raw"))
+        outputs_chunked = runner_chunked(model, population, export_variables=["biomass"])
+
+        # Results must match
+        np.testing.assert_allclose(
+            np.asarray(outputs_full["biomass"]),
+            np.asarray(outputs_chunked["biomass"]),
+            rtol=1e-5,
+        )

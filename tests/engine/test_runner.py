@@ -20,7 +20,6 @@ class TestRunnerConfig:
         assert runner.config.chunk_size == 100
         assert runner.config.output_mode == "memory"
         assert runner.config.vmap_params is False
-        assert runner.config.loop_mode == "scan"
 
     def test_optimization_preset(self):
         """Verify config from Runner.optimization()."""
@@ -35,20 +34,18 @@ class TestRunnerConfig:
         assert runner.config.vmap_params is True
         assert runner.config.output_mode == "raw"
 
-    def test_invalid_disk_fori_loop(self):
-        """disk output requires scan loop mode."""
-        with pytest.raises(EngineError):
-            RunnerConfig(output_mode="disk", loop_mode="fori_loop")
-
-    def test_invalid_vmap_with_disk(self):
+    def test_invalid_vmap_with_non_raw_output(self):
         """vmap requires raw output mode."""
         with pytest.raises(EngineError):
             RunnerConfig(vmap_params=True, output_mode="disk")
-
-    def test_invalid_vmap_with_chunking(self):
-        """vmap is incompatible with chunking."""
         with pytest.raises(EngineError):
-            RunnerConfig(vmap_params=True, chunk_size=10)
+            RunnerConfig(vmap_params=True, output_mode="memory")
+
+    def test_vmap_with_chunking_allowed(self):
+        """vmap + chunking is now supported (vmap inside each chunk's scan)."""
+        config = RunnerConfig(vmap_params=True, chunk_size=10, output_mode="raw")
+        assert config.vmap_params is True
+        assert config.chunk_size == 10
 
 
 class TestRunnerSimulation:

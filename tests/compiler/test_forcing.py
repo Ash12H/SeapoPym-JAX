@@ -35,20 +35,6 @@ class TestForcingStore:
         assert chunk["temperature"].shape == (3, 5, 5)
         np.testing.assert_allclose(np.asarray(chunk["temperature"]), data[2:5], rtol=1e-6)
 
-    @pytest.mark.xfail(reason="get_chunk() no longer includes statics — Runner must use get_statics() separately (workflow Runner)")
-    def test_get_chunk_includes_statics(self):
-        """get_chunk() returns both dynamic and static forcings (broadcast)."""
-        store = ForcingStore(
-            _static={"mask": xr.DataArray(np.ones((5, 5)), dims=["Y", "X"])},
-            _dynamic={"temp": xr.DataArray(np.random.rand(10, 5, 5), dims=["T", "Y", "X"])},
-            n_timesteps=10,
-        )
-
-        chunk = store.get_chunk(0, 3)
-        assert "temp" in chunk
-        assert "mask" in chunk
-        assert chunk["mask"].shape == (3, 5, 5)
-
     def test_get_all(self):
         """get_all materializes full time range for dynamics."""
         data = np.random.rand(10, 5, 5)

@@ -53,6 +53,7 @@ def build_step_fn(
     compute_nodes: list[ComputeNode] = model.compute_nodes
     tendency_map = model.tendency_map
     dt = model.dt
+    statics = model.forcings.get_statics()
 
     # Pre-compute vmapped functions for nodes with broadcast dimensions
     vmapped_funcs: dict[str, tuple[Callable[..., Any], list[str] | None, tuple[int, ...] | None]] = {}
@@ -79,20 +80,21 @@ def build_step_fn(
 
         Args:
             state: Current state variables.
-            forcings_t: Forcings at current timestep (includes mask).
+            forcings_t: Dynamic forcings at current timestep.
             parameters: Model parameters.
 
         Returns:
             Tuple of (new_state, outputs).
         """
-        mask = forcings_t.get("mask", 1.0)
+        all_forcings = {**statics, **forcings_t}
+        mask = all_forcings.get("mask", 1.0)
 
         # Store all derived values
         intermediates: dict[str, Array] = {}
 
         # Execute each ComputeNode in process order
         for compute_node in compute_nodes:
-            func_inputs = _resolve_inputs(compute_node.input_mapping, state, forcings_t, parameters, intermediates)
+            func_inputs = _resolve_inputs(compute_node.input_mapping, state, all_forcings, parameters, intermediates)
 
             func, arg_order, transpose_axes = vmapped_funcs[compute_node.name]
             if arg_order is not None:

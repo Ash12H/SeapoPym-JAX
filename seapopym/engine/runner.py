@@ -6,61 +6,45 @@ Use factory methods to create instances for different use-cases::
     runner = Runner.simulation(chunk_size=365)
     final_state, outputs = runner.run(model, output_path="/results/sim_001/")
 
-    # Optimization (single-shot, no chunking, callable interface)
+    # Optimization (single-shot, callable interface)
     runner = Runner.optimization()
     outputs = runner(model, free_params)
 
-Design Notes — Why optimization cannot use time chunking
-========================================================
+    # Optimization with vmap + chunking (reduced memory)
+    runner = Runner.optimization(vmap=True)
+    outputs = runner(model, population_params)
 
-Simulation mode splits the time axis into chunks processed by successive
-``lax.scan`` calls inside a **plain Python loop**.  This works because
-nothing needs to trace through the loop boundary.
+Execution paths
+===============
 
-Optimization mode must keep the **entire time axis inside a single
-``lax.scan``** call.  Two independent JAX transforms require this:
+Two internal paths handle all use-cases via functional composition:
 
-1. **``jax.value_and_grad``** (gradient-based optimizers like Adam) —
-   Automatic differentiation traces the computation graph through
-   ``lax.scan``.  A Python ``for`` loop is opaque to the JAX tracer, so
-   splitting the scan into chunks would break gradient computation.
+``_run_chunked``
+    Python loop over temporal chunks, each processed by ``lax.scan``.
+    Compatible with simulation and vmap (vmap wraps each chunk's scan,
+    forcings shared in closure). NOT compatible with grad (Python loop
+    is opaque to the JAX tracer).
 
-2. **``jax.vmap``** (evolutionary optimizers like CMA-ES / GA) —
-   Population evaluation vectorises ``eval_one`` over all individuals
-   with ``jax.vmap``.  Inside ``eval_one``, the model runs as a single
-   ``lax.scan``.  ``vmap`` can vectorise JAX primitives (including
-   ``lax.scan``) but **cannot** vectorise a Python ``for`` loop.  This
-   ``vmap`` is what enables parallel evaluation of the whole population
-   on GPU/TPU in one kernel launch — removing it would serialise
-   individuals and drastically hurt performance.
+``_run_full``
+    Single ``lax.scan`` over all timesteps. All dynamic forcings loaded
+    once via ``get_all_dynamic()``. Compatible with all transforms
+    (simulation, vmap, grad).
 
-In summary::
+JAX transforms (vmap, grad, checkpoint) are composed functionally::
 
-    Simulation:   Python for-loop  →  lax.scan per chunk   ✅ works
-    Grad optim:   jax.value_and_grad  →  lax.scan           ✅ works
-                  jax.value_and_grad  →  Python for-loop    ❌ breaks grad
-    Evol optim:   jax.vmap  →  lax.scan                     ✅ works
-                  jax.vmap  →  Python for-loop              ❌ breaks vmap
+    step_fn = build_step_fn(model)       # statics captured in closure
+    # checkpoint: step_fn = jax.checkpoint(step_fn)
+    # vmap:       jax.vmap(eval_one)(population_params)
+    # grad:       jax.value_and_grad(eval_one)(params)
 
-Memory considerations for long time series
--------------------------------------------
+Compatibility matrix::
 
-Two things consume GPU memory during optimization:
-
-* **Intermediate states (carry)** — stored at every timestep by
-  ``lax.scan`` for the backward pass.  ``jax.checkpoint`` can trade
-  compute for memory by recomputing them instead of storing them.
-  However, this only helps gradient-based optimizers (which have a
-  backward pass); evolutionary optimizers do not benefit.
-
-* **Forcing data** — loaded in full via ``model.forcings.get_all_dynamic()``
-  before ``lax.scan`` starts.  ``jax.checkpoint`` does **not** reduce
-  this cost.  Only chunking (``get_chunk(start, end)``) avoids loading
-  all forcings at once, but chunking is incompatible with ``vmap`` and
-  ``grad`` as explained above.
-
-For very long time series, the forcing data is likely the dominant memory
-bottleneck, not the intermediate states.
+                        _run_chunked        _run_full
+                        (Python loop)       (single scan)
+    ──────────────────────────────────────────────────────
+    simulation            ✅                  ✅
+    vmap                  ✅                  ✅
+    grad                  ❌                  ✅
 """
 
 from __future__ import annotations
@@ -74,6 +58,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import jax
 import jax.lax as lax
+import jax.numpy as jnp
 
 from seapopym.types import Outputs, Params, State
 
@@ -93,35 +78,22 @@ class RunnerConfig:
     """Configuration for Runner execution strategy.
 
     Attributes:
-        param_mode: How parameters flow through the scan.
-            ``"carry"`` — parameters are part of the carry (default).
-            ``"closure"`` — parameters captured in step_fn closure.
-        loop_mode: JAX loop primitive to use.
-            ``"scan"`` — ``lax.scan`` (default, supports chunking).
-            ``"fori_loop"`` — ``lax.fori_loop`` (lower memory).
         vmap_params: Whether to vmap over a population of parameter sets.
-        chunk_size: Number of timesteps per chunk (simulation only).
+        chunk_size: Number of timesteps per chunk. None = no chunking.
+            Chunking is compatible with vmap (vmap inside each chunk's scan).
         output_mode: Where to write outputs.
             ``"memory"`` — return xarray.Dataset (default for simulation).
             ``"disk"`` — write to Zarr.
             ``"raw"`` — return raw JAX arrays (default for optimization).
     """
 
-    param_mode: Literal["closure", "carry"] = "carry"
-    loop_mode: Literal["scan", "fori_loop"] = "scan"
     vmap_params: bool = False
     chunk_size: int | None = None
     output_mode: Literal["disk", "memory", "raw"] = "raw"
 
     def __post_init__(self) -> None:
-        if self.output_mode == "disk" and self.loop_mode != "scan":
-            msg = "output_mode='disk' requires loop_mode='scan' (chunking needs scan)"
-            raise EngineError(msg)
         if self.vmap_params and self.output_mode != "raw":
             msg = "vmap_params=True requires output_mode='raw'"
-            raise EngineError(msg)
-        if self.vmap_params and self.chunk_size is not None:
-            msg = "vmap_params=True is incompatible with chunking (chunk_size must be None)"
             raise EngineError(msg)
 
 
@@ -182,8 +154,6 @@ class Runner:
         """
         return cls(
             RunnerConfig(
-                param_mode="carry",
-                loop_mode="scan",
                 vmap_params=False,
                 chunk_size=chunk_size,
                 output_mode=output,
@@ -191,18 +161,19 @@ class Runner:
         )
 
     @classmethod
-    def optimization(cls, vmap: bool = False) -> Runner:
+    def optimization(cls, vmap: bool = False, chunk_size: int | None = None) -> Runner:
         """Create a runner configured for optimization/calibration.
 
         Args:
             vmap: Whether to vmap over a population of parameter sets.
+            chunk_size: Number of timesteps per chunk. None = no chunking
+                (all timesteps in a single scan). Chunking reduces memory
+                for long time series and is compatible with vmap.
         """
         return cls(
             RunnerConfig(
-                param_mode="carry",
-                loop_mode="scan",
                 vmap_params=vmap,
-                chunk_size=None,
+                chunk_size=chunk_size,
                 output_mode="raw",
             )
         )
@@ -226,7 +197,24 @@ class Runner:
         Returns:
             Tuple of (final_state, outputs).
         """
-        return self._run_simulation(model, output_path, export_variables)
+        state = dict(model.state)
+        params = dict(model.parameters)
+        output_vars = export_variables if export_variables is not None else list(state.keys())
+        step_fn = build_step_fn(model, export_variables=output_vars)
+        writer = self._build_writer(model, output_path, output_vars)
+
+        try:
+            if self.config.chunk_size is not None:
+                state, _ = self._run_chunked(model, step_fn, state, params, writer)
+            else:
+                state, outputs = self._run_full(model, step_fn, state, params)
+                writer.append(outputs)
+            final_results = writer.finalize()
+        finally:
+            writer.close()
+
+        logger.info("Simulation complete")
+        return state, final_results
 
     # --- Optimization interface ---
 
@@ -248,9 +236,20 @@ class Runner:
         Returns:
             Model outputs (dict of arrays).
         """
+        step_fn = build_step_fn(model, export_variables=export_variables)
+
+        def eval_one(single_free: Params) -> Outputs:
+            merged = {**model.parameters, **single_free}
+            state = dict(model.state)
+            if self.config.chunk_size is not None:
+                _, outputs = self._run_chunked(model, step_fn, state, merged, writer=None)
+            else:
+                _, outputs = self._run_full(model, step_fn, state, merged)
+            return outputs
+
         if self.config.vmap_params:
-            return self._run_optimization_vmap(model, free_params, export_variables)
-        return self._run_optimization(model, free_params, export_variables)
+            return jax.vmap(eval_one)(free_params)
+        return eval_one(free_params)
 
     # --- Internal: simulation ---
 
@@ -282,13 +281,26 @@ class Runner:
         writer.initialize(model.shapes, output_vars, coords=writer_coords, var_dims=var_dims)
         return writer
 
-    def _run_simulation(
+    def _run_chunked(
         self,
         model: CompiledModel,
-        output_path: str | Path | None,
-        export_variables: list[str] | None,
-    ) -> tuple[State, Any | None]:
-        """Run simulation with chunking and writer output."""
+        step_fn: Callable,
+        state: State,
+        params: Params,
+        writer: OutputWriter | None,
+    ) -> tuple[State, Outputs | None]:
+        """Run with temporal chunking (Python loop over chunks).
+
+        Args:
+            model: Compiled model.
+            step_fn: Step function from build_step_fn.
+            state: Initial state.
+            params: Parameters.
+            writer: Output writer (None for raw mode).
+
+        Returns:
+            Tuple of (final_state, last_chunk_outputs or None).
+        """
         n_timesteps = model.n_timesteps
         chunk_size = self._resolve_chunk_size(model)
 
@@ -297,71 +309,53 @@ class Runner:
 
         n_chunks = math.ceil(n_timesteps / chunk_size)
         logger.info(
-            f"Starting simulation: {n_timesteps} steps in {n_chunks} chunks "
+            f"Starting chunked run: {n_timesteps} steps in {n_chunks} chunks "
             f"(chunk_size={chunk_size})"
         )
 
-        state = dict(model.state)
-        params = dict(model.parameters)
-        output_vars = export_variables if export_variables is not None else list(state.keys())
-        step_fn = build_step_fn(model, export_variables=output_vars)
-        writer = self._build_writer(model, output_path, output_vars)
+        collected: list[Outputs] = []
+        for chunk_idx in range(n_chunks):
+            start_t = chunk_idx * chunk_size
+            end_t = min(start_t + chunk_size, n_timesteps)
+            chunk_len = end_t - start_t
 
-        try:
-            for chunk_idx in range(n_chunks):
-                start_t = chunk_idx * chunk_size
-                end_t = min(start_t + chunk_size, n_timesteps)
-                chunk_len = end_t - start_t
+            logger.debug(f"Processing chunk {chunk_idx + 1}/{n_chunks} (t={start_t}-{end_t})")
 
-                logger.debug(
-                    f"Processing chunk {chunk_idx + 1}/{n_chunks} (t={start_t}-{end_t})"
-                )
+            forcings_chunk = model.forcings.get_chunk(start_t, end_t)
+            (state, params), chunk_outputs = _scan(step_fn, (state, params), forcings_chunk, chunk_len)
 
-                forcings_chunk = model.forcings.get_chunk(start_t, end_t)
-                (state, params), outputs = _scan(
-                    step_fn, (state, params), forcings_chunk, chunk_len
-                )
-                writer.append(outputs)
+            if writer is not None:
+                writer.append(chunk_outputs)
+            else:
+                collected.append(chunk_outputs)
 
-            final_results = writer.finalize()
-        finally:
-            writer.close()
+        if collected:
+            all_outputs = jax.tree.map(lambda *arrays: jnp.concatenate(arrays, axis=0), *collected)
+            return state, all_outputs
+        return state, None
 
-        logger.info("Simulation complete")
-        return state, final_results
+    # --- Internal: full (no chunking) ---
 
-    # --- Internal: optimization ---
-
-    def _run_optimization(
+    def _run_full(
         self,
         model: CompiledModel,
-        free_params: Params,
-        export_variables: list[str] | None = None,
-    ) -> Outputs:
-        """Single-shot run with merged parameters."""
-        merged = {**model.parameters, **free_params}
-        step_fn = build_step_fn(model, export_variables=export_variables)
+        step_fn: Callable,
+        state: State,
+        params: Params,
+    ) -> tuple[State, Outputs]:
+        """Run full scan without chunking.
+
+        All dynamic forcings are loaded once via get_all_dynamic().
+
+        Args:
+            model: Compiled model.
+            step_fn: Step function from build_step_fn.
+            state: Initial state.
+            params: Parameters.
+
+        Returns:
+            Tuple of (final_state, outputs).
+        """
         forcings = model.forcings.get_all_dynamic()
-        (final_state, _), outputs = lax.scan(
-            step_fn, (dict(model.state), merged), forcings
-        )
-        return outputs
-
-    def _run_optimization_vmap(
-        self,
-        model: CompiledModel,
-        free_params: Params,
-        export_variables: list[str] | None = None,
-    ) -> Outputs:
-        """Vmap over a population of free parameter sets."""
-
-        def run_one(single_free: Params) -> Outputs:
-            merged = {**model.parameters, **single_free}
-            step_fn = build_step_fn(model, export_variables=export_variables)
-            forcings = model.forcings.get_all_dynamic()
-            (_, _), outputs = lax.scan(
-                step_fn, (dict(model.state), merged), forcings
-            )
-            return outputs
-
-        return jax.vmap(run_one)(free_params)
+        (state, params), outputs = lax.scan(step_fn, (state, params), forcings)
+        return state, outputs
