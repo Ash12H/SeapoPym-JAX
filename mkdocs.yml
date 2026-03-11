@@ -42,11 +42,18 @@ plugins:
             show_source: true
             show_root_heading: true
             show_category_heading: true
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
 
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -60,6 +67,20 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+  - Concepts:
+    - Blueprint & DAG: concepts/blueprint.md
+    - Compilation & Config: concepts/compilation.md
+    - Simulation & Engine: concepts/simulation.md
+    - Optimization: concepts/optimization.md
+  - Examples:
+    - LMTL No Transport: examples/01_lmtl_no_transport.ipynb
+    - Transport & Movement: examples/02_transport.ipynb
+    - Benchmarks: examples/03_benchmark.ipynb
+    - Gradient Descent: examples/04_gradient.ipynb
+    - Genetic Algorithm: examples/05_optimization_ga.ipynb
+    - CMA-ES: examples/06_optimization_cmaes.ipynb
 
 extra:
   social:

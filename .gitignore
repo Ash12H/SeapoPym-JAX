@@ -98,5 +98,6 @@ site/
 IA/
 article/
 examples/
+!docs/examples/
 prompt.md
 CLAUDE.md

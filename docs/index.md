@@ -2,12 +2,25 @@
 
 **SeapoPym** is a JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids.
 
-It uses a DAG-based blueprint architecture where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
+It uses a **DAG-based blueprint architecture** where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
 
 ## Why SeapoPym?
 
-- **For scientists**: explicit numerical schemes, visual DAG of processes, YAML-based model declaration — easy to understand and modify.
-- **For ML engineers**: JAX backend, differentiable end-to-end, GPU/TPU support, gradient-based optimization and backpropagation on mechanistic models.
+SeapoPym bridges two communities:
+
+=== "For Scientists"
+
+    - **Explicit numerical schemes** — Euler integration, finite-volume transport (Zalesak), no black-box solvers.
+    - **Visual DAG of processes** — Each computation step is a named node with declared inputs, outputs, and units.
+    - **YAML-based model declaration** — Define your model topology without writing code. Swap processes, add forcings, change resolution.
+    - **Strict validation** — Pint-based unit checking, dimension consistency, NaN rejection — all at compile time.
+
+=== "For ML Engineers"
+
+    - **Pure JAX backend** — `jax.lax.scan` for time loops, full JIT compilation, GPU/TPU support.
+    - **End-to-end differentiable** — Compute gradients through the entire simulation via `jax.grad`.
+    - **Automatic vectorization** — `jax.vmap` dispatches over non-core dimensions with canonical ordering.
+    - **Built-in optimization** — Gradient descent (Optax), CMA-ES, Genetic Algorithm, IPOP-CMA-ES (evosax).
 
 ## Key Features
 
@@ -20,29 +33,16 @@ It uses a DAG-based blueprint architecture where biological and physical process
 
 ## Pipeline
 
+The SeapoPym pipeline follows a compile-then-run pattern:
+
 ```
 Blueprint (YAML) + Config → compile_model() → CompiledModel → simulate() / run() → Outputs
 ```
 
-## Installation
-
-```bash
-pip install git+https://github.com/Ash12H/SeapoPym-JAX.git
-```
-
-For GPU support:
-
-```bash
-pip install git+https://github.com/Ash12H/SeapoPym-JAX.git[gpu]
-```
-
-For development:
-
-```bash
-git clone https://github.com/Ash12H/SeapoPym-JAX.git
-cd SeapoPym-JAX
-uv sync --all-extras
-```
+1. **Blueprint** — A YAML file declaring the model topology: variables, process steps (as a DAG), and tendencies.
+2. **Config** — Concrete data: parameter values, forcing arrays, initial state, and execution settings.
+3. **compile_model()** — Validates, infers shapes, builds the forcing store, and produces a `CompiledModel`.
+4. **simulate() / run()** — Executes the compiled model using `jax.lax.scan`, returning state and outputs.
 
 ## Quickstart
 
@@ -73,8 +73,8 @@ state, outputs = simulate(model, chunk_size=365)
 print(outputs)
 ```
 
-## Links
+## Next Steps
 
-- [GitHub Repository](https://github.com/Ash12H/SeapoPym-JAX)
-- [Contributing Guide](https://github.com/Ash12H/SeapoPym-JAX/blob/main/CONTRIBUTING.md)
-- [Changelog](https://github.com/Ash12H/SeapoPym-JAX/blob/main/CHANGELOG.md)
+- [Installation](getting-started/installation.md) — Set up SeapoPym on your machine.
+- [Blueprint & DAG](concepts/blueprint.md) — Understand how models are declared.
+- [Examples](examples/01_lmtl_no_transport.ipynb) — Run your first simulation.
