@@ -9,21 +9,10 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 ![JAX](https://img.shields.io/badge/powered_by-JAX-red)
 
-**SeapoPym** is a JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids. It uses a DAG-based blueprint architecture where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges.
+**SeapoPym** is a JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids. Models are declared as YAML blueprints (DAG of processes), compiled into optimized JAX graphs, and executed on CPU or GPU.
 
-## Why SeapoPym?
-
-- **For scientists**: explicit numerical schemes, visual DAG of processes, YAML-based model declaration — easy to understand and modify.
-- **For ML engineers**: JAX backend, differentiable end-to-end, GPU/TPU support, gradient-based optimization and backpropagation on mechanistic models.
-
-## Key Features
-
-- **Blueprint Architecture** — Declare models as YAML: state variables, parameters, forcings, and process DAG.
-- **Strict Unit Validation** — Pint-based dimensional consistency enforced at compile time.
-- **Automatic Vectorization** — `vmap` dispatch over non-core dimensions with canonical ordering `(E, T, F, C, Z, Y, X)`.
-- **Pluggable Writers** — WriterRaw (JAX-traceable for optimization), MemoryWriter (`xr.Dataset`), DiskWriter (Zarr).
-- **Flexible Forcings** — Lazy loading with temporal interpolation (`linear`, `nearest`, `ffill`).
-- **Optimization** — Gradient descent (Optax), CMA-ES, Genetic Algorithm, IPOP-CMA-ES (evosax).
+- **For scientists** — Explicit numerical schemes, YAML model declaration, strict unit validation (Pint), visual process DAG.
+- **For ML engineers** — Pure JAX backend, end-to-end differentiable, GPU/TPU support, built-in optimization (Optax, CMA-ES, GA).
 
 ## Installation
 
@@ -31,9 +20,9 @@
 pip install git+https://github.com/Ash12H/SeapoPym-JAX.git
 ```
 
-For GPU support:
+With GPU support:
 ```bash
-pip install git+https://github.com/Ash12H/SeapoPym-JAX.git[gpu]
+pip install "git+https://github.com/Ash12H/SeapoPym-JAX.git[gpu]"
 ```
 
 For development:
@@ -43,38 +32,75 @@ cd SeapoPym-JAX
 uv sync --all-extras
 ```
 
-## Quickstart
+## Simulation pipeline
 
-```python
-from seapopym.models import LMTL_NO_TRANSPORT
-from seapopym.blueprint import Config
-from seapopym.compiler import compile_model
-from seapopym.engine import simulate
-import xarray as xr
-import numpy as np
+A model is declared as a YAML blueprint and configured with concrete data. The compiler validates units and shapes, then produces a `CompiledModel` ready for execution:
 
-# 1. Load a pre-defined blueprint
-blueprint = LMTL_NO_TRANSPORT
+```mermaid
+graph LR
+    A[Blueprint YAML] --> C[compile_model]
+    B[Config] --> C
+    C --> D[CompiledModel]
+    D --> E[simulate / run]
+    E --> F[Outputs]
 
-# 2. Configure the experiment
-config = Config.from_dict({
-    "parameters": {"growth_rate": {"value": 0.01}, ...},
-    "forcings": {"temperature": xr.DataArray(...)},
-    "initial_state": {"biomass": xr.DataArray(...)},
-    "execution": {"time_start": "2020-01-01", "time_end": "2020-12-31", "dt": "1d"},
-})
-
-# 3. Compile and run
-model = compile_model(blueprint, config)
-state, outputs = simulate(model, chunk_size=365)
-
-# outputs is an xr.Dataset with the exported variables
-print(outputs)
+    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style D fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style F fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style C fill:#e8833a,stroke:#b5612a,color:#fff
+    style E fill:#e8833a,stroke:#b5612a,color:#fff
 ```
+
+At each timestep, the process DAG (solid arrows) computes tendencies from state, parameters and forcings. An explicit Euler solver (dashed arrows) then integrates the tendencies to advance the state:
+
+```mermaid
+graph LR
+    S[State] --> F[Process Function]
+    P[Parameters] --> F
+    Fo[Forcings] --> F
+    F --> T[Tendency]
+    T -.-> E[Euler Solver]
+    S -.->|t| E
+    E -.->|t+1| S
+
+    style S fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style P fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style Fo fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style T fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style F fill:#e8833a,stroke:#b5612a,color:#fff
+    style E fill:#e8833a,stroke:#b5612a,color:#fff
+```
+
+## Optimization
+
+Parameter calibration builds on the same Blueprint + Config base. Two additional components are needed: **Objectives** (observed data + loss metric) and an **Optimizer** (calibration strategy):
+
+```mermaid
+graph LR
+    A[Blueprint] --> C[compile_model]
+    B[Config] --> C
+    C --> M[CompiledModel]
+    Obj[Objectives] --> Opt[Optimizer]
+    M --> Opt
+    Opt --> Res[Optimized Parameters]
+
+    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style M fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style Obj fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style Res fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style C fill:#e8833a,stroke:#b5612a,color:#fff
+    style Opt fill:#e8833a,stroke:#b5612a,color:#fff
+```
+
+Three methods are available: **Gradient descent** (Optax), **Genetic Algorithm** and **CMA-ES** (evosax). Gradient-based optimization leverages JAX's automatic differentiation; evolutionary methods work without gradients.
 
 ## Documentation
 
-See the [documentation](https://ash12h.github.io/SeapoPym-JAX/).
+Full documentation, conceptual guides, and runnable examples are available at:
+
+**[https://ash12h.github.io/SeapoPym-JAX/](https://ash12h.github.io/SeapoPym-JAX/)**
 
 ## Contributing
 
@@ -82,4 +108,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) — Jules Lehodey, 2024
