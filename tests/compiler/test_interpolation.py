@@ -32,9 +32,7 @@ class TestForcingInterpolation:
         ny, nx = 10, 5
         nt = 100
 
-        blueprint = self._make_blueprint(
-            {"time_index": {"dims": ["T"]}, "bathy": {"dims": ["Y", "X"]}}
-        )
+        blueprint = self._make_blueprint({"time_index": {"dims": ["T"]}, "bathy": {"dims": ["Y", "X"]}})
 
         bathy_data = np.random.rand(ny, nx)
         target_coords = pd.date_range("2000-01-01", periods=nt, freq="1D").to_numpy()

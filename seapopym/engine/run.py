@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 import jax.lax as lax
 
-from seapopym.types import Outputs, Params, State
+from seapopym.types import Params, State
 
 from .exceptions import ChunkingError
 from .io import WriterRaw, build_writer
@@ -96,7 +96,9 @@ def run(
     n_chunks = math.ceil(n_timesteps / effective_chunk)
     logger.info(
         "Starting run: %d steps in %d chunk(s) (chunk_size=%d)",
-        n_timesteps, n_chunks, effective_chunk,
+        n_timesteps,
+        n_chunks,
+        effective_chunk,
     )
 
     for start, end in chunk_ranges(n_timesteps, effective_chunk):
@@ -135,8 +137,7 @@ def simulate(
     writer = build_writer(model, output_path, output_vars)
 
     try:
-        result = run(step_fn, model, dict(model.state), dict(model.parameters),
-                     chunk_size=chunk_size, writer=writer)
+        result = run(step_fn, model, dict(model.state), dict(model.parameters), chunk_size=chunk_size, writer=writer)
     finally:
         writer.close()
 

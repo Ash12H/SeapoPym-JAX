@@ -202,8 +202,7 @@ class ForcingStore:
         """Interpolate a lazy DataArray to target times via xarray."""
         data = self._compute_source_window(data, target_times)
         if self.interp_method == "linear":
-            return data.interp(T=target_times, method="linear",
-                               kwargs={"fill_value": "extrapolate"}).values
+            return data.interp(T=target_times, method="linear", kwargs={"fill_value": "extrapolate"}).values
         if self.interp_method in ("nearest", "ffill"):
             return data.reindex(T=target_times, method=self.interp_method).values
         raise ValueError(f"Unknown interp_method: {self.interp_method}")
@@ -224,4 +223,3 @@ class ForcingStore:
             return data
 
         return data.isel(T=slice(i_start, i_end))
-

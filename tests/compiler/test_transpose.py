@@ -138,5 +138,3 @@ class TestTransposeCanonical:
         )
         result = transpose_canonical(da, target_order=("X", "Y", "T"))
         assert list(result.dims) == ["X", "Y", "T"]
-
-

@@ -1,15 +1,8 @@
 # SeapoPym
 
-![Tests](https://github.com/Ash12H/SeapoPym-JAX/actions/workflows/ci.yml/badge.svg)
-![Docs](https://github.com/Ash12H/SeapoPym-JAX/actions/workflows/docs.yml/badge.svg)
-[![Coverage](https://codecov.io/gh/Ash12H/SeapoPym-JAX/branch/main/graph/badge.svg)](https://codecov.io/gh/Ash12H/SeapoPym-JAX)
-![Python](https://img.shields.io/badge/python-%E2%89%A53.12-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
-![JAX](https://img.shields.io/badge/powered_by-JAX-red)
+**SeapoPym** is a JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids.
 
-**SeapoPym** is a JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids. It uses a DAG-based blueprint architecture where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges.
+It uses a DAG-based blueprint architecture where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
 
 ## Why SeapoPym?
 
@@ -25,6 +18,12 @@
 - **Flexible Forcings** — Lazy loading with temporal interpolation (`linear`, `nearest`, `ffill`).
 - **Optimization** — Gradient descent (Optax), CMA-ES, Genetic Algorithm, IPOP-CMA-ES (evosax).
 
+## Pipeline
+
+```
+Blueprint (YAML) + Config → compile_model() → CompiledModel → simulate() / run() → Outputs
+```
+
 ## Installation
 
 ```bash
@@ -32,11 +31,13 @@ pip install git+https://github.com/Ash12H/SeapoPym-JAX.git
 ```
 
 For GPU support:
+
 ```bash
 pip install git+https://github.com/Ash12H/SeapoPym-JAX.git[gpu]
 ```
 
 For development:
+
 ```bash
 git clone https://github.com/Ash12H/SeapoPym-JAX.git
 cd SeapoPym-JAX
@@ -72,14 +73,8 @@ state, outputs = simulate(model, chunk_size=365)
 print(outputs)
 ```
 
-## Documentation
+## Links
 
-See the [documentation](https://ash12h.github.io/SeapoPym-JAX/).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
-
-## License
-
-[MIT](LICENSE)
+- [GitHub Repository](https://github.com/Ash12H/SeapoPym-JAX)
+- [Contributing Guide](https://github.com/Ash12H/SeapoPym-JAX/blob/main/CONTRIBUTING.md)
+- [Changelog](https://github.com/Ash12H/SeapoPym-JAX/blob/main/CHANGELOG.md)

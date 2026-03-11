@@ -120,9 +120,7 @@ def build_step_fn(
 
         return new_state, outputs
 
-    def step_fn(
-        carry: tuple[State, Params], forcings_t: Forcings
-    ) -> tuple[tuple[State, Params], Outputs]:
+    def step_fn(carry: tuple[State, Params], forcings_t: Forcings) -> tuple[tuple[State, Params], Outputs]:
         """Execute one timestep with parameters as part of the carry.
 
         This signature is compatible with jax.lax.scan and jax.grad.
@@ -273,10 +271,7 @@ def _integrate_euler(
     for var_name, value in state.items():
         if var_name in tendency_map:
             sources = tendency_map[var_name]
-            total = sum(
-                src.sign * intermediates[src.source.removeprefix("derived.")]
-                for src in sources
-            )
+            total = sum(src.sign * intermediates[src.source.removeprefix("derived.")] for src in sources)
             # Clamp to zero: biomass and other state variables are physically
             # non-negative quantities.  Euler explicit can overshoot below zero
             # when the loss tendency is large relative to dt, so we enforce the

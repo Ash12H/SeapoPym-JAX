@@ -1,0 +1,12 @@
+{
+    "extends": "./pyproject.toml",
+    "executionEnvironments": [
+        {
+            "root": "tests",
+            "reportArgumentType": false,
+            "reportIndexIssue": false,
+            "reportAttributeAccessIssue": false,
+            "reportGeneralTypeIssues": false
+        }
+    ]
+}

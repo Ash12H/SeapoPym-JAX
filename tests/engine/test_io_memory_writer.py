@@ -1,7 +1,6 @@
 """Tests for MemoryWriter."""
 
 import numpy as np
-import pytest
 import xarray as xr
 
 from seapopym.engine.io import MemoryWriter

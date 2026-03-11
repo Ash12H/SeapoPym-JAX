@@ -37,7 +37,7 @@ class TestLoadModelFunction:
 
     def test_load_model_not_found(self):
         """load_model raises an error for an unknown model name."""
-        with pytest.raises(Exception):
+        with pytest.raises(FileNotFoundError):
             load_model("inexistant")
 
 

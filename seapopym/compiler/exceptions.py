@@ -55,5 +55,3 @@ class TransposeError(CompilerError):
         self.variable = variable
         self.reason = reason
         super().__init__(f"Cannot transpose '{variable}': {reason}")
-
-

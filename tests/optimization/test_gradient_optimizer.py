@@ -11,7 +11,7 @@ class TestGradientOptimizerInit:
     def test_invalid_algorithm_raises(self):
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         with pytest.raises(ValueError, match="Unknown algorithm 'bad'"):
-            GradientOptimizer([(obj, "mse", 1.0)], algorithm="bad")
+            GradientOptimizer([(obj, "mse", 1.0)], algorithm="bad")  # type: ignore[reportArgumentType]
 
     def test_bounds_scaling_without_bounds_raises(self):
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])

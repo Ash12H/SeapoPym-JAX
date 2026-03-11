@@ -1,9 +1,8 @@
 """Tests for step function builder."""
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
-
-import jax.numpy as jnp
 
 from seapopym.blueprint import functional
 from seapopym.compiler import compile_model

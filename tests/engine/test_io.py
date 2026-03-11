@@ -133,8 +133,6 @@ class TestDiskWriter:
             var_dims={"biomass": ("Y", "X"), "cohort_var": ("C", "Y", "X")},
         )
 
-        import zarr
-
         # biomass: (T, Y, X) → initial shape (0, 4, 5)
         assert writer.store["biomass"].shape == (0, 4, 5)
         assert writer.store["biomass"].attrs["_ARRAY_DIMENSIONS"] == ["T", "Y", "X"]
@@ -173,5 +171,3 @@ class TestDiskWriter:
         assert store["biomass"].attrs["_ARRAY_DIMENSIONS"] == ["T", "Y", "X"]
 
         writer.close()
-
-

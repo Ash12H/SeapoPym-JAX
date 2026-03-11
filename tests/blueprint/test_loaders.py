@@ -1,7 +1,6 @@
 """Tests for Blueprint file loaders (load_json, load_yaml, load_file)."""
 
 import json
-from pathlib import Path
 
 import pytest
 import yaml

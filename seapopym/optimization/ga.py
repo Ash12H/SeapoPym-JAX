@@ -136,7 +136,7 @@ class GAOptimizer:
             solution=x0_norm,
             std_schedule=optax.constant_schedule(self.mutation_std),
         )
-        es_params = strategy.default_params.replace(crossover_rate=self.crossover_rate)
+        es_params = strategy.default_params.replace(crossover_rate=self.crossover_rate)  # type: ignore[reportAttributeAccessIssue]
 
         key = jax.random.key(self.seed)
         key, init_key = jax.random.split(key)

@@ -1,6 +1,5 @@
 """Tests for Blueprint and Config schema classes."""
 
-
 import pytest
 import xarray as xr
 
@@ -13,8 +12,6 @@ from seapopym.blueprint import (
     TendencySource,
     VariableDeclaration,
 )
-
-
 
 
 class TestVariableDeclaration:
@@ -154,7 +151,6 @@ class TestBlueprint:
         assert bp.version == "0.1.0"
         assert len(bp.process) == 1
         assert "biomass" in bp.tendencies
-
 
     def test_get_variable(self):
         """Test getting variable by path."""

@@ -76,7 +76,7 @@ def _prepare_forcings(
         is_dynamic = bp_dims is not None and "T" in bp_dims
 
         da = apply_dimension_mapping(source, dim_mapping)
-        da = transpose_canonical(da)
+        da = transpose_canonical(da)  # type: ignore[reportArgumentType]
 
         # Slice dynamic forcings at xarray level (still lazy)
         if is_dynamic and "T" in da.coords:
@@ -127,7 +127,7 @@ def _prepare_state(config: Config, dim_mapping: dict[str, str] | None) -> dict[s
     result = {}
     for name, da in config.initial_state.items():
         da = apply_dimension_mapping(da, dim_mapping)
-        da = transpose_canonical(da)
+        da = transpose_canonical(da)  # type: ignore[reportArgumentType]
         values = da.values
         _check_nan(name, values, "Initial state")
         result[name] = jnp.asarray(values)
@@ -141,7 +141,7 @@ def _prepare_parameters(config: Config, dim_mapping: dict[str, str] | None) -> d
     result = {}
     for name, da in config.parameters.items():
         da = apply_dimension_mapping(da, dim_mapping)
-        da = transpose_canonical(da)
+        da = transpose_canonical(da)  # type: ignore[reportArgumentType]
         values = da.values
         _check_nan(name, values, "Parameter")
         result[name] = jnp.asarray(values)

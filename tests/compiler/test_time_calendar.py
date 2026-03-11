@@ -252,7 +252,6 @@ class TestCompileTimeGrid:
                     "temp": xr.DataArray(
                         np.zeros((10, 1, 1)),
                         dims=["T", "Y", "X"],
-
                         coords={"T": pd.date_range("2000-01-05", periods=10, freq="1D")},
                     )
                 },

@@ -161,13 +161,8 @@ class UnitValidator:
 
             # Validate output units
             for out_key, target_path in step.outputs.items():
-                # Resolve the unit for this output:
-                # - multi-output: use the output key name (e.g. "prod_loss")
-                # - single-output: use "return"
-                if metadata.is_multi_output:
-                    out_unit = metadata.units.get(out_key)
-                else:
-                    out_unit = metadata.units.get("return")
+                # multi-output → use output key name, single-output → use "return"
+                out_unit = metadata.units.get(out_key) if metadata.is_multi_output else metadata.units.get("return")
 
                 if out_unit is None:
                     continue  # No unit declared, chain stops here

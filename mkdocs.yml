@@ -1,10 +1,10 @@
-site_name: SEAPOPYM-Message Documentation
-site_description: Distributed Population Dynamics Simulation using Ray and JAX
-site_author: SEAPOPYM-Message Contributors
-site_url: https://seapopym-message.readthedocs.io
+site_name: SeapoPym Documentation
+site_description: JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids
+site_author: Jules Lehodey
+site_url: https://ash12h.github.io/SeapoPym-JAX/
 
-repo_name: seapopym-message
-repo_url: https://github.com/yourusername/seapopym-message
+repo_name: Ash12H/SeapoPym-JAX
+repo_url: https://github.com/Ash12H/SeapoPym-JAX
 edit_uri: edit/main/docs/
 
 theme:
@@ -60,38 +60,8 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting Started:
-      - Installation: getting-started/installation.md
-      - Quick Start: getting-started/quickstart.md
-      - Concepts: getting-started/concepts.md
-  - Architecture:
-      - Overview: architecture/overview.md
-      - Event Scheduler: architecture/scheduler.md
-      - Kernel & Units: architecture/kernel.md
-      - Workers: architecture/workers.md
-      - 2D Grids: architecture/2d-grids.md
-      - Transport Strategies: architecture/transport.md
-  - API Reference:
-      - Core: api/core.md
-      - Distributed: api/distributed.md
-      - Kernels: api/kernels.md
-      - Forcing: api/forcing.md
-      - Utils: api/utils.md
-  - Tutorials:
-      - Simple 0D Model: tutorials/0d-model.md
-      - 1D Grid with Diffusion: tutorials/1d-diffusion.md
-      - 2D Spatial Model: tutorials/2d-spatial.md
-      - Temperature Forcing: tutorials/forcing.md
-      - Scalability: tutorials/scalability.md
-  - Development:
-      - Contributing: development/contributing.md
-      - Testing: development/testing.md
-      - Code Style: development/style.md
-  - About:
-      - Changelog: about/changelog.md
-      - License: about/license.md
 
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yourusername/seapopym-message
+      link: https://github.com/Ash12H/SeapoPym-JAX

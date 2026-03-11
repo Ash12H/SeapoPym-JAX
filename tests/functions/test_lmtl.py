@@ -17,7 +17,6 @@ from seapopym.functions.lmtl import (
     threshold_temperature,
 )
 
-
 # =============================================================================
 # HELPERS
 # =============================================================================
@@ -172,27 +171,19 @@ class TestMortalityTendency:
 
     def test_sign_is_negative(self):
         """Mortality tendency should be negative (loss)."""
-        result = mortality_tendency(
-            jnp.array(10.0), jnp.array(15.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0
-        )
+        result = mortality_tendency(jnp.array(10.0), jnp.array(15.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0)
         assert result < 0
 
     def test_increases_with_temperature(self):
         """Higher temperature should give greater mortality magnitude."""
-        cold = mortality_tendency(
-            jnp.array(10.0), jnp.array(5.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0
-        )
-        warm = mortality_tendency(
-            jnp.array(10.0), jnp.array(20.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0
-        )
+        cold = mortality_tendency(jnp.array(10.0), jnp.array(5.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0)
+        warm = mortality_tendency(jnp.array(10.0), jnp.array(20.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0)
         # More negative = greater loss
         assert warm < cold
 
     def test_zero_biomass_zero_mortality(self):
         """Zero biomass should give zero mortality tendency."""
-        result = mortality_tendency(
-            jnp.array(0.0), jnp.array(15.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0
-        )
+        result = mortality_tendency(jnp.array(0.0), jnp.array(15.0), lambda_0=1e-6, gamma=0.1, t_ref=10.0)
         assert jnp.isclose(result, 0.0)
 
 

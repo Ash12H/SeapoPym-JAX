@@ -7,11 +7,10 @@ and experiment configuration (Config).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import xarray as xr
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing_extensions import Self
 
 # === Variable Declarations ===
 
@@ -171,14 +170,11 @@ class Blueprint(BaseModel):
         for state_var, sources in self.tendencies.items():
             if state_var not in state_keys:
                 raise ValueError(
-                    f"Tendency target '{state_var}' is not a declared state variable. "
-                    f"Available: {sorted(state_keys)}"
+                    f"Tendency target '{state_var}' is not a declared state variable. Available: {sorted(state_keys)}"
                 )
             for src in sources:
                 if not src.source.startswith("derived."):
-                    raise ValueError(
-                        f"Tendency source '{src.source}' for '{state_var}' must start with 'derived.'."
-                    )
+                    raise ValueError(f"Tendency source '{src.source}' for '{state_var}' must start with 'derived.'.")
         return self
 
     @classmethod
@@ -258,9 +254,8 @@ class ExecutionParams(BaseModel):
             quantity.to("seconds")
         except (pint.UndefinedUnitError, pint.DimensionalityError, Exception):
             raise ValueError(
-                f"Invalid dt format: '{v}'. Expected a time duration "
-                f"(e.g. '1d', '6h', '30min', '1.5h')."
-            )
+                f"Invalid dt format: '{v}'. Expected a time duration (e.g. '1d', '6h', '30min', '1.5h')."
+            ) from None
         return v
 
     @field_validator("time_start", "time_end")
@@ -284,7 +279,6 @@ class ExecutionParams(BaseModel):
             return v
         except Exception as e:
             raise ValueError(f"Invalid datetime format: {v}. Use ISO format (e.g., '2000-01-01').") from e
-
 
     @model_validator(mode="after")
     def validate_time_range(self) -> Self:
@@ -354,4 +348,3 @@ class Config(BaseModel):
     def from_dict(cls, data: dict[str, Any]) -> Config:
         """Create Config from a dictionary."""
         return cls.model_validate(data)
-

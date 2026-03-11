@@ -1,4 +1,4 @@
-"""Catalogue de modeles pre-definis.
+"""Pre-defined model catalog.
 
 Each blueprint is a strict contract: it defines the process chain, the
 variables (state, parameters, forcings) **and their dimensions**.  Data
@@ -19,10 +19,10 @@ _MODELS_DIR = files("seapopym.models")
 
 
 def load_model(name: str) -> Blueprint:
-    """Charge un blueprint depuis le catalogue.
+    """Load a blueprint from the catalog.
 
     Args:
-        name: Nom du modele (ex: "seapodym_lmtl", "seapodym_lmtl_no_transport").
+        name: Model name (e.g. "seapodym_lmtl", "seapodym_lmtl_no_transport").
     """
     with as_file(_MODELS_DIR / f"{name}.yaml") as path:
         return Blueprint.load(path)

@@ -27,9 +27,8 @@ def _parse_dt(dt_str: str) -> float:
         return _ureg(dt_str).to("seconds").magnitude
     except (pint.UndefinedUnitError, pint.DimensionalityError):
         raise ValueError(
-            f"Invalid dt format: '{dt_str}'. Expected a time duration "
-            f"(e.g. '1d', '6h', '30min', '1.5h')."
-        )
+            f"Invalid dt format: '{dt_str}'. Expected a time duration (e.g. '1d', '6h', '30min', '1.5h')."
+        ) from None
 
 
 @dataclass

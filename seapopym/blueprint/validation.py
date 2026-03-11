@@ -274,15 +274,12 @@ class BlueprintValidator:
             resolved = input_dims.get(arg_name, ())
             if not resolved:
                 result.add_warning(
-                    f"Variable '{var_path}' has no dimensions, "
-                    f"but function '{step.func}' expects core_dims {core_dims}"
+                    f"Variable '{var_path}' has no dimensions, but function '{step.func}' expects core_dims {core_dims}"
                 )
                 continue
             for dim in core_dims:
                 if dim not in resolved:
-                    result.add_error(
-                        DimensionMismatchError(var_path, expected=core_dims, actual=list(resolved))
-                    )
+                    result.add_error(DimensionMismatchError(var_path, expected=core_dims, actual=list(resolved)))
 
     @staticmethod
     def _compute_output_dims(
@@ -317,8 +314,7 @@ class BlueprintValidator:
             for src in sources:
                 if src.source not in produced_derived:
                     result.add_warning(
-                        f"Tendency source '{src.source}' for state '{state_var}' "
-                        f"is not produced by any process step."
+                        f"Tendency source '{src.source}' for state '{state_var}' is not produced by any process step."
                     )
 
 
@@ -477,9 +473,7 @@ def _validate_data_dims(
             expected = set(var_decl.dims)
             actual = _mapped_dims(source)
             if expected != actual:
-                result.add_error(
-                    DimensionMismatchError(var_path, expected=sorted(expected), actual=sorted(actual))
-                )
+                result.add_error(DimensionMismatchError(var_path, expected=sorted(expected), actual=sorted(actual)))
 
 
 def _validate_temporal_coverage(
@@ -525,5 +519,3 @@ def _validate_temporal_coverage(
                     f"Ensure forcing data spans the entire simulation period."
                 )
             )
-
-

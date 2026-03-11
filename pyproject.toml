@@ -1,22 +1,21 @@
 [project]
 name = "seapopym"
-version = "0.1.0"
-description = "Distributed population dynamics simulation using Ray and JAX"
+version = "0.2.0"
+description = "JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Jules Lehodey", email = "lehodey.jules@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
-keywords = ["population-dynamics", "ray", "jax", "oceanography", "simulation"]
+keywords = ["population-dynamics", "jax", "eulerian", "simulation", "oceanography", "differentiable", "gpu"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
 ]
 
@@ -33,7 +32,6 @@ dependencies = [
     "jax>=0.4.20",
     "jaxlib>=0.4.20",
     "optax>=0.2.6",
-    "netcdf4>=1.7.4",
 ]
 
 [project.optional-dependencies]
@@ -43,8 +41,6 @@ dev = [
     "pyright>=1.1.340",
     "ruff>=0.1.0",
     "pre-commit>=3.5.0",
-    "ipykernel>=6.27.0",
-    "jupyter>=1.0.0",
     "pandas-stubs>=2.0.0",
 ]
 
@@ -52,6 +48,8 @@ docs = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.24.0",
+    "ipykernel>=6.27.0",
+    "jupyter>=1.0.0",
 ]
 
 gpu = [
@@ -60,13 +58,6 @@ gpu = [
 
 optimization = [
     "evosax>=0.1.0",
-    "flax>=0.12.3",
-    "blackjax>=1.2.0",
-]
-
-sensitivity = [
-    "SALib>=1.4.0",
-    "pyarrow>=14.0.0",
 ]
 
 viz = [
@@ -76,10 +67,10 @@ viz = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Ash12H/seapopym-message"
-Documentation = "https://seapopym-message.readthedocs.io"
-Repository = "https://github.com/Ash12H/seapopym-message"
-Issues = "https://github.com/Ash12H/seapopym-message/issues"
+Homepage = "https://github.com/Ash12H/SeapoPym-JAX"
+Documentation = "https://ash12h.github.io/SeapoPym-JAX/"
+Repository = "https://github.com/Ash12H/SeapoPym-JAX"
+Issues = "https://github.com/Ash12H/SeapoPym-JAX/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -94,7 +85,7 @@ packages = ["seapopym"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 src = ["seapopym", "tests"]
 exclude = [
     ".bzr",
@@ -190,7 +181,7 @@ venvPath = "."
 venv = ".venv"
 reportMissingImports = true
 reportMissingTypeStubs = false
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 typeCheckingMode = "basic"
 
 # ══════════════════════════════════════════════════════════════

@@ -75,6 +75,7 @@ class CompiledModel:
             raise KeyError(f"State variable '{var_name}' not found")
         return self.state[var_name].shape
 
+
 def _default_forcing_store() -> ForcingStore:
     """Create a default empty ForcingStore (avoids circular import at module level)."""
     from seapopym.compiler.forcing import ForcingStore

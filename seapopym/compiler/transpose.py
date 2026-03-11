@@ -75,7 +75,3 @@ def transpose_canonical(
     except Exception as e:
         name = str(da.name) if da.name is not None else "unnamed"
         raise TransposeError(name, str(e)) from e
-
-
-
-

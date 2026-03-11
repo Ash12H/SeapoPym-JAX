@@ -93,3 +93,10 @@ site/
 # Environment variables
 .env
 .env.local
+
+# Internal / non-public files
+IA/
+article/
+examples/
+prompt.md
+CLAUDE.md
