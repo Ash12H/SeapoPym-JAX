@@ -77,10 +77,9 @@ nav:
   - Examples:
     - LMTL No Transport: examples/01_lmtl_no_transport.ipynb
     - Transport & Movement: examples/02_transport.ipynb
-    - Benchmarks: examples/03_benchmark.ipynb
-    - Gradient Descent: examples/04_gradient.ipynb
-    - Genetic Algorithm: examples/05_optimization_ga.ipynb
-    - CMA-ES: examples/06_optimization_cmaes.ipynb
+    - Gradient Descent: examples/03_gradient.ipynb
+    - Genetic Algorithm: examples/04_optimization_ga.ipynb
+    - CMA-ES: examples/05_optimization_cmaes.ipynb
 
 extra:
   social:
