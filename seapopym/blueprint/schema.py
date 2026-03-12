@@ -212,6 +212,108 @@ class Blueprint(BaseModel):
         all_vars = self.declarations.get_all_variables()
         return all_vars.get(path)
 
+    def to_graphviz(self, *, direction: str = "TB", show_tendencies: bool = True) -> Any:
+        """Generate a Graphviz DAG diagram from this Blueprint.
+
+        Each node is colored by category (state, parameters, forcings, derived, function,
+        tendency). Edges represent data flow through the process DAG.
+
+        Args:
+            direction: Graph layout direction ("TB" for top-bottom, "LR" for left-right).
+            show_tendencies: Whether to show tendency accumulator nodes.
+
+        Returns:
+            A ``graphviz.Digraph`` object. Renders as SVG inline in Jupyter notebooks
+            and can be saved via ``.render(format="svg")``.
+
+        Raises:
+            ImportError: If the ``graphviz`` Python package is not installed.
+        """
+        try:
+            import graphviz
+        except ImportError:
+            raise ImportError(
+                "Blueprint.to_graphviz() requires the graphviz package. "
+                "Install it with: pip install seapopym[viz]\n"
+                "You also need the Graphviz system binary: https://graphviz.org/download/"
+            ) from None
+
+        # --- Color palette ---
+        colors = {
+            "state": "#c8e6c9",
+            "parameters": "#ffe0b2",
+            "forcings": "#bbdefb",
+            "derived": "#e1bee7",
+            "function": "#f8bbd0",
+            "tendency": "#ffcdd2",
+        }
+
+        g = graphviz.Digraph(
+            name=self.id,
+            format="svg",
+            graph_attr={"rankdir": direction, "bgcolor": "transparent", "fontname": "Helvetica"},
+            node_attr={"fontname": "Helvetica", "fontsize": "10", "style": "filled"},
+            edge_attr={"fontname": "Helvetica", "fontsize": "8"},
+        )
+
+        # --- Collect all data nodes referenced in process steps ---
+        referenced_vars: set[str] = set()
+        for step in self.process:
+            referenced_vars.update(step.inputs.values())
+            referenced_vars.update(step.outputs.values())
+        if show_tendencies:
+            for sources in self.tendencies.values():
+                for src in sources:
+                    referenced_vars.add(src.source)
+
+        # --- Create data nodes (only those actually referenced) ---
+        def _category(path: str) -> str:
+            return path.split(".")[0]
+
+        def _short_name(path: str) -> str:
+            return path.split(".", 1)[1]
+
+        for var_path in sorted(referenced_vars):
+            cat = _category(var_path)
+            color = colors.get(cat, "#eeeeee")
+            shape = "box" if cat != "derived" else "ellipse"
+            if cat == "state":
+                shape = "box"
+                style = "filled,bold"
+            else:
+                style = "filled"
+            g.node(var_path, label=_short_name(var_path), fillcolor=color, shape=shape, style=style)
+
+        # --- Create function nodes ---
+        for i, step in enumerate(self.process):
+            func_id = f"process_{i}"
+            func_label = step.func.split(":")[1] if ":" in step.func else step.func
+            g.node(func_id, label=func_label, fillcolor=colors["function"], shape="box", style="filled,rounded")
+
+            # Input edges
+            for _arg_name, var_path in step.inputs.items():
+                g.edge(var_path, func_id)
+
+            # Output edges
+            for _output_key, var_path in step.outputs.items():
+                g.edge(func_id, var_path)
+
+        # --- Create tendency nodes ---
+        if show_tendencies:
+            for state_var, sources in self.tendencies.items():
+                tendency_id = f"tendency_{state_var}"
+                g.node(
+                    tendency_id,
+                    label=f"d {state_var} / dt",
+                    fillcolor=colors["tendency"],
+                    shape="diamond",
+                    style="filled",
+                )
+                for src in sources:
+                    g.edge(src.source, tendency_id)
+
+        return g
+
 
 # === Execution Parameters ===
 

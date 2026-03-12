@@ -79,6 +79,10 @@ nav:
     - Transport & Movement: examples/02_transport.ipynb
     - Optimization: examples/03_optimization.ipynb
 
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
 extra:
   social:
     - icon: fontawesome/brands/github
