@@ -31,18 +31,69 @@ SeapoPym bridges two communities:
 - **Flexible Forcings** — Lazy loading with temporal interpolation (`linear`, `nearest`, `ffill`).
 - **Optimization** — Gradient descent (Optax), CMA-ES, Genetic Algorithm, IPOP-CMA-ES (evosax).
 
-## Pipeline
+## Simulation Pipeline
 
-The SeapoPym pipeline follows a compile-then-run pattern:
+A model is declared as a YAML blueprint and configured with concrete data. The compiler validates units and shapes, then produces a `CompiledModel` ready for execution:
 
+```mermaid
+graph LR
+    A[Blueprint YAML] --> C[compile_model]
+    B[Config] --> C
+    C --> D[CompiledModel]
+    D --> E[simulate / run]
+    E --> F[Outputs]
+
+    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style D fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style F fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style C fill:#e8833a,stroke:#b5612a,color:#fff
+    style E fill:#e8833a,stroke:#b5612a,color:#fff
 ```
-Blueprint (YAML) + Config → compile_model() → CompiledModel → simulate() / run() → Outputs
+
+At each timestep, the process DAG (solid arrows) computes tendencies from state, parameters and forcings. An explicit Euler solver (dashed arrows) then integrates the tendencies to advance the state:
+
+```mermaid
+graph LR
+    S[State] --> F[Process Function]
+    P[Parameters] --> F
+    Fo[Forcings] --> F
+    F --> T[Tendency]
+    T -.-> E[Euler Solver]
+    S -.->|t| E
+    E -.->|t+1| S
+
+    style S fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style P fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style Fo fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style T fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style F fill:#e8833a,stroke:#b5612a,color:#fff
+    style E fill:#e8833a,stroke:#b5612a,color:#fff
 ```
 
-1. **Blueprint** — A YAML file declaring the model topology: variables, process steps (as a DAG), and tendencies.
-2. **Config** — Concrete data: parameter values, forcing arrays, initial state, and execution settings.
-3. **compile_model()** — Validates, infers shapes, builds the forcing store, and produces a `CompiledModel`.
-4. **simulate() / run()** — Executes the compiled model using `jax.lax.scan`, returning state and outputs.
+## Optimization
+
+Parameter calibration builds on the same Blueprint + Config base. Two additional components are needed: **Objectives** (observed data + loss metric) and an **Optimizer** (calibration strategy):
+
+```mermaid
+graph LR
+    A[Blueprint] --> C[compile_model]
+    B[Config] --> C
+    C --> M[CompiledModel]
+    Obj[Objectives] --> Opt[Optimizer]
+    M --> Opt
+    Opt --> Res[Optimized Parameters]
+
+    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style M fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style Obj fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style Res fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style C fill:#e8833a,stroke:#b5612a,color:#fff
+    style Opt fill:#e8833a,stroke:#b5612a,color:#fff
+```
+
+Three methods are available: **Gradient descent** (Optax), **Genetic Algorithm** and **CMA-ES** (evosax). Gradient-based optimization leverages JAX's automatic differentiation; evolutionary methods work without gradients.
 
 ## Quickstart
 
