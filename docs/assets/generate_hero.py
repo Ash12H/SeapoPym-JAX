@@ -112,8 +112,8 @@ TRUE_PARAMS = {
 }
 
 INITIAL_STATE = {
-    "prey": xr.DataArray(np.array([[50.0]]), dims=["Y", "X"]),
-    "predator": xr.DataArray(np.array([[5.0]]), dims=["Y", "X"]),
+    "prey": xr.DataArray(np.array([[42.0]]), dims=["Y", "X"]),
+    "predator": xr.DataArray(np.array([[7.0]]), dims=["Y", "X"]),
 }
 
 
@@ -182,7 +182,7 @@ def run_gradient_optimization():
     opt_state = optimizer.init(norm_params)
 
     hist_alpha, hist_gamma, hist_loss = [], [], []
-    for _ in range(200):
+    for _ in range(400):
         loss_val, grads = vg(norm_params)
         updates, opt_state = optimizer.update(grads, opt_state, norm_params)
         norm_params = optax.apply_updates(norm_params, updates)

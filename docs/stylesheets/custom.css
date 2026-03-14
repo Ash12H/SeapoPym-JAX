@@ -2,13 +2,13 @@
 
 :root {
   /* Primary palette */
-  --md-primary-fg-color: #1b4965;
-  --md-primary-fg-color--light: #5fa8d3;
-  --md-primary-fg-color--dark: #0d2b3e;
+  --md-primary-fg-color: rgb(27, 73, 101);
+  --md-primary-fg-color--light: rgb(95, 168, 211);
+  --md-primary-fg-color--dark: rgb(13, 43, 62);
   --md-primary-bg-color: #ffffff;
 
   /* Accent */
-  --md-accent-fg-color: #e8833a;
+  --md-accent-fg-color: rgb(D);
   --md-accent-fg-color--transparent: rgba(232, 131, 58, 0.1);
 
   /* Text */
@@ -54,4 +54,19 @@
 .md-typeset .admonition.note,
 .md-typeset details.note {
   border-color: #62b6cb;
+}
+
+/* Center logo in mobile navigation drawer */
+@media screen and (max-width: 76.2344em) {
+  .md-nav--primary > .md-nav__title {
+    padding-top: 0.2rem;
+  }
+  .md-nav--primary .md-nav__title .md-logo {
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
+    width: fit-content;
+    margin: 0.2rem auto;
+  }
 }

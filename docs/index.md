@@ -6,6 +6,10 @@ It uses a **DAG-based blueprint architecture** where biological and physical pro
 
 ![Simulate dynamical systems, compute exact gradients through physics, and optimize parameters — all in JAX.](assets/hero.png)
 
+!!! example "Lotka-Volterra prey-predator"
+
+    A classic 2-species ODE (prey growth α=0.04/day, predation β=0.005/day, conversion δ=0.5, mortality γ=0.1/day) declared as a SeapoPym Blueprint and compiled to JAX. **Gradient Descent** recovers all four parameters from partial, noisy observations (prey only, 5% Gaussian noise) by back-propagating through the entire simulation via `jax.grad`.
+
 ## Why SeapoPym?
 
 SeapoPym bridges two communities:
