@@ -1,0 +1,56 @@
+id: lotka-volterra
+version: "1.0"
+
+declarations:
+  state:
+    prey:
+      units: "dimensionless"
+      dims: [Y, X]
+    predator:
+      units: "dimensionless"
+      dims: [Y, X]
+
+  parameters:
+    alpha:
+      units: "1/s"
+    beta:
+      units: "1/s"
+    delta:
+      units: "dimensionless"
+    gamma:
+      units: "1/s"
+
+  forcings: {}
+
+process:
+  - func: "lv:prey_growth"
+    inputs:
+      N: state.prey
+      alpha: parameters.alpha
+    outputs:
+      return: derived.prey_growth
+
+  - func: "lv:predation"
+    inputs:
+      N: state.prey
+      P: state.predator
+      beta: parameters.beta
+      delta: parameters.delta
+    outputs:
+      prey_loss: derived.prey_loss
+      predator_gain: derived.predator_gain
+
+  - func: "lv:predator_death"
+    inputs:
+      P: state.predator
+      gamma: parameters.gamma
+    outputs:
+      return: derived.predator_death
+
+tendencies:
+  prey:
+    - source: derived.prey_growth
+    - source: derived.prey_loss
+  predator:
+    - source: derived.predator_gain
+    - source: derived.predator_death

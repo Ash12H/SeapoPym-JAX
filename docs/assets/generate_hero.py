@@ -19,90 +19,15 @@ import numpy as np
 import optax
 import xarray as xr
 
-from seapopym.blueprint import Blueprint, Config, functional
+import seapopym.functions.lotka_volterra  # noqa: F401 — register LV functions
+from seapopym.blueprint import Config
 from seapopym.compiler import compile_model
 from seapopym.engine import build_step_fn, run, simulate
+from seapopym.models import LOTKA_VOLTERRA
 
 OUTPUT_DIR = Path(__file__).parent
 PALETTE = ["#1B4965", "#62B6CB", "#E8833A", "#5FA8D3"]
 DAY = 86400.0
-
-
-# === Lotka-Volterra functions ===
-
-
-@functional(name="hero:prey_growth", units={"N": "kg/m^2", "alpha": "1/s", "return": "kg/m^2/s"})
-def prey_growth(N, alpha):
-    return alpha * N
-
-
-@functional(
-    name="hero:predation",
-    units={
-        "N": "kg/m^2",
-        "P": "kg/m^2",
-        "beta": "m^2/kg/s",
-        "delta": "dimensionless",
-        "prey_loss": "kg/m^2/s",
-        "predator_gain": "kg/m^2/s",
-    },
-    outputs=("prey_loss", "predator_gain"),
-)
-def predation(N, P, beta, delta):
-    interaction = beta * N * P
-    return -interaction, delta * interaction
-
-
-@functional(name="hero:predator_death", units={"P": "kg/m^2", "gamma": "1/s", "return": "kg/m^2/s"})
-def predator_death(P, gamma):
-    return -gamma * P
-
-
-BLUEPRINT = Blueprint.from_dict(
-    {
-        "id": "lv-hero",
-        "version": "1.0",
-        "declarations": {
-            "state": {
-                "prey": {"units": "kg/m^2", "dims": ["Y", "X"]},
-                "predator": {"units": "kg/m^2", "dims": ["Y", "X"]},
-            },
-            "parameters": {
-                "alpha": {"units": "1/s"},
-                "beta": {"units": "m^2/kg/s"},
-                "delta": {"units": "dimensionless"},
-                "gamma": {"units": "1/s"},
-            },
-            "forcings": {},
-        },
-        "process": [
-            {
-                "func": "hero:prey_growth",
-                "inputs": {"N": "state.prey", "alpha": "parameters.alpha"},
-                "outputs": {"return": "derived.prey_growth"},
-            },
-            {
-                "func": "hero:predation",
-                "inputs": {
-                    "N": "state.prey",
-                    "P": "state.predator",
-                    "beta": "parameters.beta",
-                    "delta": "parameters.delta",
-                },
-                "outputs": {"prey_loss": "derived.prey_loss", "predator_gain": "derived.predator_gain"},
-            },
-            {
-                "func": "hero:predator_death",
-                "inputs": {"P": "state.predator", "gamma": "parameters.gamma"},
-                "outputs": {"return": "derived.predator_death"},
-            },
-        ],
-        "tendencies": {
-            "prey": [{"source": "derived.prey_growth"}, {"source": "derived.prey_loss"}],
-            "predator": [{"source": "derived.predator_gain"}, {"source": "derived.predator_death"}],
-        },
-    }
-)
 
 TRUE_PARAMS = {
     "alpha": 0.04 / DAY,
@@ -127,7 +52,7 @@ def run_simulation():
             "execution": {"time_start": "2000-01-01", "time_end": "2002-12-31", "dt": "1d"},
         }
     )
-    model = compile_model(BLUEPRINT, config)
+    model = compile_model(LOTKA_VOLTERRA, config)
     _, outputs = simulate(model)
     return outputs["prey"].values[:, 0, 0], outputs["predator"].values[:, 0, 0]
 
@@ -142,7 +67,7 @@ def run_gradient_optimization():
             "execution": {"time_start": "2000-01-01", "time_end": "2000-06-30", "dt": "1d"},
         }
     )
-    model = compile_model(BLUEPRINT, config)
+    model = compile_model(LOTKA_VOLTERRA, config)
     step_fn = build_step_fn(model, export_variables=["prey", "predator"])
     _, truth = run(step_fn, model, model.state, model.parameters, chunk_size=None)
 
@@ -163,26 +88,27 @@ def run_gradient_optimization():
             params = {**model.parameters, "alpha": jnp.array(a), "gamma": jnp.array(g)}
             loss_grid[j, i] = float(loss_fn(params))
 
-    # Adam optimization trajectory
-    bounds = {k: (v * 0.5, v * 2.0) for k, v in TRUE_PARAMS.items()}
+    # Adam optimization trajectory — optimize alpha and gamma only
+    opt_keys = ["alpha", "gamma"]
+    bounds = {k: (TRUE_PARAMS[k] * 0.5, TRUE_PARAMS[k] * 2.0) for k in opt_keys}
 
     def to_real(norm):
-        return {k: jnp.array(bounds[k][0] + norm[k] * (bounds[k][1] - bounds[k][0])) for k in norm}
+        return {**model.parameters, **{k: jnp.array(bounds[k][0] + norm[k] * (bounds[k][1] - bounds[k][0])) for k in norm}}
 
     def to_norm(real):
-        return {k: jnp.array((real[k] - bounds[k][0]) / (bounds[k][1] - bounds[k][0])) for k in real}
+        return {k: jnp.array((real[k] - bounds[k][0]) / (bounds[k][1] - bounds[k][0])) for k in opt_keys}
 
     def loss_norm(norm_params):
         return loss_fn(to_real(norm_params))
 
     vg = jax.jit(jax.value_and_grad(loss_norm))
-    init_guess = {k: jnp.array(v * 1.3) for k, v in TRUE_PARAMS.items()}
+    init_guess = {k: jnp.array(TRUE_PARAMS[k] * 1.3) for k in opt_keys}
     norm_params = to_norm(init_guess)
     optimizer = optax.adam(learning_rate=0.01)
     opt_state = optimizer.init(norm_params)
 
     hist_alpha, hist_gamma, hist_loss = [], [], []
-    for _ in range(400):
+    for _ in range(200):
         loss_val, grads = vg(norm_params)
         updates, opt_state = optimizer.update(grads, opt_state, norm_params)
         norm_params = optax.apply_updates(norm_params, updates)
@@ -206,7 +132,7 @@ def generate_hero(prey_ts, pred_ts, alpha_range, gamma_range, loss_grid, hist_al
     ax1.plot(days, prey_ts, color=PALETTE[0], linewidth=2, label="Prey")
     ax1.plot(days, pred_ts, color=PALETTE[2], linewidth=2, label="Predator")
     ax1.set_xlabel("Day", color="#718096", fontsize=10)
-    ax1.set_ylabel("Density (kg/m\u00b2)", color="#718096", fontsize=10)
+    ax1.set_ylabel("Population density", color="#718096", fontsize=10)
     ax1.set_title("Simulation", color="#1B4965", fontsize=13, fontweight="bold")
     ax1.legend(framealpha=0.9, fontsize=9)
     ax1.tick_params(colors="#718096")
@@ -216,7 +142,7 @@ def generate_hero(prey_ts, pred_ts, alpha_range, gamma_range, loss_grid, hist_al
     ax2 = fig.add_subplot(gs[1])
     ad = alpha_range * DAY
     gd = gamma_range * DAY
-    im = ax2.contourf(ad, gd, np.log10(loss_grid + 1), levels=20, cmap="Blues")
+    ax2.contourf(ad, gd, np.log10(loss_grid + 1), levels=20, cmap="Blues")
     ax2.contour(ad, gd, np.log10(loss_grid + 1), levels=8, colors="#718096", linewidths=0.4, alpha=0.4)
     ta = np.array(hist_alpha) * DAY
     tg = np.array(hist_gamma) * DAY

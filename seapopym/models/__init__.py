@@ -30,3 +30,16 @@ def load_model(name: str) -> Blueprint:
 
 LMTL_NO_TRANSPORT = load_model("seapodym_lmtl_no_transport")
 LMTL = load_model("seapodym_lmtl")
+
+
+def load_lotka_volterra() -> Blueprint:
+    """Load the Lotka-Volterra blueprint.
+
+    Note: requires ``import seapopym.functions.lotka_volterra`` (or
+    ``import seapopym.functions``) so that the ``lv:*`` functions are
+    registered before compilation.
+    """
+    return load_model("lotka_volterra")
+
+
+LOTKA_VOLTERRA = load_lotka_volterra()

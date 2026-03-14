@@ -2,13 +2,13 @@
 
 **SeapoPym** is a JAX-accelerated framework for differentiable simulation of dynamical systems on N-dimensional grids.
 
-It uses a **DAG-based blueprint architecture** where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
+It uses a **[Directed Acyclic Graph](https://en.wikipedia.org/wiki/Directed_acyclic_graph) (DAG) blueprint architecture** where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
 
 ![Simulate dynamical systems, compute exact gradients through physics, and optimize parameters — all in JAX.](assets/hero.png)
 
 !!! example "Lotka-Volterra prey-predator"
 
-    A classic 2-species ODE (prey growth α=0.04/day, predation β=0.005/day, conversion δ=0.5, mortality γ=0.1/day) declared as a SeapoPym Blueprint and compiled to JAX. **Gradient Descent** recovers all four parameters from partial, noisy observations (prey only, 5% Gaussian noise) by back-propagating through the entire simulation via `jax.grad`.
+    A classic 2-species ODE (prey growth α, predation β, conversion δ, mortality γ) declared as a SeapoPym Blueprint and compiled to JAX. **Gradient Descent** recovers α and γ from partial, noisy observations (prey only, 5% Gaussian noise) by back-propagating through the entire simulation via `jax.grad` — converging to <1% error in ~100 steps.
 
 ## Why SeapoPym?
 
@@ -28,66 +28,67 @@ SeapoPym bridges two communities:
     - **Automatic vectorization** — `jax.vmap` dispatches over non-core dimensions with canonical ordering.
     - **Built-in optimization** — Gradient descent (Optax), CMA-ES, Genetic Algorithm, IPOP-CMA-ES (evosax).
 
-## Key Features
+## How it works
 
-- **Blueprint Architecture** — Declare models as YAML: state variables, parameters, forcings, and process DAG.
-- **Strict Unit Validation** — Pint-based dimensional consistency enforced at compile time.
-- **Automatic Vectorization** — `vmap` dispatch over non-core dimensions with canonical ordering `(E, T, F, C, Z, Y, X)`.
-- **Pluggable Writers** — WriterRaw (JAX-traceable for optimization), MemoryWriter (`xr.Dataset`), DiskWriter (Zarr).
-- **Flexible Forcings** — Lazy loading with temporal interpolation (`linear`, `nearest`, `ffill`).
-- **Optimization** — Gradient descent (Optax), CMA-ES, Genetic Algorithm, IPOP-CMA-ES (evosax).
+Define a model in YAML, compile it, run it. The same pipeline supports simulation and parameter optimization.
 
-## Simulation Pipeline
-
-A model is declared as a YAML blueprint and configured with concrete data. The compiler validates units and shapes, then produces a `CompiledModel` ready for execution:
+_Fig. 1 — From YAML blueprint to simulation output. The compiler validates units and shapes at compile time._
 
 ![Simulation Pipeline](assets/diagrams/pipeline.svg)
 
-At each timestep, the process DAG computes tendencies from state, parameters and forcings. An explicit Euler solver then integrates the tendencies to advance the state:
+_Fig. 2 — At each timestep, the DAG computes tendencies from state, parameters and forcings. An Euler solver advances the state._
 
 ![Timestep Loop](assets/diagrams/timestep.svg)
 
-## Optimization
-
-Parameter calibration builds on the same Blueprint + Config base. Two additional components are needed: **Objectives** (observed data + loss metric) and an **Optimizer** (calibration strategy):
+_Fig. 3 — Same pipeline, extended with objectives and an optimizer for automatic parameter calibration._
 
 ![Optimization Flow](assets/diagrams/optimization_flow.svg)
 
-Three methods are available: **Gradient descent** (Optax), **Genetic Algorithm** and **CMA-ES** (evosax). Gradient-based optimization leverages JAX's automatic differentiation; evolutionary methods work without gradients.
-
 ## Quickstart
 
+Logistic growth — `dN/dt = r·N·(1 − N/K)` — in 20 lines:
+
 ```python
-from seapopym.models import LMTL_NO_TRANSPORT
-from seapopym.blueprint import Config
+import numpy as np
+import xarray as xr
+from seapopym.blueprint import Blueprint, Config, functional
 from seapopym.compiler import compile_model
 from seapopym.engine import simulate
-import xarray as xr
-import numpy as np
 
-# 1. Load a pre-defined blueprint
-blueprint = LMTL_NO_TRANSPORT
+# 1. Define the physics — one equation, two parameters
+@functional(name="logistic", units={"N": "kg/m^2", "r": "1/s", "K": "kg/m^2", "return": "kg/m^2/s"})
+def logistic_growth(N, r, K):
+    return r * N * (1 - N / K)
 
-# 2. Configure the experiment
-config = Config.from_dict({
-    "parameters": {"growth_rate": {"value": 0.01}, ...},
-    "forcings": {"temperature": xr.DataArray(...)},
-    "initial_state": {"biomass": xr.DataArray(...)},
-    "execution": {"time_start": "2020-01-01", "time_end": "2020-12-31", "dt": "1d"},
+# 2. Declare the model
+blueprint = Blueprint.from_dict({
+    "id": "logistic", "version": "1.0",
+    "declarations": {
+        "state": {"N": {"units": "kg/m^2", "dims": ["Y", "X"]}},
+        "parameters": {"r": {"units": "1/s"}, "K": {"units": "kg/m^2"}},
+        "forcings": {},
+    },
+    "process": [{"func": "logistic", "inputs": {"N": "state.N", "r": "parameters.r", "K": "parameters.K"}, "outputs": {"return": "derived.growth"}}],
+    "tendencies": {"N": [{"source": "derived.growth"}]},
 })
 
-# 3. Compile and run
+# 3. Configure, compile, run
+DAY = 86400.0
+config = Config.from_dict({
+    "parameters": {"r": xr.DataArray(0.05 / DAY), "K": xr.DataArray(100.0)},
+    "forcings": {},
+    "initial_state": {"N": xr.DataArray(np.array([[1.0]]), dims=["Y", "X"])},
+    "execution": {"time_start": "2000-01-01", "time_end": "2000-12-31", "dt": "1d"},
+})
 model = compile_model(blueprint, config)
-state, outputs = simulate(model, chunk_size=365)
+_, outputs = simulate(model)
 
-# outputs is an xr.Dataset with the exported variables
-print(outputs)
+# 4. Result — logistic saturation toward K=100
+N = outputs["N"].values[:, 0, 0]
+print(f"Day 0: {N[0]:.0f} → Day 90: {N[90]:.0f} → Day 180: {N[180]:.0f} → Day 365: {N[-1]:.0f}")
+# Day 0: 1 → Day 90: 47 → Day 180: 99 → Day 365: 100
 ```
 
-## Next Steps
+## Next step
 
-- [Installation](getting-started/installation.md) — Set up SeapoPym on your machine.
-- [Blueprint & DAG](concepts/blueprint.md) — Understand how models are declared.
-- [LMTL Simulation](examples/01_lmtl_no_transport.ipynb) — Run a marine ecosystem model.
-- [Custom Model](examples/03_lotka_volterra.ipynb) — Build any dynamical system from scratch.
-- [Differentiable Simulation](examples/04_gradient.ipynb) — Compute gradients through physics.
+[Build a dynamical system from scratch](examples/01_lotka_volterra.ipynb) — Define a Lotka-Volterra model, compile it, and simulate predator-prey dynamics.

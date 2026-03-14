@@ -75,11 +75,11 @@ nav:
     - Simulation & Engine: concepts/simulation.md
     - Optimization: concepts/optimization.md
   - Examples:
-    - LMTL No Transport: examples/01_lmtl_no_transport.ipynb
-    - Transport & Movement: examples/02_transport.ipynb
-    - Custom Model (Lotka-Volterra): examples/03_lotka_volterra.ipynb
-    - Differentiable Simulation: examples/04_gradient.ipynb
-    - Optimization Strategies: examples/05_optimization.ipynb
+    - Custom Model (Lotka-Volterra): examples/01_lotka_volterra.ipynb
+    - Differentiable Simulation: examples/02_gradient.ipynb
+    - Parameter Optimization: examples/03_optimization.ipynb
+    - LMTL — No Transport: examples/04_lmtl_no_transport.ipynb
+    - LMTL — Spatial Transport: examples/05_transport.ipynb
 
 extra_css:
   - stylesheets/custom.css

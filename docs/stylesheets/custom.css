@@ -29,6 +29,15 @@
   line-height: 1.8;
 }
 
+/* Links — underline for clarity */
+.md-typeset a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.md-typeset a:hover {
+  text-decoration-color: #e8833a;
+}
+
 /* Code blocks — light gray background */
 .md-typeset code {
   background-color: #f0f0f0;

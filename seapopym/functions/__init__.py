@@ -3,6 +3,7 @@
 This package contains @functional-decorated functions organized by domain:
 - lmtl: LMTL ecosystem model (temperature, mortality, cohort dynamics)
 - transport: Advection and diffusion
+- lotka_volterra: Classic predator-prey model
 """
 
 from .lmtl import (
@@ -16,6 +17,7 @@ from .lmtl import (
     recruitment_flow,
     threshold_temperature,
 )
+from .lotka_volterra import predation, predator_death, prey_growth
 from .transport import BoundaryType, transport_tendency
 
 __all__ = [
@@ -34,4 +36,8 @@ __all__ = [
     # Transport functions
     "transport_tendency",
     "BoundaryType",
+    # Lotka-Volterra functions
+    "prey_growth",
+    "predation",
+    "predator_death",
 ]
