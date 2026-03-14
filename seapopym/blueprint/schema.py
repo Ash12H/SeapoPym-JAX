@@ -288,7 +288,14 @@ class Blueprint(BaseModel):
         for i, step in enumerate(self.process):
             func_id = f"process_{i}"
             func_label = step.func.split(":")[1] if ":" in step.func else step.func
-            g.node(func_id, label=func_label, fillcolor=colors["function"], fontcolor="white", shape="box", style="filled,rounded")
+            g.node(
+                func_id,
+                label=func_label,
+                fillcolor=colors["function"],
+                fontcolor="white",
+                shape="box",
+                style="filled,rounded",
+            )
 
             # Input edges
             for _arg_name, var_path in step.inputs.items():

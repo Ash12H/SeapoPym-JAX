@@ -93,7 +93,10 @@ def run_gradient_optimization():
     bounds = {k: (TRUE_PARAMS[k] * 0.5, TRUE_PARAMS[k] * 2.0) for k in opt_keys}
 
     def to_real(norm):
-        return {**model.parameters, **{k: jnp.array(bounds[k][0] + norm[k] * (bounds[k][1] - bounds[k][0])) for k in norm}}
+        return {
+            **model.parameters,
+            **{k: jnp.array(bounds[k][0] + norm[k] * (bounds[k][1] - bounds[k][0])) for k in norm},
+        }
 
     def to_norm(real):
         return {k: jnp.array((real[k] - bounds[k][0]) / (bounds[k][1] - bounds[k][0])) for k in opt_keys}
