@@ -32,7 +32,7 @@ def prey_growth(N, alpha):
         "prey_loss": "1/s",
         "predator_gain": "1/s",
     },
-    outputs=("prey_loss", "predator_gain"),
+    outputs=["prey_loss", "predator_gain"],
 )
 def predation(N, P, beta, delta):
     """Predation interaction: prey loses beta*N*P, predator gains delta*beta*N*P."""
