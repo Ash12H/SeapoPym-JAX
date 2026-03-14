@@ -11,14 +11,14 @@
 <!-- derived.predator_death -->
 <g id="node1" class="node">
 <title>derived.predator_death</title>
-<ellipse fill="#e1bee7" stroke="black" cx="351" cy="-90" rx="47.63" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="351" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">predator_death</text>
+<ellipse fill="#62b6cb" stroke="black" cx="351" cy="-90" rx="47.63" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="351" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">predator_death</text>
 </g>
 <!-- tendency_predator -->
 <g id="node15" class="node">
 <title>tendency_predator</title>
-<polygon fill="#ffcdd2" stroke="black" points="273,-36 208.78,-18 273,0 337.22,-18 273,-36"/>
-<text xml:space="preserve" text-anchor="middle" x="273" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00">d predator / dt</text>
+<polygon fill="#f0f0f0" stroke="black" points="273,-36 208.78,-18 273,0 337.22,-18 273,-36"/>
+<text xml:space="preserve" text-anchor="middle" x="273" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3748">d predator / dt</text>
 </g>
 <!-- derived.predator_death&#45;&gt;tendency_predator -->
 <g id="edge16" class="edge">
@@ -29,8 +29,8 @@
 <!-- derived.predator_gain -->
 <g id="node2" class="node">
 <title>derived.predator_gain</title>
-<ellipse fill="#e1bee7" stroke="black" cx="241" cy="-90" rx="44.08" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="241" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">predator_gain</text>
+<ellipse fill="#62b6cb" stroke="black" cx="241" cy="-90" rx="44.08" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="241" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">predator_gain</text>
 </g>
 <!-- derived.predator_gain&#45;&gt;tendency_predator -->
 <g id="edge15" class="edge">
@@ -41,14 +41,14 @@
 <!-- derived.prey_growth -->
 <g id="node3" class="node">
 <title>derived.prey_growth</title>
-<ellipse fill="#e1bee7" stroke="black" cx="52" cy="-90" rx="40.97" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="52" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">prey_growth</text>
+<ellipse fill="#62b6cb" stroke="black" cx="52" cy="-90" rx="40.97" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="52" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">prey_growth</text>
 </g>
 <!-- tendency_prey -->
 <g id="node14" class="node">
 <title>tendency_prey</title>
-<polygon fill="#ffcdd2" stroke="black" points="112,-36 61.58,-18 112,0 162.42,-18 112,-36"/>
-<text xml:space="preserve" text-anchor="middle" x="112" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00">d prey / dt</text>
+<polygon fill="#f0f0f0" stroke="black" points="112,-36 61.58,-18 112,0 162.42,-18 112,-36"/>
+<text xml:space="preserve" text-anchor="middle" x="112" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3748">d prey / dt</text>
 </g>
 <!-- derived.prey_growth&#45;&gt;tendency_prey -->
 <g id="edge13" class="edge">
@@ -59,8 +59,8 @@
 <!-- derived.prey_loss -->
 <g id="node4" class="node">
 <title>derived.prey_loss</title>
-<ellipse fill="#e1bee7" stroke="black" cx="145" cy="-90" rx="34.32" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="145" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">prey_loss</text>
+<ellipse fill="#62b6cb" stroke="black" cx="145" cy="-90" rx="34.32" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="145" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">prey_loss</text>
 </g>
 <!-- derived.prey_loss&#45;&gt;tendency_prey -->
 <g id="edge14" class="edge">
@@ -71,14 +71,14 @@
 <!-- parameters.alpha -->
 <g id="node5" class="node">
 <title>parameters.alpha</title>
-<polygon fill="#ffe0b2" stroke="black" points="54,-252 0,-252 0,-216 54,-216 54,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="27" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">alpha</text>
+<polygon fill="#5fa8d3" stroke="black" points="54,-252 0,-252 0,-216 54,-216 54,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="27" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">alpha</text>
 </g>
 <!-- process_0 -->
 <g id="node11" class="node">
 <title>process_0</title>
-<path fill="#f8bbd0" stroke="black" d="M74.62,-180C74.62,-180 29.38,-180 29.38,-180 23.38,-180 17.38,-174 17.38,-168 17.38,-168 17.38,-156 17.38,-156 17.38,-150 23.38,-144 29.38,-144 29.38,-144 74.62,-144 74.62,-144 80.62,-144 86.62,-150 86.62,-156 86.62,-156 86.62,-168 86.62,-168 86.62,-174 80.62,-180 74.62,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="52" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">prey_growth</text>
+<path fill="#e8833a" stroke="black" d="M74.62,-180C74.62,-180 29.38,-180 29.38,-180 23.38,-180 17.38,-174 17.38,-168 17.38,-168 17.38,-156 17.38,-156 17.38,-150 23.38,-144 29.38,-144 29.38,-144 74.62,-144 74.62,-144 80.62,-144 86.62,-150 86.62,-156 86.62,-156 86.62,-168 86.62,-168 86.62,-174 80.62,-180 74.62,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="52" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">prey_growth</text>
 </g>
 <!-- parameters.alpha&#45;&gt;process_0 -->
 <g id="edge2" class="edge">
@@ -89,14 +89,14 @@
 <!-- parameters.beta -->
 <g id="node6" class="node">
 <title>parameters.beta</title>
-<polygon fill="#ffe0b2" stroke="black" points="198,-252 144,-252 144,-216 198,-216 198,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="171" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">beta</text>
+<polygon fill="#5fa8d3" stroke="black" points="198,-252 144,-252 144,-216 198,-216 198,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="171" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">beta</text>
 </g>
 <!-- process_1 -->
 <g id="node12" class="node">
 <title>process_1</title>
-<path fill="#f8bbd0" stroke="black" d="M221.88,-180C221.88,-180 190.12,-180 190.12,-180 184.12,-180 178.12,-174 178.12,-168 178.12,-168 178.12,-156 178.12,-156 178.12,-150 184.12,-144 190.12,-144 190.12,-144 221.88,-144 221.88,-144 227.88,-144 233.88,-150 233.88,-156 233.88,-156 233.88,-168 233.88,-168 233.88,-174 227.88,-180 221.88,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="206" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">predation</text>
+<path fill="#e8833a" stroke="black" d="M221.88,-180C221.88,-180 190.12,-180 190.12,-180 184.12,-180 178.12,-174 178.12,-168 178.12,-168 178.12,-156 178.12,-156 178.12,-150 184.12,-144 190.12,-144 190.12,-144 221.88,-144 221.88,-144 227.88,-144 233.88,-150 233.88,-156 233.88,-156 233.88,-168 233.88,-168 233.88,-174 227.88,-180 221.88,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="206" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">predation</text>
 </g>
 <!-- parameters.beta&#45;&gt;process_1 -->
 <g id="edge6" class="edge">
@@ -107,8 +107,8 @@
 <!-- parameters.delta -->
 <g id="node7" class="node">
 <title>parameters.delta</title>
-<polygon fill="#ffe0b2" stroke="black" points="270,-252 216,-252 216,-216 270,-216 270,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="243" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">delta</text>
+<polygon fill="#5fa8d3" stroke="black" points="270,-252 216,-252 216,-216 270,-216 270,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="243" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">delta</text>
 </g>
 <!-- parameters.delta&#45;&gt;process_1 -->
 <g id="edge7" class="edge">
@@ -119,14 +119,14 @@
 <!-- parameters.gamma -->
 <g id="node8" class="node">
 <title>parameters.gamma</title>
-<polygon fill="#ffe0b2" stroke="black" points="414,-252 360,-252 360,-216 414,-216 414,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="387" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">gamma</text>
+<polygon fill="#5fa8d3" stroke="black" points="414,-252 360,-252 360,-216 414,-216 414,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="387" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">gamma</text>
 </g>
 <!-- process_2 -->
 <g id="node13" class="node">
 <title>process_2</title>
-<path fill="#f8bbd0" stroke="black" d="M379.25,-180C379.25,-180 322.75,-180 322.75,-180 316.75,-180 310.75,-174 310.75,-168 310.75,-168 310.75,-156 310.75,-156 310.75,-150 316.75,-144 322.75,-144 322.75,-144 379.25,-144 379.25,-144 385.25,-144 391.25,-150 391.25,-156 391.25,-156 391.25,-168 391.25,-168 391.25,-174 385.25,-180 379.25,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="351" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">predator_death</text>
+<path fill="#e8833a" stroke="black" d="M379.25,-180C379.25,-180 322.75,-180 322.75,-180 316.75,-180 310.75,-174 310.75,-168 310.75,-168 310.75,-156 310.75,-156 310.75,-150 316.75,-144 322.75,-144 322.75,-144 379.25,-144 379.25,-144 385.25,-144 391.25,-150 391.25,-156 391.25,-156 391.25,-168 391.25,-168 391.25,-174 385.25,-180 379.25,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="351" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">predator_death</text>
 </g>
 <!-- parameters.gamma&#45;&gt;process_2 -->
 <g id="edge11" class="edge">
@@ -137,8 +137,8 @@
 <!-- state.predator -->
 <g id="node9" class="node">
 <title>state.predator</title>
-<polygon fill="#c8e6c9" stroke="black" stroke-width="2" points="342,-252 288,-252 288,-216 342,-216 342,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="315" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">predator</text>
+<polygon fill="#1b4965" stroke="black" stroke-width="2" points="342,-252 288,-252 288,-216 342,-216 342,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="315" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">predator</text>
 </g>
 <!-- state.predator&#45;&gt;process_1 -->
 <g id="edge5" class="edge">
@@ -155,8 +155,8 @@
 <!-- state.prey -->
 <g id="node10" class="node">
 <title>state.prey</title>
-<polygon fill="#c8e6c9" stroke="black" stroke-width="2" points="126,-252 72,-252 72,-216 126,-216 126,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="99" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">prey</text>
+<polygon fill="#1b4965" stroke="black" stroke-width="2" points="126,-252 72,-252 72,-216 126,-216 126,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="99" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">prey</text>
 </g>
 <!-- state.prey&#45;&gt;process_0 -->
 <g id="edge1" class="edge">

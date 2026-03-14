@@ -11,14 +11,14 @@
 <!-- derived.growth_flux -->
 <g id="node1" class="node">
 <title>derived.growth_flux</title>
-<ellipse fill="#e1bee7" stroke="black" cx="241.88" cy="-90" rx="39.2" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="241.88" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">growth_flux</text>
+<ellipse fill="#62b6cb" stroke="black" cx="241.88" cy="-90" rx="39.2" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="241.88" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">growth_flux</text>
 </g>
 <!-- tendency_biomass -->
 <g id="node9" class="node">
 <title>tendency_biomass</title>
-<polygon fill="#ffcdd2" stroke="black" points="188.88,-36 123.4,-18 188.87,0 254.35,-18 188.88,-36"/>
-<text xml:space="preserve" text-anchor="middle" x="188.88" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00">d biomass / dt</text>
+<polygon fill="#f0f0f0" stroke="black" points="188.88,-36 123.4,-18 188.87,0 254.35,-18 188.88,-36"/>
+<text xml:space="preserve" text-anchor="middle" x="188.88" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3748">d biomass / dt</text>
 </g>
 <!-- derived.growth_flux&#45;&gt;tendency_biomass -->
 <g id="edge8" class="edge">
@@ -29,8 +29,8 @@
 <!-- derived.mortality_flux -->
 <g id="node2" class="node">
 <title>derived.mortality_flux</title>
-<ellipse fill="#e1bee7" stroke="black" cx="138.88" cy="-90" rx="44.08" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="138.88" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">mortality_flux</text>
+<ellipse fill="#62b6cb" stroke="black" cx="138.88" cy="-90" rx="44.08" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="138.88" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">mortality_flux</text>
 </g>
 <!-- derived.mortality_flux&#45;&gt;tendency_biomass -->
 <g id="edge9" class="edge">
@@ -41,14 +41,14 @@
 <!-- forcings.temperature -->
 <g id="node3" class="node">
 <title>forcings.temperature</title>
-<polygon fill="#bbdefb" stroke="black" points="67.75,-252 0,-252 0,-216 67.75,-216 67.75,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="33.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">temperature</text>
+<polygon fill="#62b6cb" stroke="black" points="67.75,-252 0,-252 0,-216 67.75,-216 67.75,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="33.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">temperature</text>
 </g>
 <!-- process_1 -->
 <g id="node8" class="node">
 <title>process_1</title>
-<path fill="#f8bbd0" stroke="black" d="M171,-180C171,-180 98.75,-180 98.75,-180 92.75,-180 86.75,-174 86.75,-168 86.75,-168 86.75,-156 86.75,-156 86.75,-150 92.75,-144 98.75,-144 98.75,-144 171,-144 171,-144 177,-144 183,-150 183,-156 183,-156 183,-168 183,-168 183,-174 177,-180 171,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="134.88" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">compute_mortality</text>
+<path fill="#e8833a" stroke="black" d="M171,-180C171,-180 98.75,-180 98.75,-180 92.75,-180 86.75,-174 86.75,-168 86.75,-168 86.75,-156 86.75,-156 86.75,-150 92.75,-144 98.75,-144 98.75,-144 171,-144 171,-144 177,-144 183,-150 183,-156 183,-156 183,-168 183,-168 183,-174 177,-180 171,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="134.88" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">compute_mortality</text>
 </g>
 <!-- forcings.temperature&#45;&gt;process_1 -->
 <g id="edge5" class="edge">
@@ -59,14 +59,14 @@
 <!-- parameters.growth_rate -->
 <g id="node4" class="node">
 <title>parameters.growth_rate</title>
-<polygon fill="#ffe0b2" stroke="black" points="341.38,-252 274.38,-252 274.38,-216 341.38,-216 341.38,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="307.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">growth_rate</text>
+<polygon fill="#5fa8d3" stroke="black" points="341.38,-252 274.38,-252 274.38,-216 341.38,-216 341.38,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="307.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">growth_rate</text>
 </g>
 <!-- process_0 -->
 <g id="node7" class="node">
 <title>process_0</title>
-<path fill="#f8bbd0" stroke="black" d="M276.88,-180C276.88,-180 212.88,-180 212.88,-180 206.88,-180 200.88,-174 200.88,-168 200.88,-168 200.88,-156 200.88,-156 200.88,-150 206.88,-144 212.88,-144 212.88,-144 276.88,-144 276.88,-144 282.88,-144 288.88,-150 288.88,-156 288.88,-156 288.88,-168 288.88,-168 288.88,-174 282.88,-180 276.88,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="244.88" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">compute_growth</text>
+<path fill="#e8833a" stroke="black" d="M276.88,-180C276.88,-180 212.88,-180 212.88,-180 206.88,-180 200.88,-174 200.88,-168 200.88,-168 200.88,-156 200.88,-156 200.88,-150 206.88,-144 212.88,-144 212.88,-144 276.88,-144 276.88,-144 282.88,-144 288.88,-150 288.88,-156 288.88,-156 288.88,-168 288.88,-168 288.88,-174 282.88,-180 276.88,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="244.88" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">compute_growth</text>
 </g>
 <!-- parameters.growth_rate&#45;&gt;process_0 -->
 <g id="edge2" class="edge">
@@ -77,8 +77,8 @@
 <!-- parameters.thermal_sensitivity -->
 <g id="node5" class="node">
 <title>parameters.thermal_sensitivity</title>
-<polygon fill="#ffe0b2" stroke="black" points="183.75,-252 86,-252 86,-216 183.75,-216 183.75,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="134.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">thermal_sensitivity</text>
+<polygon fill="#5fa8d3" stroke="black" points="183.75,-252 86,-252 86,-216 183.75,-216 183.75,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="134.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">thermal_sensitivity</text>
 </g>
 <!-- parameters.thermal_sensitivity&#45;&gt;process_1 -->
 <g id="edge6" class="edge">
@@ -89,8 +89,8 @@
 <!-- state.biomass -->
 <g id="node6" class="node">
 <title>state.biomass</title>
-<polygon fill="#c8e6c9" stroke="black" stroke-width="2" points="255.88,-252 201.88,-252 201.88,-216 255.88,-216 255.88,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="228.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">biomass</text>
+<polygon fill="#1b4965" stroke="black" stroke-width="2" points="255.88,-252 201.88,-252 201.88,-216 255.88,-216 255.88,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="228.88" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">biomass</text>
 </g>
 <!-- state.biomass&#45;&gt;process_0 -->
 <g id="edge1" class="edge">

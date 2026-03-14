@@ -44,12 +44,12 @@ graph LR
     D --> E[simulate / run]
     E --> F[Outputs]
 
-    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style D fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style F fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style C fill:#e8833a,stroke:#b5612a,color:#fff
-    style E fill:#e8833a,stroke:#b5612a,color:#fff
+    style A fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style B fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style D fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style F fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style C fill:#e8833a,stroke:#c06a2a,color:#fff
+    style E fill:#e8833a,stroke:#c06a2a,color:#fff
 ```
 
 At each timestep, the process DAG (solid arrows) computes tendencies from state, parameters and forcings. An explicit Euler solver (dashed arrows) then integrates the tendencies to advance the state:
@@ -64,12 +64,12 @@ graph LR
     S -.->|t| E
     E -.->|t+1| S
 
-    style S fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style P fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style Fo fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style T fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style F fill:#e8833a,stroke:#b5612a,color:#fff
-    style E fill:#e8833a,stroke:#b5612a,color:#fff
+    style S fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style P fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style Fo fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style T fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style F fill:#e8833a,stroke:#c06a2a,color:#fff
+    style E fill:#e8833a,stroke:#c06a2a,color:#fff
 ```
 
 ## Optimization
@@ -85,13 +85,13 @@ graph LR
     M --> Opt
     Opt --> Res[Optimized Parameters]
 
-    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style M fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style Obj fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style Res fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style C fill:#e8833a,stroke:#b5612a,color:#fff
-    style Opt fill:#e8833a,stroke:#b5612a,color:#fff
+    style A fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style B fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style M fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style Obj fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style Res fill:#1b4965,stroke:#0d2b3e,color:#fff
+    style C fill:#e8833a,stroke:#c06a2a,color:#fff
+    style Opt fill:#e8833a,stroke:#c06a2a,color:#fff
 ```
 
 Three methods are available: **Gradient descent** (Optax), **Genetic Algorithm** and **CMA-ES** (evosax). Gradient-based optimization leverages JAX's automatic differentiation; evolutionary methods work without gradients.

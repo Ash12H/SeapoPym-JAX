@@ -1,0 +1,57 @@
+/* SeapoPym Documentation — Custom Palette */
+
+:root {
+  /* Primary palette */
+  --md-primary-fg-color: #1b4965;
+  --md-primary-fg-color--light: #5fa8d3;
+  --md-primary-fg-color--dark: #0d2b3e;
+  --md-primary-bg-color: #ffffff;
+
+  /* Accent */
+  --md-accent-fg-color: #e8833a;
+  --md-accent-fg-color--transparent: rgba(232, 131, 58, 0.1);
+
+  /* Text */
+  --md-typeset-color: #2d3748;
+  --md-default-fg-color: #2d3748;
+  --md-default-fg-color--light: #718096;
+}
+
+/* Headings */
+.md-typeset h1,
+.md-typeset h2 {
+  color: #1b4965;
+}
+
+/* Body text */
+.md-typeset {
+  color: #2d3748;
+  line-height: 1.8;
+}
+
+/* Code blocks — light gray background */
+.md-typeset code {
+  background-color: #f0f0f0;
+}
+
+/* Tabs — active tab accent */
+.md-typeset .tabbed-labels > label.tabbed-alternate:checked,
+.md-typeset .tabbed-labels > label:hover {
+  color: #e8833a;
+}
+
+/* Admonition accent colors */
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-color: #e8833a;
+}
+
+.md-typeset .admonition.info,
+.md-typeset details.info {
+  border-color: #5fa8d3;
+}
+
+.md-typeset .admonition.note,
+.md-typeset details.note {
+  border-color: #62b6cb;
+}

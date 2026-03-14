@@ -35,63 +35,17 @@ SeapoPym bridges two communities:
 
 A model is declared as a YAML blueprint and configured with concrete data. The compiler validates units and shapes, then produces a `CompiledModel` ready for execution:
 
-```mermaid
-graph LR
-    A[Blueprint YAML] --> C[compile_model]
-    B[Config] --> C
-    C --> D[CompiledModel]
-    D --> E[simulate / run]
-    E --> F[Outputs]
+![Simulation Pipeline](assets/diagrams/pipeline.svg)
 
-    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style D fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style F fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style C fill:#e8833a,stroke:#b5612a,color:#fff
-    style E fill:#e8833a,stroke:#b5612a,color:#fff
-```
+At each timestep, the process DAG computes tendencies from state, parameters and forcings. An explicit Euler solver then integrates the tendencies to advance the state:
 
-At each timestep, the process DAG (solid arrows) computes tendencies from state, parameters and forcings. An explicit Euler solver (dashed arrows) then integrates the tendencies to advance the state:
-
-```mermaid
-graph LR
-    S[State] --> F[Process Function]
-    P[Parameters] --> F
-    Fo[Forcings] --> F
-    F --> T[Tendency]
-    T -.-> E[Euler Solver]
-    S -.->|t| E
-    E -.->|t+1| S
-
-    style S fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style P fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style Fo fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style T fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style F fill:#e8833a,stroke:#b5612a,color:#fff
-    style E fill:#e8833a,stroke:#b5612a,color:#fff
-```
+![Timestep Loop](assets/diagrams/timestep.svg)
 
 ## Optimization
 
 Parameter calibration builds on the same Blueprint + Config base. Two additional components are needed: **Objectives** (observed data + loss metric) and an **Optimizer** (calibration strategy):
 
-```mermaid
-graph LR
-    A[Blueprint] --> C[compile_model]
-    B[Config] --> C
-    C --> M[CompiledModel]
-    Obj[Objectives] --> Opt[Optimizer]
-    M --> Opt
-    Opt --> Res[Optimized Parameters]
-
-    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style B fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style M fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style Obj fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style Res fill:#4a90d9,stroke:#2c5f8a,color:#fff
-    style C fill:#e8833a,stroke:#b5612a,color:#fff
-    style Opt fill:#e8833a,stroke:#b5612a,color:#fff
-```
+![Optimization Flow](assets/diagrams/optimization_flow.svg)
 
 Three methods are available: **Gradient descent** (Optax), **Genetic Algorithm** and **CMA-ES** (evosax). Gradient-based optimization leverages JAX's automatic differentiation; evolutionary methods work without gradients.
 
@@ -128,4 +82,6 @@ print(outputs)
 
 - [Installation](getting-started/installation.md) — Set up SeapoPym on your machine.
 - [Blueprint & DAG](concepts/blueprint.md) — Understand how models are declared.
-- [Examples](examples/01_lmtl_no_transport.ipynb) — Run your first simulation.
+- [LMTL Simulation](examples/01_lmtl_no_transport.ipynb) — Run a marine ecosystem model.
+- [Custom Model](examples/03_lotka_volterra.ipynb) — Build any dynamical system from scratch.
+- [Differentiable Simulation](examples/04_gradient.ipynb) — Compute gradients through physics.

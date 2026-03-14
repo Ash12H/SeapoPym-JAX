@@ -11,14 +11,14 @@
 <!-- derived.aging_flow -->
 <g id="node1" class="node">
 <title>derived.aging_flow</title>
-<ellipse fill="#e1bee7" stroke="black" cx="243.25" cy="-90" rx="36.98" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="243.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">aging_flow</text>
+<ellipse fill="#62b6cb" stroke="black" cx="243.25" cy="-90" rx="36.98" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="243.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">aging_flow</text>
 </g>
 <!-- tendency_production -->
 <g id="node38" class="node">
 <title>tendency_production</title>
-<polygon fill="#ffcdd2" stroke="black" points="243.25,-36 170.87,-18 243.25,0 315.63,-18 243.25,-36"/>
-<text xml:space="preserve" text-anchor="middle" x="243.25" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00">d production / dt</text>
+<polygon fill="#f0f0f0" stroke="black" points="243.25,-36 170.87,-18 243.25,0 315.63,-18 243.25,-36"/>
+<text xml:space="preserve" text-anchor="middle" x="243.25" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3748">d production / dt</text>
 </g>
 <!-- derived.aging_flow&#45;&gt;tendency_production -->
 <g id="edge43" class="edge">
@@ -29,14 +29,14 @@
 <!-- derived.day_length -->
 <g id="node2" class="node">
 <title>derived.day_length</title>
-<ellipse fill="#e1bee7" stroke="black" cx="366.25" cy="-810" rx="37.42" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="366.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00">day_length</text>
+<ellipse fill="#62b6cb" stroke="black" cx="366.25" cy="-810" rx="37.42" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="366.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">day_length</text>
 </g>
 <!-- process_1 -->
 <g id="node28" class="node">
 <title>process_1</title>
-<path fill="#f8bbd0" stroke="black" d="M538.5,-756C538.5,-756 452,-756 452,-756 446,-756 440,-750 440,-744 440,-744 440,-732 440,-732 440,-726 446,-720 452,-720 452,-720 538.5,-720 538.5,-720 544.5,-720 550.5,-726 550.5,-732 550.5,-732 550.5,-744 550.5,-744 550.5,-750 544.5,-756 538.5,-756"/>
-<text xml:space="preserve" text-anchor="middle" x="495.25" y="-734.12" font-family="Helvetica,sans-Serif" font-size="10.00">layer_weighted_mean</text>
+<path fill="#e8833a" stroke="black" d="M538.5,-756C538.5,-756 452,-756 452,-756 446,-756 440,-750 440,-744 440,-744 440,-732 440,-732 440,-726 446,-720 452,-720 452,-720 538.5,-720 538.5,-720 544.5,-720 550.5,-726 550.5,-732 550.5,-732 550.5,-744 550.5,-744 550.5,-750 544.5,-756 538.5,-756"/>
+<text xml:space="preserve" text-anchor="middle" x="495.25" y="-734.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">layer_weighted_mean</text>
 </g>
 <!-- derived.day_length&#45;&gt;process_1 -->
 <g id="edge5" class="edge">
@@ -47,14 +47,14 @@
 <!-- derived.mean_temperature -->
 <g id="node3" class="node">
 <title>derived.mean_temperature</title>
-<ellipse fill="#e1bee7" stroke="black" cx="495.25" cy="-666" rx="57.39" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="495.25" y="-662.12" font-family="Helvetica,sans-Serif" font-size="10.00">mean_temperature</text>
+<ellipse fill="#62b6cb" stroke="black" cx="495.25" cy="-666" rx="57.39" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="495.25" y="-662.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">mean_temperature</text>
 </g>
 <!-- process_2 -->
 <g id="node29" class="node">
 <title>process_2</title>
-<path fill="#f8bbd0" stroke="black" d="M539.62,-612C539.62,-612 450.88,-612 450.88,-612 444.88,-612 438.88,-606 438.88,-600 438.88,-600 438.88,-588 438.88,-588 438.88,-582 444.88,-576 450.88,-576 450.88,-576 539.62,-576 539.62,-576 545.62,-576 551.62,-582 551.62,-588 551.62,-588 551.62,-600 551.62,-600 551.62,-606 545.62,-612 539.62,-612"/>
-<text xml:space="preserve" text-anchor="middle" x="495.25" y="-590.12" font-family="Helvetica,sans-Serif" font-size="10.00">threshold_temperature</text>
+<path fill="#e8833a" stroke="black" d="M539.62,-612C539.62,-612 450.88,-612 450.88,-612 444.88,-612 438.88,-606 438.88,-600 438.88,-600 438.88,-588 438.88,-588 438.88,-582 444.88,-576 450.88,-576 450.88,-576 539.62,-576 539.62,-576 545.62,-576 551.62,-582 551.62,-588 551.62,-588 551.62,-600 551.62,-600 551.62,-606 545.62,-612 539.62,-612"/>
+<text xml:space="preserve" text-anchor="middle" x="495.25" y="-590.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">threshold_temperature</text>
 </g>
 <!-- derived.mean_temperature&#45;&gt;process_2 -->
 <g id="edge9" class="edge">
@@ -65,14 +65,14 @@
 <!-- derived.mortality_flux -->
 <g id="node4" class="node">
 <title>derived.mortality_flux</title>
-<ellipse fill="#e1bee7" stroke="black" cx="580.25" cy="-162" rx="44.08" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="580.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">mortality_flux</text>
+<ellipse fill="#62b6cb" stroke="black" cx="580.25" cy="-162" rx="44.08" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="580.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">mortality_flux</text>
 </g>
 <!-- tendency_biomass -->
 <g id="node37" class="node">
 <title>tendency_biomass</title>
-<polygon fill="#ffcdd2" stroke="black" points="540.25,-36 474.77,-18 540.25,0 605.73,-18 540.25,-36"/>
-<text xml:space="preserve" text-anchor="middle" x="540.25" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00">d biomass / dt</text>
+<polygon fill="#f0f0f0" stroke="black" points="540.25,-36 474.77,-18 540.25,0 605.73,-18 540.25,-36"/>
+<text xml:space="preserve" text-anchor="middle" x="540.25" y="-14.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3748">d biomass / dt</text>
 </g>
 <!-- derived.mortality_flux&#45;&gt;tendency_biomass -->
 <g id="edge40" class="edge">
@@ -83,8 +83,8 @@
 <!-- derived.npp_injection -->
 <g id="node5" class="node">
 <title>derived.npp_injection</title>
-<ellipse fill="#e1bee7" stroke="black" cx="145.25" cy="-90" rx="43.19" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="145.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">npp_injection</text>
+<ellipse fill="#62b6cb" stroke="black" cx="145.25" cy="-90" rx="43.19" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="145.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">npp_injection</text>
 </g>
 <!-- derived.npp_injection&#45;&gt;tendency_production -->
 <g id="edge42" class="edge">
@@ -95,14 +95,14 @@
 <!-- derived.rec_age -->
 <g id="node6" class="node">
 <title>derived.rec_age</title>
-<ellipse fill="#e1bee7" stroke="black" cx="301.25" cy="-234" rx="29.88" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="301.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">rec_age</text>
+<ellipse fill="#62b6cb" stroke="black" cx="301.25" cy="-234" rx="29.88" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="301.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">rec_age</text>
 </g>
 <!-- process_7 -->
 <g id="node34" class="node">
 <title>process_7</title>
-<path fill="#f8bbd0" stroke="black" d="M276.5,-180C276.5,-180 238,-180 238,-180 232,-180 226,-174 226,-168 226,-168 226,-156 226,-156 226,-150 232,-144 238,-144 238,-144 276.5,-144 276.5,-144 282.5,-144 288.5,-150 288.5,-156 288.5,-156 288.5,-168 288.5,-168 288.5,-174 282.5,-180 276.5,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="257.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">aging_flow</text>
+<path fill="#e8833a" stroke="black" d="M276.5,-180C276.5,-180 238,-180 238,-180 232,-180 226,-174 226,-168 226,-168 226,-156 226,-156 226,-150 232,-144 238,-144 238,-144 276.5,-144 276.5,-144 282.5,-144 288.5,-150 288.5,-156 288.5,-156 288.5,-168 288.5,-168 288.5,-174 282.5,-180 276.5,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="257.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">aging_flow</text>
 </g>
 <!-- derived.rec_age&#45;&gt;process_7 -->
 <g id="edge27" class="edge">
@@ -113,8 +113,8 @@
 <!-- process_8 -->
 <g id="node35" class="node">
 <title>process_8</title>
-<path fill="#f8bbd0" stroke="black" d="M396.25,-180C396.25,-180 332.25,-180 332.25,-180 326.25,-180 320.25,-174 320.25,-168 320.25,-168 320.25,-156 320.25,-156 320.25,-150 326.25,-144 332.25,-144 332.25,-144 396.25,-144 396.25,-144 402.25,-144 408.25,-150 408.25,-156 408.25,-156 408.25,-168 408.25,-168 408.25,-174 402.25,-180 396.25,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="364.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">recruitment_flow</text>
+<path fill="#e8833a" stroke="black" d="M396.25,-180C396.25,-180 332.25,-180 332.25,-180 326.25,-180 320.25,-174 320.25,-168 320.25,-168 320.25,-156 320.25,-156 320.25,-150 326.25,-144 332.25,-144 332.25,-144 396.25,-144 396.25,-144 402.25,-144 408.25,-150 408.25,-156 408.25,-156 408.25,-168 408.25,-168 408.25,-174 402.25,-180 396.25,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="364.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">recruitment_flow</text>
 </g>
 <!-- derived.rec_age&#45;&gt;process_8 -->
 <g id="edge31" class="edge">
@@ -125,8 +125,8 @@
 <!-- derived.recruitment_gain -->
 <g id="node7" class="node">
 <title>derived.recruitment_gain</title>
-<ellipse fill="#e1bee7" stroke="black" cx="500.25" cy="-90" rx="52.07" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="500.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">recruitment_gain</text>
+<ellipse fill="#62b6cb" stroke="black" cx="500.25" cy="-90" rx="52.07" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="500.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">recruitment_gain</text>
 </g>
 <!-- derived.recruitment_gain&#45;&gt;tendency_biomass -->
 <g id="edge41" class="edge">
@@ -137,8 +137,8 @@
 <!-- derived.recruitment_prod_loss -->
 <g id="node8" class="node">
 <title>derived.recruitment_prod_loss</title>
-<ellipse fill="#e1bee7" stroke="black" cx="364.25" cy="-90" rx="66.27" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="364.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00">recruitment_prod_loss</text>
+<ellipse fill="#62b6cb" stroke="black" cx="364.25" cy="-90" rx="66.27" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="364.25" y="-86.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">recruitment_prod_loss</text>
 </g>
 <!-- derived.recruitment_prod_loss&#45;&gt;tendency_production -->
 <g id="edge44" class="edge">
@@ -149,14 +149,14 @@
 <!-- derived.t_ref_norm -->
 <g id="node9" class="node">
 <title>derived.t_ref_norm</title>
-<ellipse fill="#e1bee7" stroke="black" cx="388.25" cy="-378" rx="36.98" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="388.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00">t_ref_norm</text>
+<ellipse fill="#62b6cb" stroke="black" cx="388.25" cy="-378" rx="36.98" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="388.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">t_ref_norm</text>
 </g>
 <!-- process_5 -->
 <g id="node32" class="node">
 <title>process_5</title>
-<path fill="#f8bbd0" stroke="black" d="M332.12,-324C332.12,-324 270.38,-324 270.38,-324 264.38,-324 258.38,-318 258.38,-312 258.38,-312 258.38,-300 258.38,-300 258.38,-294 264.38,-288 270.38,-288 270.38,-288 332.12,-288 332.12,-288 338.12,-288 344.12,-294 344.12,-300 344.12,-300 344.12,-312 344.12,-312 344.12,-318 338.12,-324 332.12,-324"/>
-<text xml:space="preserve" text-anchor="middle" x="301.25" y="-302.12" font-family="Helvetica,sans-Serif" font-size="10.00">recruitment_age</text>
+<path fill="#e8833a" stroke="black" d="M332.12,-324C332.12,-324 270.38,-324 270.38,-324 264.38,-324 258.38,-318 258.38,-312 258.38,-312 258.38,-300 258.38,-300 258.38,-294 264.38,-288 270.38,-288 270.38,-288 332.12,-288 332.12,-288 338.12,-288 344.12,-294 344.12,-300 344.12,-300 344.12,-312 344.12,-312 344.12,-318 338.12,-324 332.12,-324"/>
+<text xml:space="preserve" text-anchor="middle" x="301.25" y="-302.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">recruitment_age</text>
 </g>
 <!-- derived.t_ref_norm&#45;&gt;process_5 -->
 <g id="edge19" class="edge">
@@ -167,8 +167,8 @@
 <!-- process_9 -->
 <g id="node36" class="node">
 <title>process_9</title>
-<path fill="#f8bbd0" stroke="black" d="M595.25,-324C595.25,-324 565.25,-324 565.25,-324 559.25,-324 553.25,-318 553.25,-312 553.25,-312 553.25,-300 553.25,-300 553.25,-294 559.25,-288 565.25,-288 565.25,-288 595.25,-288 595.25,-288 601.25,-288 607.25,-294 607.25,-300 607.25,-300 607.25,-312 607.25,-312 607.25,-318 601.25,-324 595.25,-324"/>
-<text xml:space="preserve" text-anchor="middle" x="580.25" y="-302.12" font-family="Helvetica,sans-Serif" font-size="10.00">mortality</text>
+<path fill="#e8833a" stroke="black" d="M595.25,-324C595.25,-324 565.25,-324 565.25,-324 559.25,-324 553.25,-318 553.25,-312 553.25,-312 553.25,-300 553.25,-300 553.25,-294 559.25,-288 565.25,-288 565.25,-288 595.25,-288 595.25,-288 601.25,-288 607.25,-294 607.25,-300 607.25,-300 607.25,-312 607.25,-312 607.25,-318 601.25,-324 595.25,-324"/>
+<text xml:space="preserve" text-anchor="middle" x="580.25" y="-302.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">mortality</text>
 </g>
 <!-- derived.t_ref_norm&#45;&gt;process_9 -->
 <g id="edge38" class="edge">
@@ -179,8 +179,8 @@
 <!-- derived.temp_norm -->
 <g id="node10" class="node">
 <title>derived.temp_norm</title>
-<ellipse fill="#e1bee7" stroke="black" cx="481.25" cy="-378" rx="38.31" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="481.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00">temp_norm</text>
+<ellipse fill="#62b6cb" stroke="black" cx="481.25" cy="-378" rx="38.31" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="481.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">temp_norm</text>
 </g>
 <!-- derived.temp_norm&#45;&gt;process_5 -->
 <g id="edge16" class="edge">
@@ -197,14 +197,14 @@
 <!-- derived.thresholded_temperature -->
 <g id="node11" class="node">
 <title>derived.thresholded_temperature</title>
-<ellipse fill="#e1bee7" stroke="black" cx="500.25" cy="-522" rx="72.93" ry="18"/>
-<text xml:space="preserve" text-anchor="middle" x="500.25" y="-518.12" font-family="Helvetica,sans-Serif" font-size="10.00">thresholded_temperature</text>
+<ellipse fill="#62b6cb" stroke="black" cx="500.25" cy="-522" rx="72.93" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="500.25" y="-518.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">thresholded_temperature</text>
 </g>
 <!-- process_3 -->
 <g id="node30" class="node">
 <title>process_3</title>
-<path fill="#f8bbd0" stroke="black" d="M532.75,-468C532.75,-468 453.75,-468 453.75,-468 447.75,-468 441.75,-462 441.75,-456 441.75,-456 441.75,-444 441.75,-444 441.75,-438 447.75,-432 453.75,-432 453.75,-432 532.75,-432 532.75,-432 538.75,-432 544.75,-438 544.75,-444 544.75,-444 544.75,-456 544.75,-456 544.75,-462 538.75,-468 532.75,-468"/>
-<text xml:space="preserve" text-anchor="middle" x="493.25" y="-446.12" font-family="Helvetica,sans-Serif" font-size="10.00">gillooly_temperature</text>
+<path fill="#e8833a" stroke="black" d="M532.75,-468C532.75,-468 453.75,-468 453.75,-468 447.75,-468 441.75,-462 441.75,-456 441.75,-456 441.75,-444 441.75,-444 441.75,-438 447.75,-432 453.75,-432 453.75,-432 532.75,-432 532.75,-432 538.75,-432 544.75,-438 544.75,-444 544.75,-444 544.75,-456 544.75,-456 544.75,-462 538.75,-468 532.75,-468"/>
+<text xml:space="preserve" text-anchor="middle" x="493.25" y="-446.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">gillooly_temperature</text>
 </g>
 <!-- derived.thresholded_temperature&#45;&gt;process_3 -->
 <g id="edge12" class="edge">
@@ -215,14 +215,14 @@
 <!-- forcings.day_of_year -->
 <g id="node12" class="node">
 <title>forcings.day_of_year</title>
-<polygon fill="#bbdefb" stroke="black" points="360.88,-972 291.62,-972 291.62,-936 360.88,-936 360.88,-972"/>
-<text xml:space="preserve" text-anchor="middle" x="326.25" y="-950.12" font-family="Helvetica,sans-Serif" font-size="10.00">day_of_year</text>
+<polygon fill="#62b6cb" stroke="black" points="360.88,-972 291.62,-972 291.62,-936 360.88,-936 360.88,-972"/>
+<text xml:space="preserve" text-anchor="middle" x="326.25" y="-950.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">day_of_year</text>
 </g>
 <!-- process_0 -->
 <g id="node27" class="node">
 <title>process_0</title>
-<path fill="#f8bbd0" stroke="black" d="M385.88,-900C385.88,-900 346.62,-900 346.62,-900 340.62,-900 334.62,-894 334.62,-888 334.62,-888 334.62,-876 334.62,-876 334.62,-870 340.62,-864 346.62,-864 346.62,-864 385.88,-864 385.88,-864 391.88,-864 397.88,-870 397.88,-876 397.88,-876 397.88,-888 397.88,-888 397.88,-894 391.88,-900 385.88,-900"/>
-<text xml:space="preserve" text-anchor="middle" x="366.25" y="-878.12" font-family="Helvetica,sans-Serif" font-size="10.00">day_length</text>
+<path fill="#e8833a" stroke="black" d="M385.88,-900C385.88,-900 346.62,-900 346.62,-900 340.62,-900 334.62,-894 334.62,-888 334.62,-888 334.62,-876 334.62,-876 334.62,-870 340.62,-864 346.62,-864 346.62,-864 385.88,-864 385.88,-864 391.88,-864 397.88,-870 397.88,-876 397.88,-876 397.88,-888 397.88,-888 397.88,-894 391.88,-900 385.88,-900"/>
+<text xml:space="preserve" text-anchor="middle" x="366.25" y="-878.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">day_length</text>
 </g>
 <!-- forcings.day_of_year&#45;&gt;process_0 -->
 <g id="edge2" class="edge">
@@ -233,8 +233,8 @@
 <!-- forcings.latitude -->
 <g id="node13" class="node">
 <title>forcings.latitude</title>
-<polygon fill="#bbdefb" stroke="black" points="433.25,-972 379.25,-972 379.25,-936 433.25,-936 433.25,-972"/>
-<text xml:space="preserve" text-anchor="middle" x="406.25" y="-950.12" font-family="Helvetica,sans-Serif" font-size="10.00">latitude</text>
+<polygon fill="#62b6cb" stroke="black" points="433.25,-972 379.25,-972 379.25,-936 433.25,-936 433.25,-972"/>
+<text xml:space="preserve" text-anchor="middle" x="406.25" y="-950.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">latitude</text>
 </g>
 <!-- forcings.latitude&#45;&gt;process_0 -->
 <g id="edge1" class="edge">
@@ -245,14 +245,14 @@
 <!-- forcings.primary_production -->
 <g id="node14" class="node">
 <title>forcings.primary_production</title>
-<polygon fill="#bbdefb" stroke="black" points="98.5,-252 0,-252 0,-216 98.5,-216 98.5,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="49.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">primary_production</text>
+<polygon fill="#62b6cb" stroke="black" points="98.5,-252 0,-252 0,-216 98.5,-216 98.5,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="49.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">primary_production</text>
 </g>
 <!-- process_6 -->
 <g id="node33" class="node">
 <title>process_6</title>
-<path fill="#f8bbd0" stroke="black" d="M169.75,-180C169.75,-180 120.75,-180 120.75,-180 114.75,-180 108.75,-174 108.75,-168 108.75,-168 108.75,-156 108.75,-156 108.75,-150 114.75,-144 120.75,-144 120.75,-144 169.75,-144 169.75,-144 175.75,-144 181.75,-150 181.75,-156 181.75,-156 181.75,-168 181.75,-168 181.75,-174 175.75,-180 169.75,-180"/>
-<text xml:space="preserve" text-anchor="middle" x="145.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00">npp_injection</text>
+<path fill="#e8833a" stroke="black" d="M169.75,-180C169.75,-180 120.75,-180 120.75,-180 114.75,-180 108.75,-174 108.75,-168 108.75,-168 108.75,-156 108.75,-156 108.75,-150 114.75,-144 120.75,-144 120.75,-144 169.75,-144 169.75,-144 175.75,-144 181.75,-150 181.75,-156 181.75,-156 181.75,-168 181.75,-168 181.75,-174 175.75,-180 169.75,-180"/>
+<text xml:space="preserve" text-anchor="middle" x="145.25" y="-158.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">npp_injection</text>
 </g>
 <!-- forcings.primary_production&#45;&gt;process_6 -->
 <g id="edge21" class="edge">
@@ -263,8 +263,8 @@
 <!-- forcings.temperature -->
 <g id="node15" class="node">
 <title>forcings.temperature</title>
-<polygon fill="#bbdefb" stroke="black" points="489.12,-828 421.38,-828 421.38,-792 489.12,-792 489.12,-828"/>
-<text xml:space="preserve" text-anchor="middle" x="455.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00">temperature</text>
+<polygon fill="#62b6cb" stroke="black" points="489.12,-828 421.38,-828 421.38,-792 489.12,-792 489.12,-828"/>
+<text xml:space="preserve" text-anchor="middle" x="455.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">temperature</text>
 </g>
 <!-- forcings.temperature&#45;&gt;process_1 -->
 <g id="edge4" class="edge">
@@ -275,8 +275,8 @@
 <!-- parameters.cohort_ages -->
 <g id="node16" class="node">
 <title>parameters.cohort_ages</title>
-<polygon fill="#ffe0b2" stroke="black" points="418.88,-252 349.62,-252 349.62,-216 418.88,-216 418.88,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="384.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">cohort_ages</text>
+<polygon fill="#5fa8d3" stroke="black" points="418.88,-252 349.62,-252 349.62,-216 418.88,-216 418.88,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="384.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">cohort_ages</text>
 </g>
 <!-- parameters.cohort_ages&#45;&gt;process_7 -->
 <g id="edge26" class="edge">
@@ -293,8 +293,8 @@
 <!-- parameters.day_layer -->
 <g id="node17" class="node">
 <title>parameters.day_layer</title>
-<polygon fill="#ffe0b2" stroke="black" points="565.25,-828 507.25,-828 507.25,-792 565.25,-792 565.25,-828"/>
-<text xml:space="preserve" text-anchor="middle" x="536.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00">day_layer</text>
+<polygon fill="#5fa8d3" stroke="black" points="565.25,-828 507.25,-828 507.25,-792 565.25,-792 565.25,-828"/>
+<text xml:space="preserve" text-anchor="middle" x="536.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">day_layer</text>
 </g>
 <!-- parameters.day_layer&#45;&gt;process_1 -->
 <g id="edge6" class="edge">
@@ -305,8 +305,8 @@
 <!-- parameters.efficiency -->
 <g id="node18" class="node">
 <title>parameters.efficiency</title>
-<polygon fill="#ffe0b2" stroke="black" points="174.25,-252 116.25,-252 116.25,-216 174.25,-216 174.25,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="145.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">efficiency</text>
+<polygon fill="#5fa8d3" stroke="black" points="174.25,-252 116.25,-252 116.25,-216 174.25,-216 174.25,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="145.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">efficiency</text>
 </g>
 <!-- parameters.efficiency&#45;&gt;process_6 -->
 <g id="edge22" class="edge">
@@ -317,8 +317,8 @@
 <!-- parameters.gamma_lambda -->
 <g id="node19" class="node">
 <title>parameters.gamma_lambda</title>
-<polygon fill="#ffe0b2" stroke="black" points="622.75,-396 537.75,-396 537.75,-360 622.75,-360 622.75,-396"/>
-<text xml:space="preserve" text-anchor="middle" x="580.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00">gamma_lambda</text>
+<polygon fill="#5fa8d3" stroke="black" points="622.75,-396 537.75,-396 537.75,-360 622.75,-360 622.75,-396"/>
+<text xml:space="preserve" text-anchor="middle" x="580.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">gamma_lambda</text>
 </g>
 <!-- parameters.gamma_lambda&#45;&gt;process_9 -->
 <g id="edge37" class="edge">
@@ -329,8 +329,8 @@
 <!-- parameters.gamma_tau_r -->
 <g id="node20" class="node">
 <title>parameters.gamma_tau_r</title>
-<polygon fill="#ffe0b2" stroke="black" points="332.88,-396 257.62,-396 257.62,-360 332.88,-360 332.88,-396"/>
-<text xml:space="preserve" text-anchor="middle" x="295.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00">gamma_tau_r</text>
+<polygon fill="#5fa8d3" stroke="black" points="332.88,-396 257.62,-396 257.62,-360 332.88,-360 332.88,-396"/>
+<text xml:space="preserve" text-anchor="middle" x="295.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">gamma_tau_r</text>
 </g>
 <!-- parameters.gamma_tau_r&#45;&gt;process_5 -->
 <g id="edge18" class="edge">
@@ -341,8 +341,8 @@
 <!-- parameters.lambda_0 -->
 <g id="node21" class="node">
 <title>parameters.lambda_0</title>
-<polygon fill="#ffe0b2" stroke="black" points="699.25,-396 641.25,-396 641.25,-360 699.25,-360 699.25,-396"/>
-<text xml:space="preserve" text-anchor="middle" x="670.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00">lambda_0</text>
+<polygon fill="#5fa8d3" stroke="black" points="699.25,-396 641.25,-396 641.25,-360 699.25,-360 699.25,-396"/>
+<text xml:space="preserve" text-anchor="middle" x="670.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">lambda_0</text>
 </g>
 <!-- parameters.lambda_0&#45;&gt;process_9 -->
 <g id="edge36" class="edge">
@@ -353,8 +353,8 @@
 <!-- parameters.night_layer -->
 <g id="node22" class="node">
 <title>parameters.night_layer</title>
-<polygon fill="#ffe0b2" stroke="black" points="646.88,-828 583.62,-828 583.62,-792 646.88,-792 646.88,-828"/>
-<text xml:space="preserve" text-anchor="middle" x="615.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00">night_layer</text>
+<polygon fill="#5fa8d3" stroke="black" points="646.88,-828 583.62,-828 583.62,-792 646.88,-792 646.88,-828"/>
+<text xml:space="preserve" text-anchor="middle" x="615.25" y="-806.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">night_layer</text>
 </g>
 <!-- parameters.night_layer&#45;&gt;process_1 -->
 <g id="edge7" class="edge">
@@ -365,8 +365,8 @@
 <!-- parameters.t_ref -->
 <g id="node23" class="node">
 <title>parameters.t_ref</title>
-<polygon fill="#ffe0b2" stroke="black" points="415.25,-684 361.25,-684 361.25,-648 415.25,-648 415.25,-684"/>
-<text xml:space="preserve" text-anchor="middle" x="388.25" y="-662.12" font-family="Helvetica,sans-Serif" font-size="10.00">t_ref</text>
+<polygon fill="#5fa8d3" stroke="black" points="415.25,-684 361.25,-684 361.25,-648 415.25,-648 415.25,-684"/>
+<text xml:space="preserve" text-anchor="middle" x="388.25" y="-662.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">t_ref</text>
 </g>
 <!-- parameters.t_ref&#45;&gt;process_2 -->
 <g id="edge10" class="edge">
@@ -377,8 +377,8 @@
 <!-- process_4 -->
 <g id="node31" class="node">
 <title>process_4</title>
-<path fill="#f8bbd0" stroke="black" d="M397.75,-540C397.75,-540 318.75,-540 318.75,-540 312.75,-540 306.75,-534 306.75,-528 306.75,-528 306.75,-516 306.75,-516 306.75,-510 312.75,-504 318.75,-504 318.75,-504 397.75,-504 397.75,-504 403.75,-504 409.75,-510 409.75,-516 409.75,-516 409.75,-528 409.75,-528 409.75,-534 403.75,-540 397.75,-540"/>
-<text xml:space="preserve" text-anchor="middle" x="358.25" y="-518.12" font-family="Helvetica,sans-Serif" font-size="10.00">gillooly_temperature</text>
+<path fill="#e8833a" stroke="black" d="M397.75,-540C397.75,-540 318.75,-540 318.75,-540 312.75,-540 306.75,-534 306.75,-528 306.75,-528 306.75,-516 306.75,-516 306.75,-510 312.75,-504 318.75,-504 318.75,-504 397.75,-504 397.75,-504 403.75,-504 409.75,-510 409.75,-516 409.75,-516 409.75,-528 409.75,-528 409.75,-534 403.75,-540 397.75,-540"/>
+<text xml:space="preserve" text-anchor="middle" x="358.25" y="-518.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">gillooly_temperature</text>
 </g>
 <!-- parameters.t_ref&#45;&gt;process_4 -->
 <g id="edge14" class="edge">
@@ -389,8 +389,8 @@
 <!-- parameters.tau_r_0 -->
 <g id="node24" class="node">
 <title>parameters.tau_r_0</title>
-<polygon fill="#ffe0b2" stroke="black" points="239.25,-396 185.25,-396 185.25,-360 239.25,-360 239.25,-396"/>
-<text xml:space="preserve" text-anchor="middle" x="212.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00">tau_r_0</text>
+<polygon fill="#5fa8d3" stroke="black" points="239.25,-396 185.25,-396 185.25,-360 239.25,-360 239.25,-396"/>
+<text xml:space="preserve" text-anchor="middle" x="212.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">tau_r_0</text>
 </g>
 <!-- parameters.tau_r_0&#45;&gt;process_5 -->
 <g id="edge17" class="edge">
@@ -401,8 +401,8 @@
 <!-- state.biomass -->
 <g id="node25" class="node">
 <title>state.biomass</title>
-<polygon fill="#c8e6c9" stroke="black" stroke-width="2" points="771.25,-396 717.25,-396 717.25,-360 771.25,-360 771.25,-396"/>
-<text xml:space="preserve" text-anchor="middle" x="744.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00">biomass</text>
+<polygon fill="#1b4965" stroke="black" stroke-width="2" points="771.25,-396 717.25,-396 717.25,-360 771.25,-360 771.25,-396"/>
+<text xml:space="preserve" text-anchor="middle" x="744.25" y="-374.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">biomass</text>
 </g>
 <!-- state.biomass&#45;&gt;process_9 -->
 <g id="edge34" class="edge">
@@ -413,8 +413,8 @@
 <!-- state.production -->
 <g id="node26" class="node">
 <title>state.production</title>
-<polygon fill="#c8e6c9" stroke="black" stroke-width="2" points="253.75,-252 192.75,-252 192.75,-216 253.75,-216 253.75,-252"/>
-<text xml:space="preserve" text-anchor="middle" x="223.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00">production</text>
+<polygon fill="#1b4965" stroke="black" stroke-width="2" points="253.75,-252 192.75,-252 192.75,-216 253.75,-216 253.75,-252"/>
+<text xml:space="preserve" text-anchor="middle" x="223.25" y="-230.12" font-family="Helvetica,sans-Serif" font-size="10.00" fill="white">production</text>
 </g>
 <!-- state.production&#45;&gt;process_6 -->
 <g id="edge23" class="edge">

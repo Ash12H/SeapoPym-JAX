@@ -240,12 +240,12 @@ class Blueprint(BaseModel):
 
         # --- Color palette ---
         colors = {
-            "state": "#c8e6c9",
-            "parameters": "#ffe0b2",
-            "forcings": "#bbdefb",
-            "derived": "#e1bee7",
-            "function": "#f8bbd0",
-            "tendency": "#ffcdd2",
+            "state": "#1b4965",
+            "parameters": "#5fa8d3",
+            "forcings": "#62b6cb",
+            "derived": "#62b6cb",
+            "function": "#e8833a",
+            "tendency": "#f0f0f0",
         }
 
         g = graphviz.Digraph(
@@ -282,13 +282,13 @@ class Blueprint(BaseModel):
                 style = "filled,bold"
             else:
                 style = "filled"
-            g.node(var_path, label=_short_name(var_path), fillcolor=color, shape=shape, style=style)
+            g.node(var_path, label=_short_name(var_path), fillcolor=color, fontcolor="white", shape=shape, style=style)
 
         # --- Create function nodes ---
         for i, step in enumerate(self.process):
             func_id = f"process_{i}"
             func_label = step.func.split(":")[1] if ":" in step.func else step.func
-            g.node(func_id, label=func_label, fillcolor=colors["function"], shape="box", style="filled,rounded")
+            g.node(func_id, label=func_label, fillcolor=colors["function"], fontcolor="white", shape="box", style="filled,rounded")
 
             # Input edges
             for _arg_name, var_path in step.inputs.items():
@@ -306,6 +306,7 @@ class Blueprint(BaseModel):
                     tendency_id,
                     label=f"d {state_var} / dt",
                     fillcolor=colors["tendency"],
+                    fontcolor="#2d3748",
                     shape="diamond",
                     style="filled",
                 )

@@ -11,14 +11,14 @@ theme:
   name: material
   palette:
     - scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -45,15 +45,13 @@ plugins:
   - mkdocs-jupyter:
       execute: false
       include_source: true
+      ignore:
+        - "assets/diagrams/generate.py"
 
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.superfences
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -77,7 +75,12 @@ nav:
   - Examples:
     - LMTL No Transport: examples/01_lmtl_no_transport.ipynb
     - Transport & Movement: examples/02_transport.ipynb
-    - Optimization: examples/03_optimization.ipynb
+    - Custom Model (Lotka-Volterra): examples/03_lotka_volterra.ipynb
+    - Differentiable Simulation: examples/04_gradient.ipynb
+    - Optimization Strategies: examples/05_optimization.ipynb
+
+extra_css:
+  - stylesheets/custom.css
 
 extra_javascript:
   - javascripts/mathjax.js
