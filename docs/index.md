@@ -1,8 +1,10 @@
 # SeapoPym
 
-**SeapoPym** is a JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids.
+**SeapoPym** is a JAX-accelerated framework for differentiable simulation of dynamical systems on N-dimensional grids.
 
 It uses a **DAG-based blueprint architecture** where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
+
+![Simulate dynamical systems, compute exact gradients through physics, and optimize parameters — all in JAX.](assets/hero.png)
 
 ## Why SeapoPym?
 

@@ -1,5 +1,5 @@
 site_name: SeapoPym Documentation
-site_description: JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids
+site_description: JAX-accelerated framework for differentiable simulation of dynamical systems on N-dimensional grids
 site_author: Jules Lehodey
 site_url: https://ash12h.github.io/SeapoPym-JAX/
 

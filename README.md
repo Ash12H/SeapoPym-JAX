@@ -9,7 +9,7 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 ![JAX](https://img.shields.io/badge/powered_by-JAX-red)
 
-**SeapoPym** is a JAX-accelerated framework for Eulerian population dynamics on N-dimensional grids. Models are declared as YAML blueprints (DAG of processes), compiled into optimized JAX graphs, and executed on CPU or GPU.
+**SeapoPym** is a JAX-accelerated framework for differentiable simulation of dynamical systems on N-dimensional grids. Models are declared as YAML blueprints (DAG of processes), compiled into optimized JAX graphs, and executed on CPU or GPU.
 
 - **For scientists** — Explicit numerical schemes, YAML model declaration, strict unit validation (Pint), visual process DAG.
 - **For ML engineers** — Pure JAX backend, end-to-end differentiable, GPU/TPU support, built-in optimization (Optax, CMA-ES, GA).
