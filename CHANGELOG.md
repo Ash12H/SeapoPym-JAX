@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@functional` decorator for registering physics functions with units and dimension metadata
 - Strict unit validation via Pint
 - LMTL ecosystem model (day length, temperature, recruitment, mortality, NPP, aging)
-- Zalesak transport scheme (advection/diffusion)
+- First-order upwind finite-volume transport (advection/diffusion)
 - Optimization module: Gradient (Optax), CMA-ES, GA, IPOP-CMA-ES (evosax)
 - Prior distributions for parameter calibration
 - GPU/TPU support via JAX

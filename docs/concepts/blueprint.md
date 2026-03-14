@@ -184,7 +184,7 @@ SeapoPym ships with two reference blueprints:
 | Blueprint | Description | State Variables | Process Steps |
 |-----------|-------------|-----------------|---------------|
 | `LMTL_NO_TRANSPORT` | LMTL ecosystem without spatial movement | biomass, production | 10 |
-| `LMTL` | Full LMTL with Zalesak advection/diffusion | biomass, production | 17 |
+| `LMTL` | Full LMTL with first-order upwind transport | biomass, production | 17 |
 
 ```python
 from seapopym.models import LMTL_NO_TRANSPORT, LMTL

@@ -16,7 +16,7 @@ SeapoPym bridges two communities:
 
 === "For Scientists"
 
-    - **Explicit numerical schemes** — Euler integration, finite-volume transport (Zalesak), no black-box solvers.
+    - **Explicit numerical schemes** — Euler integration, first-order upwind finite volume for transport — no black-box solvers.
     - **Visual DAG of processes** — Each computation step is a named node with declared inputs, outputs, and units.
     - **YAML-based model declaration** — Define your model topology without writing code. Swap processes, add forcings, change resolution.
     - **Strict validation** — Pint-based unit checking, dimension consistency, NaN rejection — all at compile time.
