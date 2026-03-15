@@ -4,11 +4,17 @@
 
 It uses a **[Directed Acyclic Graph](https://en.wikipedia.org/wiki/Directed_acyclic_graph) (DAG) blueprint architecture** where biological and physical processes (movement, growth, mortality) are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
 
-![Simulate dynamical systems, compute exact gradients through physics, and optimize parameters — all in JAX.](assets/hero.png)
-
 !!! example "Lotka-Volterra prey-predator"
 
+    ![Simulate dynamical systems, compute exact gradients through physics, and optimize parameters — all in JAX.](assets/hero.png)
+
     A classic 2-species ODE (prey growth α, predation β, conversion δ, mortality γ) declared as a SeapoPym Blueprint and compiled to JAX. **Gradient Descent** recovers α and γ from partial, noisy observations (prey only, 5% Gaussian noise) by back-propagating through the entire simulation via `jax.grad` — converging to <1% error in ~100 steps.
+
+!!! example "CartPole — Differentiable MPC"
+
+    ![CartPole MPC stabilization](assets/cartpole_mpc.gif)
+
+    An inverted pendulum ([Barto et al. 1983](https://ieeexplore.ieee.org/document/6313077)) stabilized over 20 seconds using **differentiable Model Predictive Control**. At each timestep, the controller optimizes a 1-second force horizon via `jax.grad` through the physics, executes the first action, and re-plans. No engine modifications needed — pure composition of SeapoPym's `step_fn` + `lax.scan`.
 
 ## Why SeapoPym?
 

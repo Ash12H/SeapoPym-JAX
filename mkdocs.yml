@@ -80,6 +80,7 @@ nav:
       - Differentiable Simulation: examples/02_gradient.ipynb
       - Parameter Optimization: examples/03_optimization.ipynb
       - Trajectory Optimization (CartPole): examples/06_cartpole.ipynb
+      - Differentiable MPC (CartPole): examples/07_cartpole_mpc.ipynb
     - SEAPODYM Models:
       - LMTL — No Transport: examples/04_lmtl_no_transport.ipynb
       - LMTL — Spatial Transport: examples/05_transport.ipynb

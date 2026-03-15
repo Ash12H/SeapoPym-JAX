@@ -6,6 +6,7 @@
 *.csv
 *.xml
 *.gif
+!docs/assets/*.gif
 *.pdf
 *.txt
 
