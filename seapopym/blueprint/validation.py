@@ -253,8 +253,9 @@ class BlueprintValidator:
                 input_dims[arg_name] = ()
                 continue
             dims_list = [str(d) for d in node_dims]
-            # T is consumed by the engine's time loop, not seen by functions
-            if var_path.startswith("forcings.") and "T" in dims_list:
+            # T is consumed by the engine's time loop, not seen by functions.
+            # This applies to forcings (always) and time-indexed parameters.
+            if (var_path.startswith("forcings.") or var_path.startswith("parameters.")) and "T" in dims_list:
                 dims_list.remove("T")
             input_dims[arg_name] = get_canonical_order(dims_list)
         return input_dims

@@ -46,14 +46,17 @@ def build_step_fn(
             so ``lax.scan`` never accumulates the excluded variables.
 
     Returns:
-        Step function with signature ((state, params), forcings_t) -> ((new_state, params), outputs).
-        This signature is compatible with jax.lax.scan and jax.grad.
+        Step function with signature ``((state, params), (forcings_t, time_params_t)) ->
+        ((new_state, params), outputs)``.  This is compatible with ``jax.lax.scan``
+        and ``jax.grad``.  When there are no time-indexed parameters the second
+        element of *xs* is an empty dict (no JAX leaves, zero overhead).
     """
     # Extract what we need from model (closure captures these)
     compute_nodes: list[ComputeNode] = model.compute_nodes
     tendency_map = model.tendency_map
     dt = model.dt
     statics = model.forcings.get_statics()
+    clamp_map = model.clamp_map
 
     # Pre-compute vmapped functions for nodes with broadcast dimensions
     vmapped_funcs: dict[str, tuple[Callable[..., Any], list[str] | None, tuple[int, ...] | None]] = {}
@@ -108,7 +111,7 @@ def build_step_fn(
             _handle_compute_outputs(result, compute_node.output_mapping, intermediates)
 
         # Euler explicit integration using tendency_map
-        new_state = _integrate_euler(state, intermediates, tendency_map, dt)
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, clamp_map)
 
         # Apply mask to state
         new_state = _apply_mask(new_state, mask)
@@ -120,21 +123,29 @@ def build_step_fn(
 
         return new_state, outputs
 
-    def step_fn(carry: tuple[State, Params], forcings_t: Forcings) -> tuple[tuple[State, Params], Outputs]:
+    def step_fn(
+        carry: tuple[State, Params],
+        xs: tuple[Forcings, Params],
+    ) -> tuple[tuple[State, Params], Outputs]:
         """Execute one timestep with parameters as part of the carry.
 
         This signature is compatible with jax.lax.scan and jax.grad.
+        Time-indexed parameters are passed via *xs* (second element) so that
+        ``jax.grad`` can differentiate through them per-timestep.
 
         Args:
-            carry: Tuple of (state, params).
-            forcings_t: Forcings at current timestep.
+            carry: Tuple of (state, static_params).
+            xs: Tuple of (forcings_t, time_params_t).  time_params_t is an
+                empty dict when there are no time-indexed parameters.
 
         Returns:
-            Tuple of ((new_state, params), outputs).
+            Tuple of ((new_state, static_params), outputs).
         """
-        state, params = carry
-        new_state, outputs = _execute_step(state, forcings_t, params)
-        return (new_state, params), outputs
+        state, static_params = carry
+        forcings_t, time_params_t = xs
+        all_params = {**static_params, **time_params_t}
+        new_state, outputs = _execute_step(state, forcings_t, all_params)
+        return (new_state, static_params), outputs
 
     return step_fn
 
@@ -255,6 +266,7 @@ def _integrate_euler(
     intermediates: dict[str, Array],
     tendency_map: dict[str, list[TendencySource]],
     dt: float,
+    clamp_map: dict[str, tuple[float | None, float | None]] | None = None,
 ) -> State:
     """Integrate state using Euler explicit method with declarative tendency_map.
 
@@ -263,6 +275,8 @@ def _integrate_euler(
         intermediates: All computed derived values.
         tendency_map: Mapping from state var name to list of TendencySource.
         dt: Timestep in seconds.
+        clamp_map: Per-variable clamping bounds. ``None`` or missing key means
+            no clamping for that variable.  ``(0.0, None)`` clamps to non-negative.
 
     Returns:
         New state after integration.
@@ -272,11 +286,15 @@ def _integrate_euler(
         if var_name in tendency_map:
             sources = tendency_map[var_name]
             total = sum(src.sign * intermediates[src.source.removeprefix("derived.")] for src in sources)
-            # Clamp to zero: biomass and other state variables are physically
-            # non-negative quantities.  Euler explicit can overshoot below zero
-            # when the loss tendency is large relative to dt, so we enforce the
-            # constraint here.
-            new_state[var_name] = jnp.maximum(value + total * dt, 0.0)
+            updated = value + total * dt
+            # Apply per-variable clamping if specified
+            if clamp_map and var_name in clamp_map:
+                lo, hi = clamp_map[var_name]
+                if lo is not None:
+                    updated = jnp.maximum(updated, lo)
+                if hi is not None:
+                    updated = jnp.minimum(updated, hi)
+            new_state[var_name] = updated
         else:
             new_state[var_name] = value
     return new_state

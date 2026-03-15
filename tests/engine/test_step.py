@@ -33,7 +33,7 @@ class TestBuildStepFn:
             "mask": jnp.ones((5, 5)),
         }
 
-        (new_state, _params), outputs = step_fn((state, params), forcings_t)
+        (new_state, _params), outputs = step_fn((state, params), (forcings_t, {}))
 
         # Check state was updated
         assert "biomass" in new_state
@@ -63,7 +63,7 @@ class TestBuildStepFn:
             "mask": mask,
         }
 
-        (new_state, _params), outputs = step_fn((state, params), forcings_t)
+        (new_state, _params), outputs = step_fn((state, params), (forcings_t, {}))
 
         # First row should be zero (masked)
         np.testing.assert_array_equal(np.asarray(new_state["biomass"][0, :]), 0.0)
@@ -375,8 +375,8 @@ class TestIntegrateEuler:
 
         np.testing.assert_array_equal(np.asarray(new_state["x"]), [12.0])  # 10 + (3 - 1)*1
 
-    def test_euler_clamp_non_negative(self):
-        """Test that Euler integration clamps state to >= 0."""
+    def test_euler_no_clamp_by_default(self):
+        """Test that Euler integration does NOT clamp when no clamp_map is provided."""
         from seapopym.blueprint.schema import TendencySource
         from seapopym.engine.step import _integrate_euler
 
@@ -387,5 +387,56 @@ class TestIntegrateEuler:
 
         new_state = _integrate_euler(state, intermediates, tendency_map, dt)
 
+        # 1.0 + (-10.0)*1.0 = -9.0 → no clamping
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [-9.0])
+
+    def test_euler_clamp_non_negative(self):
+        """Test that Euler integration clamps state to >= 0 with clamp_map."""
+        from seapopym.blueprint.schema import TendencySource
+        from seapopym.engine.step import _integrate_euler
+
+        state = {"x": jnp.array([1.0])}
+        intermediates = {"loss": jnp.array([10.0])}
+        tendency_map = {"x": [TendencySource(source="derived.loss", sign=-1.0)]}
+        dt = 1.0
+        clamp_map = {"x": (0.0, None)}
+
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, clamp_map)
+
         # 1.0 + (-10.0)*1.0 = -9.0 → clamped to 0.0
         np.testing.assert_array_equal(np.asarray(new_state["x"]), [0.0])
+
+    def test_euler_clamp_both_bounds(self):
+        """Test Euler integration with both lower and upper clamp bounds."""
+        from seapopym.blueprint.schema import TendencySource
+        from seapopym.engine.step import _integrate_euler
+
+        state = {"x": jnp.array([5.0])}
+        intermediates = {"flux": jnp.array([100.0])}
+        tendency_map = {"x": [TendencySource(source="derived.flux")]}
+        dt = 1.0
+        clamp_map = {"x": (-1.0, 10.0)}
+
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, clamp_map)
+
+        # 5.0 + 100.0*1.0 = 105.0 → clamped to 10.0
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [10.0])
+
+    def test_euler_clamp_per_variable(self):
+        """Test that clamping is applied per variable independently."""
+        from seapopym.blueprint.schema import TendencySource
+        from seapopym.engine.step import _integrate_euler
+
+        state = {"x": jnp.array([1.0]), "y": jnp.array([1.0])}
+        intermediates = {"loss": jnp.array([10.0])}
+        tendency_map = {
+            "x": [TendencySource(source="derived.loss", sign=-1.0)],
+            "y": [TendencySource(source="derived.loss", sign=-1.0)],
+        }
+        dt = 1.0
+        clamp_map = {"x": (0.0, None)}  # Only x is clamped
+
+        new_state = _integrate_euler(state, intermediates, tendency_map, dt, clamp_map)
+
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [0.0])  # clamped
+        np.testing.assert_array_equal(np.asarray(new_state["y"]), [-9.0])  # not clamped

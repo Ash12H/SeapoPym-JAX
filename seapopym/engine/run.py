@@ -77,7 +77,10 @@ def run(
         step_fn: Step function from ``build_step_fn``.
         model: Compiled model (provides forcings and n_timesteps).
         state: Initial state dict.
-        params: Parameters dict.
+        params: Parameters dict.  May include time-indexed parameters
+            (arrays with leading T dimension); these are automatically
+            separated and passed as scan *xs* so that ``jax.grad`` can
+            differentiate through them per-timestep.
         chunk_size: Timesteps per chunk. ``None`` = all timesteps in one chunk.
         writer: Output writer. ``None`` = ``WriterRaw()`` (JAX-traceable).
 
@@ -101,10 +104,19 @@ def run(
         effective_chunk,
     )
 
+    # Separate time-indexed parameters (dim T) from static parameters.
+    # Time-indexed params go into scan xs (differentiable per-timestep).
+    # Static params stay in the carry.
+    time_param_names = model.time_indexed_params
+    time_params = {k: params[k] for k in time_param_names if k in params}
+    static_params = {k: v for k, v in params.items() if k not in time_param_names}
+
     for start, end in chunk_ranges(n_timesteps, effective_chunk):
         chunk_len = end - start
         forcings = model.forcings.get_chunk(start, end)
-        (state, params), outputs = lax.scan(step_fn, (state, params), forcings, length=chunk_len)
+        time_chunk = {k: v[start:end] for k, v in time_params.items()}
+        xs = (forcings, time_chunk)
+        (state, static_params), outputs = lax.scan(step_fn, (state, static_params), xs, length=chunk_len)
         writer.append(outputs)
 
     return state, writer.finalize()

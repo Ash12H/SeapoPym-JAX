@@ -6,9 +6,11 @@ declarations:
     biomass:
       units: "g/m^2"
       dims: [F, Y, X]
+      clamp: [0.0, null]
     production:
       units: "g/m^2"
       dims: [F, C, Y, X]
+      clamp: [0.0, null]
 
   parameters:
     lambda_0:
