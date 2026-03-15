@@ -64,6 +64,12 @@ class CompiledModel:
     # Temporal configuration
     time_grid: TimeGrid | None = None
 
+    # Time-indexed parameters (params with dim T, passed as scan xs)
+    time_indexed_params: set[str] = field(default_factory=set)
+
+    # Clamping bounds per state variable (from blueprint declarations)
+    clamp_map: dict[str, tuple[float | None, float | None]] = field(default_factory=dict)
+
     @property
     def n_timesteps(self) -> int:
         """Return the number of timesteps from the time dimension."""

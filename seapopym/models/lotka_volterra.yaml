@@ -6,9 +6,11 @@ declarations:
     prey:
       units: "dimensionless"
       dims: [Y, X]
+      clamp: [0.0, null]
     predator:
       units: "dimensionless"
       dims: [Y, X]
+      clamp: [0.0, null]
 
   parameters:
     alpha:

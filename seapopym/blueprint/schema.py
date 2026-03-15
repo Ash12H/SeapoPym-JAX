@@ -22,6 +22,9 @@ class VariableDeclaration(BaseModel):
         units: Physical units (Pint-compatible string). Example: "g", "1/d", "degC".
         dims: Dimension names. Example: ["Y", "X", "C"].
         description: Human-readable description.
+        clamp: Optional clamping bounds for state variables after Euler integration.
+            None means no clamping. Tuple (min, max) where each bound can be None.
+            Example: (0.0, None) clamps to non-negative values.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -29,6 +32,7 @@ class VariableDeclaration(BaseModel):
     units: str | None = None
     dims: list[str] | None = None
     description: str | None = None
+    clamp: tuple[float | None, float | None] | None = None
 
 
 # === Process Definitions ===

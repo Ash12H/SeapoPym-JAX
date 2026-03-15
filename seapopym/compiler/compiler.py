@@ -204,7 +204,28 @@ def compile_model(
     # Step 7: Prepare parameters
     parameters = _prepare_parameters(config, dim_mapping)
 
-    # Step 8: Build CompiledModel
+    # Step 8: Detect time-indexed parameters (params with dim T)
+    n_timesteps = shapes.get("T", 1)
+    time_indexed_params: set[str] = set()
+    for name in config.parameters:
+        bp_dims = blueprint_dims.get(f"parameters.{name}")
+        if bp_dims is not None and "T" in bp_dims:
+            param_t_size = parameters[name].shape[0]  # T is first dim after canonical transpose
+            if param_t_size != n_timesteps:
+                raise ValueError(
+                    f"Time-indexed parameter '{name}' has {param_t_size} timesteps "
+                    f"but simulation requires {n_timesteps}. "
+                    f"Time-indexed parameters must have exactly n_timesteps values (no interpolation)."
+                )
+            time_indexed_params.add(name)
+
+    # Step 9: Build clamp_map from blueprint state declarations
+    clamp_map: dict[str, tuple[float | None, float | None]] = {}
+    for state_name, state_decl in blueprint.declarations.state.items():
+        if state_decl.clamp is not None:
+            clamp_map[state_name] = state_decl.clamp
+
+    # Step 10: Build CompiledModel
     return CompiledModel(
         blueprint=blueprint,
         compute_nodes=compute_nodes,
@@ -217,4 +238,6 @@ def compile_model(
         coords=coords,
         dt=time_grid.dt_seconds,
         time_grid=time_grid,
+        time_indexed_params=time_indexed_params,
+        clamp_map=clamp_map,
     )
