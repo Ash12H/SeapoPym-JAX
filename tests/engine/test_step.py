@@ -438,5 +438,5 @@ class TestIntegrateEuler:
 
         new_state = _integrate_euler(state, intermediates, tendency_map, dt, clamp_map)
 
-        np.testing.assert_array_equal(np.asarray(new_state["x"]), [0.0])   # clamped
+        np.testing.assert_array_equal(np.asarray(new_state["x"]), [0.0])  # clamped
         np.testing.assert_array_equal(np.asarray(new_state["y"]), [-9.0])  # not clamped
