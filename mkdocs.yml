@@ -49,6 +49,9 @@ plugins:
       include_source: true
       ignore:
         - "assets/diagrams/generate.py"
+      remove_tag_config:
+        remove_input_tags:
+          - hide_input
 
 markdown_extensions:
   - admonition
