@@ -6,7 +6,6 @@ import pytest
 from seapopym.optimization.cmaes import CMAESOptimizer
 from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.optimization.objective import Objective
-from seapopym.optimization.prior import PriorSet, Uniform
 
 
 class TestCMAESOptimizerInit:
@@ -20,17 +19,6 @@ class TestCMAESOptimizerInit:
         obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, popsize=31)
         assert opt.popsize == 32
-
-    def test_no_default_priors(self):
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
-        assert opt.priors is None
-
-    def test_custom_priors(self):
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        priors = PriorSet({"x": Uniform(1.0, 5.0)})
-        opt = CMAESOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, priors=priors)
-        assert opt.priors is priors
 
 
 class TestCMAESOptimizerRunLossFn:

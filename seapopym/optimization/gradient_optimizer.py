@@ -20,7 +20,6 @@ from seapopym.types import Array, Params
 if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
     from seapopym.optimization.objective import Objective
-    from seapopym.optimization.prior import PriorSet
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +55,6 @@ class GradientOptimizer:
     Args:
         objectives: List of ``(Objective, metric, weight)`` tuples.
         bounds: Optional parameter bounds as ``{name: (min, max)}``.
-        priors: Optional prior distributions. When ``None``, defaults to
-            ``Uniform`` from bounds (no penalty).
         algorithm: Optimization algorithm name.
         learning_rate: Learning rate (step size).
         scaling: Parameter scaling mode:
@@ -91,7 +88,6 @@ class GradientOptimizer:
         self,
         objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]] | None = None,
-        priors: PriorSet | None = None,
         algorithm: Literal["adam", "sgd", "rmsprop", "adagrad"] = "adam",
         learning_rate: float = 0.01,
         scaling: Literal["none", "bounds", "log"] = "none",
@@ -108,7 +104,6 @@ class GradientOptimizer:
 
         self.objectives = objectives
         self.bounds = bounds or {}
-        self.priors = priors
         self.algorithm = algorithm
         self.learning_rate = learning_rate
         self.scaling = scaling
@@ -138,14 +133,10 @@ class GradientOptimizer:
         Returns:
             OptimizeResult with optimized parameters and diagnostics.
         """
-        from seapopym.optimization._common import build_default_priors, build_loss_fn, setup_objectives
-
-        priors = self.priors
-        if priors is None and self.bounds:
-            priors = build_default_priors(self.bounds)
+        from seapopym.optimization._common import build_loss_fn, setup_objectives
 
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(model, prepared, priors, self.export_variables, self.chunk_size, self.checkpoint)
+        loss_fn = build_loss_fn(model, prepared, self.export_variables, self.chunk_size, self.checkpoint)
         initial_params = {k: model.parameters[k] for k in self.bounds} if self.bounds else dict(model.parameters)
 
         return self._run_loss_fn(loss_fn, initial_params, n_steps, tolerance, progress_bar)

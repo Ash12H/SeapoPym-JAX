@@ -25,7 +25,6 @@ from seapopym.optimization._common import (
 )
 from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.optimization.objective import Objective
-from seapopym.optimization.prior import PriorSet
 from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
@@ -41,8 +40,6 @@ class CMAESOptimizer:
     Args:
         objectives: List of ``(Objective, metric, weight)`` tuples.
         bounds: Parameter bounds as ``{name: (min, max)}``.
-        priors: Optional prior distributions. When ``None``, defaults to
-            ``Uniform`` from bounds (no penalty).
         popsize: Population size (rounded up to even if odd).
         seed: Random seed for reproducibility.
         chunk_size: Optional chunk size for time-stepping.
@@ -61,7 +58,6 @@ class CMAESOptimizer:
         self,
         objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]],
-        priors: PriorSet | None = None,
         popsize: int = 32,
         seed: int = 0,
         export_variables: list[str] | None = None,
@@ -72,7 +68,6 @@ class CMAESOptimizer:
 
         self.objectives = objectives
         self.bounds = bounds
-        self.priors = priors
         self.export_variables = export_variables
         self.chunk_size = chunk_size
         self.popsize = popsize
@@ -99,7 +94,7 @@ class CMAESOptimizer:
             OptimizeResult with optimized parameters and diagnostics.
         """
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(model, prepared, self.priors, self.export_variables, self.chunk_size)
+        loss_fn = build_loss_fn(model, prepared, self.export_variables, self.chunk_size)
         initial_params = {k: model.parameters[k] for k in self.bounds}
 
         return self._run_loss_fn(loss_fn, initial_params, n_generations, tol_fun, patience, progress_bar)

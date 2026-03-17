@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.loss import mse, nrmse, rmse
+from seapopym.optimization.multistart_gradient import MultiStartGradientOptimizer, MultiStartResult
 from seapopym.optimization.objective import Objective, PreparedObjective
 from seapopym.optimization.prior import (
     HalfNormal,
@@ -29,7 +30,9 @@ from seapopym.optimization.prior import (
 __all__ = [
     # Optimizers (always available)
     "GradientOptimizer",
+    "MultiStartGradientOptimizer",
     "OptimizeResult",
+    "MultiStartResult",
     # Objectives
     "Objective",
     "PreparedObjective",

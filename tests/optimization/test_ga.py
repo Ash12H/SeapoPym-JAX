@@ -6,7 +6,6 @@ import pytest
 from seapopym.optimization.ga import GAOptimizer
 from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.optimization.objective import Objective
-from seapopym.optimization.prior import PriorSet, Uniform
 
 
 class TestGAOptimizerInit:
@@ -17,17 +16,6 @@ class TestGAOptimizerInit:
         assert opt.seed == 0
         assert opt.crossover_rate == 0.8
         assert opt.mutation_std == 0.05
-
-    def test_no_default_priors(self):
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = GAOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)})
-        assert opt.priors is None
-
-    def test_custom_priors(self):
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        priors = PriorSet({"x": Uniform(1.0, 5.0)})
-        opt = GAOptimizer([(obj, "mse", 1.0)], bounds={"x": (0.0, 10.0)}, priors=priors)
-        assert opt.priors is priors
 
 
 class TestGAOptimizerRunLossFn:

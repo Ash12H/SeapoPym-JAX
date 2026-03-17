@@ -19,7 +19,6 @@ from seapopym.engine.run import run
 from seapopym.engine.step import build_step_fn
 from seapopym.optimization.loss import mse, nrmse, rmse
 from seapopym.optimization.objective import Objective, PreparedObjective
-from seapopym.optimization.prior import PriorSet, Uniform
 from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
@@ -53,13 +52,8 @@ def resolve_metric(metric: str | Callable[[Array, Array], Array]) -> Callable[[A
 
 
 # ---------------------------------------------------------------------------
-# Prior / objective helpers
+# Objective helpers
 # ---------------------------------------------------------------------------
-
-
-def build_default_priors(bounds: dict[str, tuple[float, float]]) -> PriorSet:
-    """Build a PriorSet of Uniform priors from bounds."""
-    return PriorSet({name: Uniform(low, high) for name, (low, high) in bounds.items()})
 
 
 def setup_objectives(
@@ -77,17 +71,15 @@ def setup_objectives(
 def build_loss_fn(
     model: CompiledModel,
     prepared_objectives: list[tuple[PreparedObjective, Callable, float]],
-    priors: PriorSet | None,
     export_variables: list[str] | None = None,
     chunk_size: int | None = None,
     checkpoint: bool = True,
 ) -> Callable[[Params], Array]:
-    """Build composite loss: sum(w_i * metric_i) + prior_penalty.
+    """Build composite loss: sum(w_i * metric_i).
 
     Args:
         model: Compiled model.
         prepared_objectives: List of (PreparedObjective, metric_fn, weight).
-        priors: Prior distributions for regularization.
         export_variables: Variables to export from the simulation.
         chunk_size: Timesteps per chunk for ``run()``.
         checkpoint: If ``True`` (default), enable gradient checkpointing
@@ -105,9 +97,6 @@ def build_loss_fn(
             pred = p.extract_fn(outputs)
             total = total + weight * metric_fn(pred, p.obs_array)
 
-        if priors is not None:
-            penalty = -priors.log_prob(free_params)
-            total = total + penalty
         return total
 
     return loss_fn

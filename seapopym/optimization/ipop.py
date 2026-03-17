@@ -23,7 +23,6 @@ from seapopym.optimization._common import (
 from seapopym.optimization.cmaes import CMAESOptimizer
 from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.optimization.objective import Objective
-from seapopym.optimization.prior import PriorSet
 from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
@@ -87,8 +86,6 @@ class IPOPCMAESOptimizer:
     Args:
         objectives: List of ``(Objective, metric, weight)`` tuples.
         bounds: Parameter bounds as ``{name: (min, max)}``.
-        priors: Optional prior distributions. When ``None``, defaults to
-            ``Uniform`` from bounds (no penalty).
         n_restarts: Number of restarts to perform.
         initial_popsize: Population size for the first restart (doubles each time).
         n_generations: Number of generations per restart.
@@ -112,7 +109,6 @@ class IPOPCMAESOptimizer:
         self,
         objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]],
-        priors: PriorSet | None = None,
         n_restarts: int = 5,
         initial_popsize: int = 32,
         n_generations: int = 100,
@@ -123,7 +119,6 @@ class IPOPCMAESOptimizer:
     ) -> None:
         self.objectives = objectives
         self.bounds = bounds
-        self.priors = priors
         self.export_variables = export_variables
         self.chunk_size = chunk_size
         self.n_restarts = n_restarts
@@ -147,7 +142,7 @@ class IPOPCMAESOptimizer:
             IPOPResult with distinct modes sorted by loss.
         """
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(model, prepared, self.priors, self.export_variables, self.chunk_size)
+        loss_fn = build_loss_fn(model, prepared, self.export_variables, self.chunk_size)
         initial_params = {k: model.parameters[k] for k in self.bounds}
 
         return self._run_loss_fn(loss_fn, initial_params, progress_bar)
@@ -179,7 +174,6 @@ class IPOPCMAESOptimizer:
             optimizer = CMAESOptimizer(
                 objectives=self.objectives,
                 bounds=self.bounds,
-                priors=self.priors,
                 popsize=popsize,
                 seed=self.seed + i,
             )
