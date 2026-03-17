@@ -28,6 +28,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import jax
 import jax.lax as lax
 
 from seapopym.types import Params, State
@@ -64,6 +65,7 @@ def run(
     params: Params,
     chunk_size: int | None = None,
     writer: OutputWriter | None = None,
+    checkpoint: bool = True,
 ) -> tuple[State, Any]:
     """Execute the model with a pluggable writer.
 
@@ -83,6 +85,11 @@ def run(
             differentiate through them per-timestep.
         chunk_size: Timesteps per chunk. ``None`` = all timesteps in one chunk.
         writer: Output writer. ``None`` = ``WriterRaw()`` (JAX-traceable).
+        checkpoint: If ``True`` (default), wrap the step function with
+            ``jax.checkpoint`` to trade compute for memory during
+            ``jax.grad``.  This avoids storing all intermediate values
+            across timesteps, reducing memory from ``O(T × intermediates)``
+            to ``O(T × carry)``.  Has no effect on forward-only execution.
 
     Returns:
         Tuple of (final_state, writer.finalize() result).
@@ -111,12 +118,14 @@ def run(
     time_params = {k: params[k] for k in time_param_names if k in params}
     static_params = {k: v for k, v in params.items() if k not in time_param_names}
 
+    effective_step = jax.checkpoint(step_fn) if checkpoint else step_fn
+
     for start, end in chunk_ranges(n_timesteps, effective_chunk):
         chunk_len = end - start
         forcings = model.forcings.get_chunk(start, end)
         time_chunk = {k: v[start:end] for k, v in time_params.items()}
         xs = (forcings, time_chunk)
-        (state, static_params), outputs = lax.scan(step_fn, (state, static_params), xs, length=chunk_len)
+        (state, static_params), outputs = lax.scan(effective_step, (state, static_params), xs, length=chunk_len)
         writer.append(outputs)
 
     return state, writer.finalize()
@@ -127,6 +136,7 @@ def simulate(
     chunk_size: int | None = None,
     output_path: str | Path | None = None,
     export_variables: list[str] | None = None,
+    checkpoint: bool = True,
 ) -> tuple[State, Any]:
     """Run a full simulation with automatic writer management.
 
@@ -139,6 +149,9 @@ def simulate(
         output_path: Path for Zarr output (DiskWriter). ``None`` = in-memory
             (MemoryWriter returning xarray.Dataset).
         export_variables: Variables to export. Defaults to all state variables.
+        checkpoint: If ``True`` (default), wrap the step function with
+            ``jax.checkpoint`` to reduce memory during ``jax.grad``.
+            Has no effect on forward-only execution.
 
     Returns:
         Tuple of (final_state, outputs). Outputs type depends on the writer:
@@ -149,7 +162,10 @@ def simulate(
     writer = build_writer(model, output_path, output_vars)
 
     try:
-        result = run(step_fn, model, dict(model.state), dict(model.parameters), chunk_size=chunk_size, writer=writer)
+        result = run(
+            step_fn, model, dict(model.state), dict(model.parameters),
+            chunk_size=chunk_size, writer=writer, checkpoint=checkpoint,
+        )
     finally:
         writer.close()
 

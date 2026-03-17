@@ -80,14 +80,25 @@ def build_loss_fn(
     priors: PriorSet | None,
     export_variables: list[str] | None = None,
     chunk_size: int | None = None,
+    checkpoint: bool = True,
 ) -> Callable[[Params], Array]:
-    """Build composite loss: sum(w_i * metric_i) + prior_penalty."""
+    """Build composite loss: sum(w_i * metric_i) + prior_penalty.
+
+    Args:
+        model: Compiled model.
+        prepared_objectives: List of (PreparedObjective, metric_fn, weight).
+        priors: Prior distributions for regularization.
+        export_variables: Variables to export from the simulation.
+        chunk_size: Timesteps per chunk for ``run()``.
+        checkpoint: If ``True`` (default), enable gradient checkpointing
+            in ``run()`` to reduce memory usage during ``jax.grad``.
+    """
     step_fn = build_step_fn(model, export_variables=export_variables)
 
     def loss_fn(free_params: Params) -> Array:
         merged = {**model.parameters, **free_params}
         state = dict(model.state)
-        _, outputs = run(step_fn, model, state, merged, chunk_size=chunk_size)
+        _, outputs = run(step_fn, model, state, merged, chunk_size=chunk_size, checkpoint=checkpoint)
 
         total = jnp.array(0.0)
         for p, metric_fn, weight in prepared_objectives:

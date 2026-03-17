@@ -65,6 +65,8 @@ class GradientOptimizer:
             - ``"bounds"``: Normalize to [0,1] using bounds (requires bounds)
             - ``"log"``: Log-space for positive parameters
         chunk_size: Optional chunk size for time-stepping.
+        checkpoint: If ``True`` (default), enable gradient checkpointing
+            to reduce memory usage during backpropagation.
 
     Example::
 
@@ -95,6 +97,7 @@ class GradientOptimizer:
         scaling: Literal["none", "bounds", "log"] = "none",
         export_variables: list[str] | None = None,
         chunk_size: int | None = None,
+        checkpoint: bool = True,
         **kwargs: Any,
     ) -> None:
         if algorithm not in self.ALGORITHMS:
@@ -111,6 +114,7 @@ class GradientOptimizer:
         self.scaling = scaling
         self.export_variables = export_variables
         self.chunk_size = chunk_size
+        self.checkpoint = checkpoint
 
         optimizer_fn = self.ALGORITHMS[algorithm]
         self._optimizer = optimizer_fn(learning_rate, **kwargs)
@@ -141,7 +145,7 @@ class GradientOptimizer:
             priors = build_default_priors(self.bounds)
 
         prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(model, prepared, priors, self.export_variables, self.chunk_size)
+        loss_fn = build_loss_fn(model, prepared, priors, self.export_variables, self.chunk_size, self.checkpoint)
         initial_params = {k: model.parameters[k] for k in self.bounds} if self.bounds else dict(model.parameters)
 
         return self._run_loss_fn(loss_fn, initial_params, n_steps, tolerance, progress_bar)

@@ -247,3 +247,58 @@ class TestTimeIndexedParams:
         assert "force" in grads
         assert grads["force"].shape == (n_steps,)
         assert jnp.any(grads["force"] != 0.0)
+
+    def test_checkpoint_gradient_matches_no_checkpoint(self):
+        """Gradients with checkpoint=True and checkpoint=False must be identical."""
+
+        @functional(name="test:forced_growth")
+        def forced_growth(biomass, force):
+            return biomass * force
+
+        blueprint = Blueprint.from_dict(
+            {
+                "id": "test-checkpoint-grad",
+                "version": "0.1.0",
+                "declarations": {
+                    "state": {"biomass": {"units": "g", "dims": ["Y", "X"]}},
+                    "parameters": {"force": {"units": "1/d", "dims": ["T"]}},
+                    "forcings": {},
+                },
+                "process": [
+                    {
+                        "func": "test:forced_growth",
+                        "inputs": {
+                            "biomass": "state.biomass",
+                            "force": "parameters.force",
+                        },
+                        "outputs": {"return": "derived.growth_flux"},
+                    }
+                ],
+                "tendencies": {"biomass": [{"source": "derived.growth_flux"}]},
+            }
+        )
+
+        n_steps = 10
+        config = Config(
+            parameters={"force": xr.DataArray(np.ones(n_steps) * 0.01, dims=["T"])},
+            forcings={},
+            initial_state={"biomass": xr.DataArray(np.ones((3, 3)) * 100.0, dims=["Y", "X"])},
+            execution={"dt": "1d", "time_start": "2000-01-01", "time_end": "2000-01-11"},
+        )
+
+        model = compile_model(blueprint, config)
+        step_fn = build_step_fn(model, export_variables=["biomass"])
+
+        def loss_fn(params, checkpoint):
+            _, outputs = run(step_fn, model, dict(model.state), params, checkpoint=checkpoint)
+            return jnp.mean(outputs["biomass"])
+
+        params = dict(model.parameters)
+        grads_with = jax.grad(lambda p: loss_fn(p, checkpoint=True))(params)
+        grads_without = jax.grad(lambda p: loss_fn(p, checkpoint=False))(params)
+
+        np.testing.assert_allclose(
+            np.asarray(grads_with["force"]),
+            np.asarray(grads_without["force"]),
+            rtol=1e-6,
+        )
