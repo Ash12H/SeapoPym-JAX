@@ -113,6 +113,8 @@ class IPOPCMAESOptimizer:
         initial_popsize: int = 32,
         n_generations: int = 100,
         distance_threshold: float = 0.1,
+        tol_fun: float = 1e-9,
+        patience: int = 50,
         seed: int = 0,
         export_variables: list[str] | None = None,
         chunk_size: int | None = None,
@@ -125,6 +127,8 @@ class IPOPCMAESOptimizer:
         self.initial_popsize = initial_popsize
         self.n_generations = n_generations
         self.distance_threshold = distance_threshold
+        self.tol_fun = tol_fun
+        self.patience = patience
         self.seed = seed
 
     def run(
@@ -191,6 +195,8 @@ class IPOPCMAESOptimizer:
                 loss_fn,
                 start_params,
                 n_generations=self.n_generations,
+                tol_fun=self.tol_fun,
+                patience=self.patience,
                 progress_bar=progress_bar,
             )
             all_results.append(result)
