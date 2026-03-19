@@ -43,6 +43,7 @@ class OptimizeResult:
     n_iterations: int = 0
     converged: bool = False
     message: str = ""
+    hall_of_fame: list[OptimizeResult] | None = None
 
 
 class GradientOptimizer:

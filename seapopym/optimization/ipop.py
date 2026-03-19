@@ -18,6 +18,7 @@ import jax.numpy as jnp
 
 from seapopym.optimization._common import (
     build_loss_fn,
+    params_distance,
     setup_objectives,
 )
 from seapopym.optimization.cmaes import CMAESOptimizer
@@ -46,26 +47,6 @@ class IPOPResult:
     n_restarts: int = 0
 
 
-def _params_distance(a: Params, b: Params, bounds: dict[str, tuple[float, float]]) -> float:
-    """Euclidean distance between two parameter dicts, normalized by bounds.
-
-    Only keys present in *bounds* contribute to the distance so that
-    unbounded keys (whose raw scale may be arbitrary) do not dominate.
-    """
-    dist_sq = 0.0
-    for key in a:
-        if key not in b or key not in bounds:
-            continue
-        va = jnp.atleast_1d(a[key])
-        vb = jnp.atleast_1d(b[key])
-        low, high = bounds[key]
-        va = (va - low) / (high - low)
-        vb = (vb - low) / (high - low)
-        diff = va - vb
-        dist_sq += float(jnp.sum(diff**2))
-    return float(jnp.sqrt(dist_sq))
-
-
 def _is_new_mode(
     candidate: OptimizeResult,
     existing_modes: list[OptimizeResult],
@@ -73,7 +54,7 @@ def _is_new_mode(
     bounds: dict[str, tuple[float, float]],
 ) -> bool:
     """Check if candidate is far enough from all existing modes (in normalized space)."""
-    return all(_params_distance(candidate.params, mode.params, bounds) >= distance_threshold for mode in existing_modes)
+    return all(params_distance(candidate.params, mode.params, bounds) >= distance_threshold for mode in existing_modes)
 
 
 class IPOPCMAESOptimizer:

@@ -15,6 +15,7 @@ import optax
 from evosax.algorithms import SimpleGA
 
 from seapopym.optimization._common import (
+    HallOfFame,
     build_bounds_arrays,
     build_loss_fn,
     denormalize,
@@ -67,6 +68,8 @@ class GAOptimizer:
         seed: int = 0,
         export_variables: list[str] | None = None,
         chunk_size: int | None = None,
+        hall_of_fame_size: int | None = None,
+        distance_threshold: float = 0.1,
     ) -> None:
         self.objectives = objectives
         self.bounds = bounds
@@ -76,6 +79,8 @@ class GAOptimizer:
         self.crossover_rate = crossover_rate
         self.mutation_std = mutation_std
         self.seed = seed
+        self.hall_of_fame_size = hall_of_fame_size
+        self.distance_threshold = distance_threshold
 
     def run(
         self,
@@ -144,6 +149,13 @@ class GAOptimizer:
         norm_lower = jnp.zeros_like(x0_norm)
         norm_upper = jnp.ones_like(x0_norm)
 
+        # Hall-of-fame setup
+        hof = None
+        denorm_fn = None
+        if self.hall_of_fame_size is not None:
+            hof = HallOfFame(self.hall_of_fame_size, self.distance_threshold, self.bounds)
+            denorm_fn = lambda flat_norm: unflatten_params(keys, denormalize(flat_norm, lower, upper), shapes, initial_params)
+
         best_flat_norm, loss_history, converged = run_evolution_strategy(
             strategy=strategy,
             es_params=es_params,
@@ -157,11 +169,18 @@ class GAOptimizer:
             norm_upper=norm_upper,
             x0_norm=x0_norm,
             progress_bar=progress_bar,
+            hall_of_fame=hof,
+            denorm_fn=denorm_fn,
         )
 
         best_flat_orig = denormalize(best_flat_norm, lower, upper)
         best_params = unflatten_params(keys, best_flat_orig, shapes, initial_params)
         best_loss = min(loss_history) if loss_history else float("inf")
+
+        # Convert HoF to list of OptimizeResult
+        hof_results = None
+        if hof is not None:
+            hof_results = [OptimizeResult(params=p, loss=l) for p, l in hof.members]
 
         return OptimizeResult(
             params=best_params,
@@ -172,4 +191,5 @@ class GAOptimizer:
             message=f"Converged after {len(loss_history)} generations"
             if converged
             else f"Reached max iterations ({n_generations})",
+            hall_of_fame=hof_results,
         )

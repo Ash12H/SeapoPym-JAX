@@ -173,6 +173,94 @@ def denormalize(flat_norm: Array, lower: Array, upper: Array) -> Array:
 
 
 # ---------------------------------------------------------------------------
+# Hall-of-fame utilities
+# ---------------------------------------------------------------------------
+
+
+def params_distance(a: Params, b: Params, bounds: dict[str, tuple[float, float]]) -> float:
+    """Euclidean distance between two parameter dicts, normalized by bounds.
+
+    Only keys present in *bounds* contribute to the distance so that
+    unbounded keys (whose raw scale may be arbitrary) do not dominate.
+    """
+    dist_sq = 0.0
+    for key in a:
+        if key not in b or key not in bounds:
+            continue
+        va = jnp.atleast_1d(a[key])
+        vb = jnp.atleast_1d(b[key])
+        low, high = bounds[key]
+        va = (va - low) / (high - low)
+        vb = (vb - low) / (high - low)
+        diff = va - vb
+        dist_sq += float(jnp.sum(diff**2))
+    return float(jnp.sqrt(dist_sq))
+
+
+class HallOfFame:
+    """Maintains a diverse set of the best solutions found during optimization.
+
+    At each update, candidates better than the worst member are considered.
+    If a candidate is too close to an existing member (distance < threshold),
+    the worse of the two is evicted. Otherwise the candidate is added and
+    the worst member is evicted if the hall is full.
+
+    Args:
+        max_size: Maximum number of members.
+        distance_threshold: Minimum normalized Euclidean distance between members.
+        bounds: Parameter bounds for normalization ``{name: (min, max)}``.
+    """
+
+    def __init__(
+        self,
+        max_size: int,
+        distance_threshold: float,
+        bounds: dict[str, tuple[float, float]],
+    ) -> None:
+        self.max_size = max_size
+        self.distance_threshold = distance_threshold
+        self.bounds = bounds
+        self.members: list[tuple[Params, float]] = []  # (params, loss)
+
+    def update(self, params: Params, loss: float) -> None:
+        """Try to insert a candidate into the hall-of-fame."""
+        loss = float(loss)
+        if not jnp.isfinite(loss):
+            return
+
+        # If hall not full, always consider; otherwise candidate must beat worst
+        if len(self.members) >= self.max_size and loss >= self.members[-1][1]:
+            return
+
+        # Check distance against all current members
+        for i, (m_params, m_loss) in enumerate(self.members):
+            dist = params_distance(params, m_params, self.bounds)
+            if dist < self.distance_threshold:
+                # Too close — keep the better one
+                if loss < m_loss:
+                    self.members[i] = (params, loss)
+                    self.members.sort(key=lambda x: x[1])
+                return
+
+        # New diverse member — add and evict worst if full
+        self.members.append((params, loss))
+        self.members.sort(key=lambda x: x[1])
+        if len(self.members) > self.max_size:
+            self.members.pop()
+
+    def update_population(self, all_params: list[Params], all_losses: list[float]) -> None:
+        """Update from a population of candidates (sorted best-first internally)."""
+        # Sort by loss to process best candidates first
+        paired = sorted(zip(all_losses, all_params), key=lambda x: x[0])
+        for loss, params in paired:
+            self.update(params, loss)
+
+    def to_results(self) -> list[dict]:
+        """Export as list of dicts with params and loss."""
+        return [{"params": p, "loss": l} for p, l in self.members]
+
+
+# ---------------------------------------------------------------------------
 # Shared evolution-strategy loop
 # ---------------------------------------------------------------------------
 
@@ -190,8 +278,15 @@ def run_evolution_strategy(
     norm_upper: Array,
     x0_norm: Array,
     progress_bar: bool = False,
+    hall_of_fame: HallOfFame | None = None,
+    denorm_fn: Callable[[Array], Params] | None = None,
 ) -> tuple[Array, list[float], bool]:
     """Shared ask/tell loop for evolutionary strategies.
+
+    Args:
+        hall_of_fame: Optional HallOfFame to update each generation.
+        denorm_fn: Function to convert flat normalized array to Params dict.
+            Required when hall_of_fame is not None.
 
     Returns ``(best_flat_norm, loss_history, converged)``.
     """
@@ -219,6 +314,13 @@ def run_evolution_strategy(
             stall_count = 0
         else:
             stall_count += 1
+
+        # Update hall-of-fame with this generation's population
+        if hall_of_fame is not None and denorm_fn is not None:
+            for i in range(population.shape[0]):
+                f = float(fitness[i])
+                if len(hall_of_fame.members) < hall_of_fame.max_size or f < hall_of_fame.members[-1][1]:
+                    hall_of_fame.update(denorm_fn(population[i]), f)
 
         if stall_count >= patience:
             converged = True
