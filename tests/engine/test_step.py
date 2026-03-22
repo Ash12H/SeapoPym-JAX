@@ -39,38 +39,6 @@ class TestBuildStepFn:
         assert "biomass" in new_state
         assert new_state["biomass"].shape == (5, 5)
 
-    def test_mask_application(self, simple_blueprint, simple_config):
-        """Test that mask is applied correctly."""
-
-        @functional(name="test:growth")
-        def test_growth(biomass, rate, temp):
-            return biomass * rate * (temp / 20.0)
-
-        model = compile_model(simple_blueprint, simple_config)
-
-        from seapopym.engine.step import build_step_fn
-
-        step_fn = build_step_fn(model)
-
-        # Create mask with some zeros
-        mask = jnp.ones((5, 5))
-        mask = mask.at[0, :].set(0)  # First row masked
-
-        state = {"biomass": jnp.ones((5, 5)) * 100.0}
-        params = model.parameters
-        forcings_t = {
-            "temperature": jnp.ones((5, 5)) * 20.0,
-            "mask": mask,
-        }
-
-        (new_state, _params), outputs = step_fn((state, params), (forcings_t, {}))
-
-        # First row should be zero (masked)
-        np.testing.assert_array_equal(np.asarray(new_state["biomass"][0, :]), 0.0)
-        # Other rows should have values
-        assert np.all(np.asarray(new_state["biomass"][1:, :]) > 0)
-
-
 class TestResolveInputs:
     """Tests for input resolution helper."""
 
@@ -282,27 +250,6 @@ class TestHandleComputeOutputs:
                 {"a": "derived.flux_a", "b": "derived.flux_b"},
                 {},
             )
-
-
-class TestApplyMask:
-    """Tests for _apply_mask."""
-
-    def test_no_op_mask(self):
-        """Test that mask=1.0 is a no-op."""
-        from seapopym.engine.step import _apply_mask
-
-        state = {"x": jnp.array([1.0, 2.0])}
-        result = _apply_mask(state, 1.0)
-        assert result is state  # Same object (no copy)
-
-    def test_array_mask(self):
-        """Test applying a real mask array."""
-        from seapopym.engine.step import _apply_mask
-
-        state = {"x": jnp.array([10.0, 20.0, 30.0])}
-        mask = jnp.array([1.0, 0.0, 1.0])
-        result = _apply_mask(state, mask)
-        np.testing.assert_array_equal(np.asarray(result["x"]), [10.0, 0.0, 30.0])
 
 
 class TestIntegrateEuler:

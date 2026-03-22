@@ -92,15 +92,6 @@ def _prepare_forcings(
             except (KeyError, ValueError, TypeError) as e:
                 logger.debug("Failed to extract coords from DataArray '%s': %s", name, e)
 
-    # Generate mask if not provided
-    if "mask" not in processed_forcings:
-        mask_shape = tuple(shapes.get(d, 1) for d in ["Y", "X"] if d in shapes)
-        if mask_shape:
-            processed_forcings["mask"] = xr.DataArray(
-                data=np.ones(mask_shape, dtype=bool),
-                dims=[d for d in ["Y", "X"] if d in shapes],
-            )
-
     coords["T"] = time_grid.coords
 
     forcing_store = ForcingStore.from_config(

@@ -200,13 +200,11 @@ class DiskWriter:
         # Create arrays for each variable
         # Time dimension is unlimited (append along axis 0)
         for var_name in variables:
-            # Use per-variable dims if provided, otherwise fall back to spatial dims
-            if var_dims and var_name in var_dims:
-                dims = var_dims[var_name]
-                # Spatial dims only (exclude T — it's the append axis)
-                spatial_dims = tuple(d for d in dims if d != "T")
-            else:
-                spatial_dims = tuple(d for d in ["Y", "X"] if d in shapes)
+            if not var_dims or var_name not in var_dims:
+                continue
+            dims = var_dims[var_name]
+            # Spatial dims only (exclude T — it's the append axis)
+            spatial_dims = tuple(d for d in dims if d != "T")
 
             var_shape = (0,) + tuple(shapes.get(d, 1) for d in spatial_dims)
             chunks = (1,) + var_shape[1:]
