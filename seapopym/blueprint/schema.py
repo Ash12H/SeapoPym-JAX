@@ -353,6 +353,7 @@ class ExecutionParams(BaseModel):
     time_start: str
     time_end: str
     dt: str = "1d"
+    time_dim: str = "T"
     forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
     output_path: str | None = None
 

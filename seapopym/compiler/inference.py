@@ -25,7 +25,7 @@ def infer_shapes(
     All data (forcings, initial_state, parameters) are xr.DataArray,
     so dimensions are read directly from .dims and .sizes.
 
-    If time_grid is provided, the time dimension "T" is computed from the
+    If time_grid is provided, the time dimension is computed from the
     temporal grid configuration rather than inferred from data sources.
 
     Args:
@@ -38,17 +38,18 @@ def infer_shapes(
     Raises:
         GridAlignmentError: If same dimension has different sizes in different sources.
     """
+    time_dim = config.execution.time_dim
     shapes: dict[str, int] = {}
     size_sources: dict[str, dict[str, int]] = {}
 
-    # If time_grid provided, set T dimension from it (priority over data inference)
+    # If time_grid provided, set time dimension from it (priority over data inference)
     if time_grid is not None:
-        shapes["T"] = time_grid.n_timesteps
-        size_sources["T"] = {"time_grid": time_grid.n_timesteps}
+        shapes[time_dim] = time_grid.n_timesteps
+        size_sources[time_dim] = {"time_grid": time_grid.n_timesteps}
 
     def record_shape(source_name: str, dim: str, size: int) -> None:
         """Record a dimension size and check for conflicts."""
-        if dim == "T" and time_grid is not None:
+        if dim == time_dim and time_grid is not None:
             return
 
         if dim not in size_sources:

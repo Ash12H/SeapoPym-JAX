@@ -72,11 +72,12 @@ class BlueprintValidator:
     against its declarations and the function registry.
     """
 
-    def validate(self, blueprint: Blueprint) -> ValidationResult:
+    def validate(self, blueprint: Blueprint, time_dim: str = "T") -> ValidationResult:
         """Run the full validation pipeline on a Blueprint.
 
         Args:
             blueprint: The Blueprint to validate.
+            time_dim: Name of the time dimension (default "T").
 
         Returns:
             ValidationResult with errors, warnings, and built nodes.
@@ -98,7 +99,7 @@ class BlueprintValidator:
         # Steps 4-6 are independent — errors in one do not block the others.
 
         # Step 4: Build nodes and validate core dimensions
-        self._build_nodes_and_validate_dims(blueprint, result)
+        self._build_nodes_and_validate_dims(blueprint, result, time_dim=time_dim)
 
         # Step 5: Validate units
         self._validate_units(blueprint, result)
@@ -168,7 +169,9 @@ class BlueprintValidator:
         for error in unit_errors:
             result.add_error(error)
 
-    def _build_nodes_and_validate_dims(self, blueprint: Blueprint, result: ValidationResult) -> None:
+    def _build_nodes_and_validate_dims(
+        self, blueprint: Blueprint, result: ValidationResult, time_dim: str = "T",
+    ) -> None:
         """Build ComputeNode/DataNode lists and validate core dimensions.
 
         Iterates over process steps in declaration order:
@@ -179,9 +182,9 @@ class BlueprintValidator:
         3. Propagate output dimensions for derived variables so that
            subsequent steps can validate against them.
 
-        Note: Forcings are declared with a T (time) dimension, but the
+        Note: Forcings are declared with a time dimension, but the
         engine slices forcings per-timestep before passing them to
-        functions. T is therefore excluded from dimension checks here.
+        functions. The time dim is therefore excluded from dimension checks here.
         """
         from seapopym.dims import get_canonical_order
 
@@ -207,7 +210,7 @@ class BlueprintValidator:
             metadata = result.resolved_functions[step.func]
 
             # --- Resolve input dimensions ---
-            input_dims = self._resolve_input_dims(step, data_nodes, get_canonical_order)
+            input_dims = self._resolve_input_dims(step, data_nodes, get_canonical_order, time_dim)
 
             # --- Validate core_dims ---
             self._check_core_dims(step, metadata, input_dims, result)
@@ -241,10 +244,11 @@ class BlueprintValidator:
         step: ProcessStep,
         data_nodes: dict[str, DataNode],
         get_canonical_order: Callable[..., Any],
+        time_dim: str = "T",
     ) -> dict[str, tuple[str, ...]]:
         """Resolve the dimension tuple for each input of a process step.
 
-        Forcings have their T dimension stripped (the engine slices per-timestep).
+        Forcings have their time dimension stripped (the engine slices per-timestep).
         """
         input_dims: dict[str, tuple[str, ...]] = {}
         for arg_name, var_path in step.inputs.items():
@@ -253,10 +257,10 @@ class BlueprintValidator:
                 input_dims[arg_name] = ()
                 continue
             dims_list = [str(d) for d in node_dims]
-            # T is consumed by the engine's time loop, not seen by functions.
+            # Time dim is consumed by the engine's time loop, not seen by functions.
             # This applies to forcings (always) and time-indexed parameters.
-            if (var_path.startswith("forcings.") or var_path.startswith("parameters.")) and "T" in dims_list:
-                dims_list.remove("T")
+            if (var_path.startswith("forcings.") or var_path.startswith("parameters.")) and time_dim in dims_list:
+                dims_list.remove(time_dim)
             input_dims[arg_name] = get_canonical_order(dims_list)
         return input_dims
 
@@ -337,18 +341,20 @@ def validate_model(blueprint: Blueprint, config: Config) -> ValidationResult:
         BlueprintValidationError: If blueprint validation fails.
         ConfigValidationError: If config validation fails.
     """
-    bp_result = validate_blueprint(blueprint)
+    time_dim = config.execution.time_dim
+    bp_result = validate_blueprint(blueprint, time_dim=time_dim)
     validate_config(config, blueprint)
     return bp_result
 
 
-def validate_blueprint(blueprint: Blueprint) -> ValidationResult:
+def validate_blueprint(blueprint: Blueprint, *, time_dim: str = "T") -> ValidationResult:
     """Validate a Blueprint.
 
     Convenience function that creates a validator and runs validation.
 
     Args:
         blueprint: The Blueprint to validate.
+        time_dim: Name of the time dimension (default "T").
 
     Returns:
         ValidationResult with errors, warnings, and built nodes.
@@ -357,7 +363,7 @@ def validate_blueprint(blueprint: Blueprint) -> ValidationResult:
         BlueprintValidationError: If validation fails (contains all errors).
     """
     validator = BlueprintValidator()
-    result = validator.validate(blueprint)
+    result = validator.validate(blueprint, time_dim=time_dim)
     if not result.valid:
         raise BlueprintValidationError(result.errors, result.warnings)
     return result
@@ -500,15 +506,16 @@ def _validate_temporal_coverage(
     for var_path, var_decl in all_vars.items():
         if not var_path.startswith("forcings."):
             continue
-        if var_decl.dims is None or "T" not in var_decl.dims:
+        time_dim = config.execution.time_dim
+        if var_decl.dims is None or time_dim not in var_decl.dims:
             continue
 
         forcing_name = var_path.removeprefix("forcings.")
         source = config.forcings.get(forcing_name)
-        if source is None or "T" not in source.coords:
+        if source is None or time_dim not in source.coords:
             continue
 
-        forcing_coords = source.coords["T"]
+        forcing_coords = source.coords[time_dim]
         forcing_start = pd.to_datetime(forcing_coords.values[0])
         forcing_end = pd.to_datetime(forcing_coords.values[-1])
 

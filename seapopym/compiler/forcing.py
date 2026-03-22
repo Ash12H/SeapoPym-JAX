@@ -51,6 +51,7 @@ class ForcingStore:
     n_timesteps: int = 1
     interp_method: str = "constant"
     _time_coords: np.ndarray | None = None
+    time_dim: str = "T"
 
     def get_chunk(self, start: int, end: int) -> dict[str, Array]:
         """Load and interpolate a temporal chunk [start, end).
@@ -124,11 +125,12 @@ class ForcingStore:
         n_timesteps: int,
         interp_method: str = "constant",
         time_coords: np.ndarray | None = None,
+        time_dim: str = "T",
     ) -> ForcingStore:
         """Build a ForcingStore from config forcings.
 
-        Separates forcings into static (no T dim) and dynamic (with T dim)
-        based on blueprint dimension declarations.
+        Separates forcings into static and dynamic based on whether the
+        time dimension is present in blueprint dimension declarations.
 
         Args:
             forcings: Forcing data as xr.DataArray (already transposed/mapped).
@@ -145,7 +147,7 @@ class ForcingStore:
 
         for name, da in forcings.items():
             bp_dims = blueprint_dims.get(f"forcings.{name}")
-            is_dynamic = bp_dims is not None and "T" in bp_dims
+            is_dynamic = bp_dims is not None and time_dim in bp_dims
 
             if is_dynamic:
                 dynamic[name] = da
@@ -158,6 +160,7 @@ class ForcingStore:
             n_timesteps=n_timesteps,
             interp_method=interp_method,
             _time_coords=time_coords,
+            time_dim=time_dim,
         )
 
     def __contains__(self, name: str) -> bool:
@@ -184,10 +187,10 @@ class ForcingStore:
         Returns:
             Array sliced/interpolated for the chunk.
         """
-        source_len = data.sizes["T"]
+        source_len = data.sizes[self.time_dim]
 
         if source_len == self.n_timesteps or self.interp_method == "constant":
-            return data.isel(T=slice(start, end)).values
+            return data.isel({self.time_dim: slice(start, end)}).values
 
         # Interpolation needed
         if self._time_coords is None:
@@ -202,17 +205,17 @@ class ForcingStore:
         """Interpolate a lazy DataArray to target times via xarray."""
         data = self._compute_source_window(data, target_times)
         if self.interp_method == "linear":
-            return data.interp(T=target_times, method="linear", kwargs={"fill_value": "extrapolate"}).values
+            return data.interp({self.time_dim: target_times}, method="linear", kwargs={"fill_value": "extrapolate"}).values
         if self.interp_method in ("nearest", "ffill"):
-            return data.reindex(T=target_times, method=self.interp_method).values
+            return data.reindex({self.time_dim: target_times}, method=self.interp_method).values
         raise ValueError(f"Unknown interp_method: {self.interp_method}")
 
     def _compute_source_window(self, data: xr.DataArray, target_times: np.ndarray) -> xr.DataArray:
         """Slice source DataArray to minimal temporal window for interpolation."""
-        if "T" not in data.dims or len(target_times) == 0:
+        if self.time_dim not in data.dims or len(target_times) == 0:
             return data
 
-        t_index = data.indexes["T"]
+        t_index = data.indexes[self.time_dim]
         source_len = len(t_index)
 
         # Bracket: 1 point before first target, 1 point after last target
@@ -222,4 +225,4 @@ class ForcingStore:
         if i_end - i_start >= source_len:
             return data
 
-        return data.isel(T=slice(i_start, i_end))
+        return data.isel({self.time_dim: slice(i_start, i_end)})
