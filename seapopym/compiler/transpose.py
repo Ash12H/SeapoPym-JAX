@@ -57,20 +57,13 @@ def transpose_canonical(
         TransposeError: If transposition fails.
     """
     try:
-        # Convert dims to strings
         str_dims = tuple(str(d) for d in da.dims)
 
         if target_order is None:
+            # get_canonical_order now preserves non-canonical dims at the end
             target_order = get_canonical_order(str_dims)
 
-        # Only include dims that exist in the data
-        present_dims = tuple(d for d in target_order if d in str_dims)
-
-        # Add any dims not in canonical order at the end (preserve them)
-        extra_dims = tuple(d for d in str_dims if d not in present_dims)
-        final_order = present_dims + extra_dims
-
-        return da.transpose(*final_order)
+        return da.transpose(*target_order)
 
     except Exception as e:
         name = str(da.name) if da.name is not None else "unnamed"

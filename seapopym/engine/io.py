@@ -348,10 +348,8 @@ class MemoryWriter:
                 # Dimension mismatch - skip this variable
                 continue
 
-            # Apply canonical order (preserve non-canonical dims)
-            canonical = get_canonical_order(dims)
-            extras = tuple(d for d in dims if d not in canonical)
-            dims = canonical + extras
+            # Apply canonical order (non-canonical dims preserved at end)
+            dims = get_canonical_order(dims)
 
             data_vars[var_name] = (dims, data)
 

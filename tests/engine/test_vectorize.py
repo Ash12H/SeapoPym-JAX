@@ -53,6 +53,19 @@ class TestComputeBroadcastDims:
         assert result == ["Y", "X"]
 
 
+    def test_non_canonical_dims_not_broadcast(self):
+        """Test that non-canonical dims are never included in broadcast dims."""
+        input_dims = {"nn_params": ("F", "P"), "production": ("F", "C", "Y", "X")}
+        core_dims = {"nn_params": ["P"], "production": ["C"]}
+
+        result = compute_broadcast_dims(input_dims, core_dims)
+
+        # P is non-canonical, should not be broadcast even though it's not a core dim of production
+        # Only canonical dims F, Y, X are broadcast candidates
+        assert result == ["F", "Y", "X"]
+        assert "P" not in result
+
+
 class TestComputeInAxes:
     """Tests for compute_in_axes function."""
 
