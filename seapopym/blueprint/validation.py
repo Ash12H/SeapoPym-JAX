@@ -170,7 +170,10 @@ class BlueprintValidator:
             result.add_error(error)
 
     def _build_nodes_and_validate_dims(
-        self, blueprint: Blueprint, result: ValidationResult, time_dim: str = "T",
+        self,
+        blueprint: Blueprint,
+        result: ValidationResult,
+        time_dim: str = "T",
     ) -> None:
         """Build ComputeNode/DataNode lists and validate core dimensions.
 

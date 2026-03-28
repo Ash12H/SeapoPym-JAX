@@ -142,7 +142,11 @@ class CMAESOptimizer:
         denorm_fn = None
         if self.hall_of_fame_size is not None:
             hof = HallOfFame(self.hall_of_fame_size, self.distance_threshold, self.bounds)
-            denorm_fn = lambda flat_norm: unflatten_params(keys, denormalize(flat_norm, lower, upper), shapes, initial_params)
+
+            def _denorm(flat_norm: Array) -> Params:
+                return unflatten_params(keys, denormalize(flat_norm, lower, upper), shapes, initial_params)
+
+            denorm_fn = _denorm
 
         best_flat_norm, loss_history, converged = run_evolution_strategy(
             strategy=strategy,
@@ -167,7 +171,7 @@ class CMAESOptimizer:
 
         hof_results = None
         if hof is not None:
-            hof_results = [OptimizeResult(params=p, loss=l) for p, l in hof.members]
+            hof_results = [OptimizeResult(params=p, loss=loss) for p, loss in hof.members]
 
         return OptimizeResult(
             params=best_params,

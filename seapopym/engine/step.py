@@ -292,5 +292,3 @@ def _integrate_euler(
         else:
             new_state[var_name] = value
     return new_state
-
-

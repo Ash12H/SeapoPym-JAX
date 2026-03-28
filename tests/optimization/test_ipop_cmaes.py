@@ -3,8 +3,9 @@
 import jax.numpy as jnp
 import pytest
 
+from seapopym.optimization._common import params_distance
 from seapopym.optimization.gradient_optimizer import OptimizeResult
-from seapopym.optimization.ipop import IPOPCMAESOptimizer, IPOPResult, _is_new_mode, _params_distance
+from seapopym.optimization.ipop import IPOPCMAESOptimizer, IPOPResult, _is_new_mode
 from seapopym.optimization.objective import Objective
 
 
@@ -13,19 +14,19 @@ class TestParamsDistance:
         a = {"x": jnp.array(0.5)}
         b = {"x": jnp.array(0.5)}
         bounds = {"x": (0.0, 1.0)}
-        assert _params_distance(a, b, bounds) == pytest.approx(0.0)
+        assert params_distance(a, b, bounds) == pytest.approx(0.0)
 
     def test_opposite_bounds(self):
         a = {"x": jnp.array(0.0)}
         b = {"x": jnp.array(1.0)}
         bounds = {"x": (0.0, 1.0)}
-        assert _params_distance(a, b, bounds) == pytest.approx(1.0)
+        assert params_distance(a, b, bounds) == pytest.approx(1.0)
 
     def test_multivariate(self):
         a = {"x": jnp.array(0.0), "y": jnp.array(0.0)}
         b = {"x": jnp.array(1.0), "y": jnp.array(1.0)}
         bounds = {"x": (0.0, 1.0), "y": (0.0, 1.0)}
-        assert _params_distance(a, b, bounds) == pytest.approx(jnp.sqrt(2.0), abs=1e-5)
+        assert params_distance(a, b, bounds) == pytest.approx(jnp.sqrt(2.0), abs=1e-5)
 
 
 class TestIsNewMode:

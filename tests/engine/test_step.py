@@ -39,6 +39,7 @@ class TestBuildStepFn:
         assert "biomass" in new_state
         assert new_state["biomass"].shape == (5, 5)
 
+
 class TestResolveInputs:
     """Tests for input resolution helper."""
 

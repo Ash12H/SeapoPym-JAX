@@ -52,7 +52,6 @@ class TestComputeBroadcastDims:
         # Canonical order: E, T, F, C, Z, Y, X
         assert result == ["Y", "X"]
 
-
     def test_non_canonical_dims_not_broadcast(self):
         """Test that non-canonical dims are never included in broadcast dims."""
         input_dims = {"nn_params": ("F", "P"), "production": ("F", "C", "Y", "X")}

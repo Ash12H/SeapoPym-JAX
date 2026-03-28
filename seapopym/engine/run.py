@@ -163,8 +163,13 @@ def simulate(
 
     try:
         result = run(
-            step_fn, model, dict(model.state), dict(model.parameters),
-            chunk_size=chunk_size, writer=writer, checkpoint=checkpoint,
+            step_fn,
+            model,
+            dict(model.state),
+            dict(model.parameters),
+            chunk_size=chunk_size,
+            writer=writer,
+            checkpoint=checkpoint,
         )
     finally:
         writer.close()

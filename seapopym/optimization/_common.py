@@ -251,13 +251,13 @@ class HallOfFame:
     def update_population(self, all_params: list[Params], all_losses: list[float]) -> None:
         """Update from a population of candidates (sorted best-first internally)."""
         # Sort by loss to process best candidates first
-        paired = sorted(zip(all_losses, all_params), key=lambda x: x[0])
+        paired = sorted(zip(all_losses, all_params, strict=True), key=lambda x: x[0])
         for loss, params in paired:
             self.update(params, loss)
 
     def to_results(self) -> list[dict]:
         """Export as list of dicts with params and loss."""
-        return [{"params": p, "loss": l} for p, l in self.members]
+        return [{"params": p, "loss": loss} for p, loss in self.members]
 
 
 # ---------------------------------------------------------------------------

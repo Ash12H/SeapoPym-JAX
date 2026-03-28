@@ -61,7 +61,8 @@ class TestDiskWriter:
         output_path = tmp_path / "output"
         writer = DiskWriter(output_path)
         writer.initialize(
-            {"Y": 5, "X": 5}, ["biomass", "temperature"],
+            {"Y": 5, "X": 5},
+            ["biomass", "temperature"],
             var_dims={"biomass": ("Y", "X"), "temperature": ("Y", "X")},
         )
 

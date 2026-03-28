@@ -254,8 +254,7 @@ class MultiStartGradientOptimizer:
                     loss_history=loss_histories[j],
                     n_iterations=converged_iters[j],
                     converged=converged_flags[j],
-                    message=f"Start {j}: "
-                    + ("Converged" if converged_flags[j] else f"Reached max ({n_steps})"),
+                    message=f"Start {j}: " + ("Converged" if converged_flags[j] else f"Reached max ({n_steps})"),
                 )
             )
 

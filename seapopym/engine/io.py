@@ -115,6 +115,7 @@ class WriterRaw:
         variables: list[str],
         coords: dict[str, Array] | None = None,
         var_dims: dict[str, tuple[str, ...]] | None = None,
+        time_dim: str = "T",
     ) -> None:
         """No-op (kept for Protocol compatibility)."""
 
