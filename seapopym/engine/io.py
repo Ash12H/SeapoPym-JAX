@@ -67,6 +67,7 @@ class OutputWriter(Protocol):
         variables: list[str],
         coords: dict[str, Array] | None = None,
         var_dims: dict[str, tuple[str, ...]] | None = None,
+        time_dim: str = "T",
     ) -> None:
         """Initialize the writer.
 
@@ -114,6 +115,7 @@ class WriterRaw:
         variables: list[str],
         coords: dict[str, Array] | None = None,
         var_dims: dict[str, tuple[str, ...]] | None = None,
+        time_dim: str = "T",
     ) -> None:
         """No-op (kept for Protocol compatibility)."""
 
@@ -154,6 +156,7 @@ class DiskWriter:
         self.output_path = Path(output_path)
         self._initialized = False
         self.store: Any = None  # zarr.Group at runtime
+        self._time_dim: str = "T"
 
     def initialize(
         self,
@@ -161,6 +164,7 @@ class DiskWriter:
         variables: list[str],
         coords: dict[str, Array] | None = None,
         var_dims: dict[str, tuple[str, ...]] | None = None,
+        time_dim: str = "T",
     ) -> None:
         """Initialize output storage structure.
 
@@ -170,6 +174,7 @@ class DiskWriter:
             coords: Coordinate arrays for dimensions.
             var_dims: Mapping from variable name to its dimension names.
         """
+        self._time_dim = time_dim
         self.output_path.mkdir(parents=True, exist_ok=True)
         self._init_zarr(shapes, variables, coords=coords, var_dims=var_dims)
         self._initialized = True
@@ -200,13 +205,11 @@ class DiskWriter:
         # Create arrays for each variable
         # Time dimension is unlimited (append along axis 0)
         for var_name in variables:
-            # Use per-variable dims if provided, otherwise fall back to spatial dims
-            if var_dims and var_name in var_dims:
-                dims = var_dims[var_name]
-                # Spatial dims only (exclude T — it's the append axis)
-                spatial_dims = tuple(d for d in dims if d != "T")
-            else:
-                spatial_dims = tuple(d for d in ["Y", "X"] if d in shapes)
+            if not var_dims or var_name not in var_dims:
+                continue
+            dims = var_dims[var_name]
+            # Non-time dims only (time is the append axis)
+            spatial_dims = tuple(d for d in dims if d != self._time_dim)
 
             var_shape = (0,) + tuple(shapes.get(d, 1) for d in spatial_dims)
             chunks = (1,) + var_shape[1:]
@@ -218,7 +221,7 @@ class DiskWriter:
                 dtype=np.float32,
             )
             # xarray/zarr convention: store dimension names as attribute
-            ds.attrs["_ARRAY_DIMENSIONS"] = ["T", *spatial_dims]
+            ds.attrs["_ARRAY_DIMENSIONS"] = [self._time_dim, *spatial_dims]
 
     def append(
         self,
@@ -274,6 +277,7 @@ class MemoryWriter:
         self._accumulator: dict[str, list[Array]] = {}
         self._coords: dict[str, Array] = {}
         self._var_dims: dict[str, tuple[str, ...]] = {}
+        self._time_dim: str = "T"
 
     def initialize(
         self,
@@ -281,6 +285,7 @@ class MemoryWriter:
         variables: list[str],
         coords: dict[str, Array] | None = None,
         var_dims: dict[str, tuple[str, ...]] | None = None,
+        time_dim: str = "T",
     ) -> None:
         """Initialize accumulator.
 
@@ -288,9 +293,11 @@ class MemoryWriter:
             shapes: Dimension sizes (unused, kept for protocol compatibility).
             variables: List of variable names to accumulate.
             coords: Coordinate arrays for dimensions (includes accumulated timestamps).
-            var_dims: Mapping from variable name to its dims (unused, kept for protocol compatibility).
+            var_dims: Mapping from variable name to its dims.
+            time_dim: Name of the time dimension.
         """
         del shapes  # Unused, kept for protocol compatibility
+        self._time_dim = time_dim
         self.variables = variables
         for var in variables:
             self._accumulator[var] = []
@@ -343,15 +350,13 @@ class MemoryWriter:
 
             # Add time dimension if needed (accumulated data has extra dimension)
             if len(dims) + 1 == data.ndim:
-                dims = ("T",) + dims
+                dims = (self._time_dim,) + dims
             elif len(dims) != data.ndim:
                 # Dimension mismatch - skip this variable
                 continue
 
-            # Apply canonical order (preserve non-canonical dims)
-            canonical = get_canonical_order(dims)
-            extras = tuple(d for d in dims if d not in canonical)
-            dims = canonical + extras
+            # Apply canonical order (non-canonical dims preserved at end)
+            dims = get_canonical_order(dims)
 
             data_vars[var_name] = (dims, data)
 
@@ -377,13 +382,14 @@ def build_writer(
     Returns:
         Initialized OutputWriter ready for append/finalize/close.
     """
+    time_dim = model.time_dim
     n_timesteps = model.n_timesteps
     writer_coords = dict(model.coords)
     if model.time_grid is not None:
-        writer_coords["T"] = model.time_grid.coords[:n_timesteps]
+        writer_coords[time_dim] = model.time_grid.coords[:n_timesteps]
     var_dims = resolve_var_dims(model.data_nodes, export_variables)
 
     writer: OutputWriter
     writer = DiskWriter(output_path) if output_path is not None else MemoryWriter()
-    writer.initialize(model.shapes, export_variables, coords=writer_coords, var_dims=var_dims)
+    writer.initialize(model.shapes, export_variables, coords=writer_coords, var_dims=var_dims, time_dim=time_dim)
     return writer

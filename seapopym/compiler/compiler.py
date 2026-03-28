@@ -65,22 +65,23 @@ def _prepare_forcings(
     """
     from .transpose import apply_dimension_mapping, transpose_canonical
 
+    time_dim = config.execution.time_dim
     processed_forcings: dict[str, xr.DataArray] = {}
     coords: dict[str, Array] = {}
     coords_extracted = False
-    n_timesteps = shapes.get("T", 1)
+    n_timesteps = shapes.get(time_dim, 1)
     interp_method = config.execution.forcing_interpolation
 
     for name, source in config.forcings.items():
         bp_dims = blueprint_dims.get(f"forcings.{name}")
-        is_dynamic = bp_dims is not None and "T" in bp_dims
+        is_dynamic = bp_dims is not None and time_dim in bp_dims
 
         da = apply_dimension_mapping(source, dim_mapping)
         da = transpose_canonical(da)  # type: ignore[reportArgumentType]
 
         # Slice dynamic forcings at xarray level (still lazy)
-        if is_dynamic and "T" in da.coords:
-            da = da.sel(T=slice(time_grid.start, time_grid.end))
+        if is_dynamic and time_dim in da.coords:
+            da = da.sel({time_dim: slice(time_grid.start, time_grid.end)})
 
         processed_forcings[name] = da
 
@@ -92,16 +93,7 @@ def _prepare_forcings(
             except (KeyError, ValueError, TypeError) as e:
                 logger.debug("Failed to extract coords from DataArray '%s': %s", name, e)
 
-    # Generate mask if not provided
-    if "mask" not in processed_forcings:
-        mask_shape = tuple(shapes.get(d, 1) for d in ["Y", "X"] if d in shapes)
-        if mask_shape:
-            processed_forcings["mask"] = xr.DataArray(
-                data=np.ones(mask_shape, dtype=bool),
-                dims=[d for d in ["Y", "X"] if d in shapes],
-            )
-
-    coords["T"] = time_grid.coords
+    coords[time_dim] = time_grid.coords
 
     forcing_store = ForcingStore.from_config(
         forcings=processed_forcings,
@@ -109,6 +101,7 @@ def _prepare_forcings(
         n_timesteps=n_timesteps,
         interp_method=interp_method,
         time_coords=time_grid.coords,
+        time_dim=time_dim,
     )
 
     return forcing_store, coords
@@ -204,12 +197,13 @@ def compile_model(
     # Step 7: Prepare parameters
     parameters = _prepare_parameters(config, dim_mapping)
 
-    # Step 8: Detect time-indexed parameters (params with dim T)
-    n_timesteps = shapes.get("T", 1)
+    # Step 8: Detect time-indexed parameters (params with time dim)
+    time_dim = config.execution.time_dim
+    n_timesteps = shapes.get(time_dim, 1)
     time_indexed_params: set[str] = set()
     for name in config.parameters:
         bp_dims = blueprint_dims.get(f"parameters.{name}")
-        if bp_dims is not None and "T" in bp_dims:
+        if bp_dims is not None and time_dim in bp_dims:
             param_t_size = parameters[name].shape[0]  # T is first dim after canonical transpose
             if param_t_size != n_timesteps:
                 raise ValueError(
@@ -240,4 +234,5 @@ def compile_model(
         time_grid=time_grid,
         time_indexed_params=time_indexed_params,
         clamp_map=clamp_map,
+        time_dim=time_dim,
     )

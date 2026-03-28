@@ -36,11 +36,23 @@ class TestGetCanonicalOrder:
         result = get_canonical_order([])
         assert result == ()
 
-    def test_non_canonical_dims_ignored(self):
-        """Test that non-canonical dims are not included."""
+    def test_non_canonical_dims_preserved_at_end(self):
+        """Test that non-canonical dims are preserved after canonical dims."""
         dims = ["X", "Y", "custom_dim"]
         result = get_canonical_order(dims)
-        assert result == ("Y", "X")
+        assert result == ("Y", "X", "custom_dim")
+
+    def test_multiple_non_canonical_dims(self):
+        """Test multiple non-canonical dims preserve original order."""
+        dims = ["F", "P", "H"]
+        result = get_canonical_order(dims)
+        assert result == ("F", "P", "H")
+
+    def test_non_canonical_only(self):
+        """Test with only non-canonical dims."""
+        dims = ["species", "age"]
+        result = get_canonical_order(dims)
+        assert result == ("species", "age")
 
 
 class TestApplyDimensionMapping:

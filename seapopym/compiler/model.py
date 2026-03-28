@@ -64,16 +64,19 @@ class CompiledModel:
     # Temporal configuration
     time_grid: TimeGrid | None = None
 
-    # Time-indexed parameters (params with dim T, passed as scan xs)
+    # Time-indexed parameters (params with time dim, passed as scan xs)
     time_indexed_params: set[str] = field(default_factory=set)
 
     # Clamping bounds per state variable (from blueprint declarations)
     clamp_map: dict[str, tuple[float | None, float | None]] = field(default_factory=dict)
 
+    # Name of the time dimension (default "T", configurable via ExecutionParams)
+    time_dim: str = "T"
+
     @property
     def n_timesteps(self) -> int:
         """Return the number of timesteps from the time dimension."""
-        return self.shapes.get("T", 1)
+        return self.shapes.get(self.time_dim, 1)
 
     def get_state_shape(self, var_name: str) -> tuple[int, ...]:
         """Get the shape of a state variable."""

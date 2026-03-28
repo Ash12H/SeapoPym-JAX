@@ -3,8 +3,7 @@
 The step function encapsulates the logic for a single timestep:
 1. Execute process chain to compute derived values
 2. Integrate tendencies into state (Euler explicit)
-3. Apply mask
-4. Extract diagnostics
+3. Extract diagnostics
 """
 
 from __future__ import annotations
@@ -36,8 +35,7 @@ def build_step_fn(
     The returned function executes one timestep of the model:
     1. Computes derived values via the process chain
     2. Integrates state using tendency_map + Euler explicit
-    3. Applies mask to state
-    4. Returns new state and diagnostic outputs
+    3. Returns new state and diagnostic outputs
 
     Args:
         model: Compiled model containing compute_nodes, tendency_map, parameters, and metadata.
@@ -90,7 +88,6 @@ def build_step_fn(
             Tuple of (new_state, outputs).
         """
         all_forcings = {**statics, **forcings_t}
-        mask = all_forcings.get("mask", 1.0)
 
         # Store all derived values
         intermediates: dict[str, Array] = {}
@@ -112,9 +109,6 @@ def build_step_fn(
 
         # Euler explicit integration using tendency_map
         new_state = _integrate_euler(state, intermediates, tendency_map, dt, clamp_map)
-
-        # Apply mask to state
-        new_state = _apply_mask(new_state, mask)
 
         # Build outputs (include state variables for saving)
         outputs: Outputs = {**intermediates, **new_state}
@@ -297,24 +291,4 @@ def _integrate_euler(
             new_state[var_name] = updated
         else:
             new_state[var_name] = value
-    return new_state
-
-
-def _apply_mask(state: State, mask: Array) -> State:
-    """Apply mask to state variables.
-
-    Args:
-        state: Current state.
-        mask: Binary mask (1 = valid, 0 = masked).
-
-    Returns:
-        Masked state.
-    """
-    if isinstance(mask, int | float) and mask == 1.0:
-        return state
-
-    new_state = {}
-    for var_name, value in state.items():
-        new_state[var_name] = value * mask
-
     return new_state

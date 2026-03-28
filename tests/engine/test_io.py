@@ -16,7 +16,7 @@ class TestDiskWriter:
         assert not output_path.exists()
 
         writer = DiskWriter(output_path)
-        writer.initialize({"Y": 10, "X": 20}, ["biomass"])
+        writer.initialize({"Y": 10, "X": 20}, ["biomass"], var_dims={"biomass": ("Y", "X")})
 
         assert output_path.exists()
         writer.close()
@@ -25,28 +25,25 @@ class TestDiskWriter:
         """Test writing a single chunk."""
         output_path = tmp_path / "output"
         writer = DiskWriter(output_path)
-        writer.initialize({"Y": 5, "X": 5}, ["biomass"])
+        writer.initialize({"Y": 5, "X": 5}, ["biomass"], var_dims={"biomass": ("Y", "X")})
 
-        # Write a chunk
         data = {"biomass": np.ones((10, 5, 5)) * 100.0}
         writer.append(data)
         writer.finalize()
         writer.close()
 
-        # Verify data was written
         import zarr
 
         store = zarr.open(str(output_path), mode="r")
         assert "biomass" in store
-        assert store["biomass"].shape[0] == 10  # type: ignore[union-attr]  # 10 timesteps
+        assert store["biomass"].shape[0] == 10  # type: ignore[union-attr]
 
     def test_write_multiple_chunks(self, tmp_path):
         """Test writing multiple chunks."""
         output_path = tmp_path / "output"
         writer = DiskWriter(output_path)
-        writer.initialize({"Y": 5, "X": 5}, ["biomass"])
+        writer.initialize({"Y": 5, "X": 5}, ["biomass"], var_dims={"biomass": ("Y", "X")})
 
-        # Write multiple chunks
         for i in range(3):
             data = {"biomass": np.ones((5, 5, 5)) * (i + 1)}
             writer.append(data)
@@ -54,17 +51,20 @@ class TestDiskWriter:
         writer.finalize()
         writer.close()
 
-        # Verify all data was written
         import zarr
 
         store = zarr.open(str(output_path), mode="r")
-        assert store["biomass"].shape[0] == 15  # type: ignore[union-attr]  # 3 chunks * 5 timesteps
+        assert store["biomass"].shape[0] == 15  # type: ignore[union-attr]
 
     def test_write_multiple_variables(self, tmp_path):
         """Test writing multiple variables."""
         output_path = tmp_path / "output"
         writer = DiskWriter(output_path)
-        writer.initialize({"Y": 5, "X": 5}, ["biomass", "temperature"])
+        writer.initialize(
+            {"Y": 5, "X": 5},
+            ["biomass", "temperature"],
+            var_dims={"biomass": ("Y", "X"), "temperature": ("Y", "X")},
+        )
 
         data = {
             "biomass": np.ones((5, 5, 5)) * 100.0,
@@ -85,11 +85,10 @@ class TestDiskWriter:
         output_path = tmp_path / "output"
 
         with DiskWriter(output_path) as writer:
-            writer.initialize({"Y": 5, "X": 5}, ["biomass"])
+            writer.initialize({"Y": 5, "X": 5}, ["biomass"], var_dims={"biomass": ("Y", "X")})
             data = {"biomass": np.ones((5, 5, 5)) * 100.0}
             writer.append(data)
 
-        # Should have flushed and closed
         import zarr
 
         store = zarr.open(str(output_path), mode="r")
@@ -111,13 +110,11 @@ class TestDiskWriter:
 
         output_path = tmp_path / "output"
         with DiskWriter(output_path) as writer:
-            writer.initialize({"Y": 5, "X": 5}, ["biomass"])
+            writer.initialize({"Y": 5, "X": 5}, ["biomass"], var_dims={"biomass": ("Y", "X")})
 
-            # Use JAX array
             data = {"biomass": jnp.ones((5, 5, 5)) * 100.0}
             writer.append(data)
 
-        # Should have been converted and written
         import zarr
 
         store = zarr.open(str(output_path), mode="r")
@@ -133,11 +130,9 @@ class TestDiskWriter:
             var_dims={"biomass": ("Y", "X"), "cohort_var": ("C", "Y", "X")},
         )
 
-        # biomass: (T, Y, X) → initial shape (0, 4, 5)
         assert writer.store["biomass"].shape == (0, 4, 5)
         assert writer.store["biomass"].attrs["_ARRAY_DIMENSIONS"] == ["T", "Y", "X"]
 
-        # cohort_var: (T, C, Y, X) → initial shape (0, 3, 4, 5)
         assert writer.store["cohort_var"].shape == (0, 3, 4, 5)
         assert writer.store["cohort_var"].attrs["_ARRAY_DIMENSIONS"] == ["T", "C", "Y", "X"]
 
@@ -149,7 +144,7 @@ class TestDiskWriter:
         writer = DiskWriter(output_path)
 
         coords = {"Y": np.arange(5), "X": np.arange(3)}
-        writer.initialize({"Y": 5, "X": 3}, ["biomass"], coords=coords)
+        writer.initialize({"Y": 5, "X": 3}, ["biomass"], coords=coords, var_dims={"biomass": ("Y", "X")})
 
         import zarr
 
@@ -163,7 +158,7 @@ class TestDiskWriter:
         """Test that _ARRAY_DIMENSIONS attribute is set on variables."""
         output_path = tmp_path / "output"
         writer = DiskWriter(output_path)
-        writer.initialize({"Y": 5, "X": 5}, ["biomass"])
+        writer.initialize({"Y": 5, "X": 5}, ["biomass"], var_dims={"biomass": ("Y", "X")})
 
         import zarr
 
