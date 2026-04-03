@@ -16,6 +16,12 @@ It uses a **[Directed Acyclic Graph](https://en.wikipedia.org/wiki/Directed_acyc
 
     An inverted pendulum ([Barto et al. 1983](https://ieeexplore.ieee.org/document/6313077)) stabilized over 20 seconds using **differentiable Model Predictive Control**. At each timestep, the controller optimizes a 1-second force horizon via `jax.grad` through the physics, executes the first action, and re-plans. No engine modifications needed — pure composition of SeapoPym's `step_fn` + `lax.scan`.
 
+!!! example "Pursuit-Evasion — Multi-Agent MPC"
+
+    ![Pursuit-Evasion MPC](assets/pursuit_evasion_mpc.gif)
+
+    Two agents compete in a 2D arena with terrain: a pursuer (red) chases using proportional pursuit, while the evader (blue) plans ahead using **differentiable MPC** — optimizing a 60-step acceleration sequence via `jax.grad` through the compiled physics at every timestep. The same Blueprint is instantiated for both agents; the adversarial behavior emerges from the cost function alone, with `stop_gradient` isolating each agent's optimization.
+
 ## Why SeapoPym?
 
 SeapoPym bridges two communities:

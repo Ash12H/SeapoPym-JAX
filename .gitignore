@@ -86,6 +86,7 @@ dmypy.json
 # Documentation
 docs/_build/
 site/
+.cache/
 
 # Logs
 *.log

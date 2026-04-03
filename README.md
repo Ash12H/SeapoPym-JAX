@@ -13,15 +13,42 @@
 
 It uses a **[Directed Acyclic Graph](https://en.wikipedia.org/wiki/Directed_acyclic_graph) (DAG) blueprint architecture** where processes are declared as connected nodes with flux edges. Models are defined in YAML, compiled into optimized JAX computation graphs, and executed on CPU or GPU.
 
-![Simulate dynamical systems, compute exact gradients through physics, and optimize parameters — all in JAX.](docs/assets/hero.png)
+```
+Blueprint (YAML) + Config ──▶ compile_model() ──▶ CompiledModel ──▶ simulate() / jax.grad() ──▶ Outputs
+```
 
-> **Lotka-Volterra twin experiment** — A 2-species predator-prey ODE declared as a SeapoPym Blueprint. Gradient descent recovers α and γ from partial, noisy observations (prey only, 5% Gaussian noise) by back-propagating through the entire simulation via `jax.grad` — converging to <1% error in ~100 steps.
+## Showcase
+
+**Lotka-Volterra** — Parameter recovery via `jax.grad` through the full simulation:
+
+![Lotka-Volterra twin experiment](docs/assets/hero.png)
+
+**CartPole MPC** — 20s stabilization via differentiable Model Predictive Control:
+
+![CartPole MPC](docs/assets/cartpole_mpc.gif)
+
+**Pursuit-Evasion MPC** — Multi-agent adversarial planning on 2D terrain:
+
+![Pursuit-Evasion MPC](docs/assets/pursuit_evasion_mpc.gif)
 
 ## Why SeapoPym?
 
 **For scientists** — Explicit numerical schemes (Euler, first-order upwind finite volume), YAML model declaration, visual process DAG, strict unit validation (Pint), NaN rejection at compile time.
 
 **For ML engineers** — Pure JAX backend (`jax.lax.scan`), end-to-end differentiable (`jax.grad` through physics), `jax.vmap` auto-vectorization, GPU/TPU support, built-in optimization (Optax, CMA-ES, GA via evosax).
+
+## Examples
+
+| Notebook                                                          | What it demonstrates                         | SeapoPym features                         |
+| ----------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------- |
+| [Lotka-Volterra](docs/examples/01_lotka_volterra.ipynb)           | 2-species predator-prey ODE                  | Blueprint, `@functional`, `simulate()`    |
+| [Gradient](docs/examples/02_gradient.ipynb)                       | Exact gradients through physics              | `jax.grad` through `lax.scan`             |
+| [Optimization](docs/examples/03_optimization.ipynb)               | Parameter recovery from noisy observations   | `GradientOptimizer`, `Objective`, priors  |
+| [LMTL — No Transport](docs/examples/04_lmtl_no_transport.ipynb)   | Marine ecosystem (6 cohorts, NPP, mortality) | Pre-built YAML model, `core_dims`         |
+| [LMTL — Transport](docs/examples/05_transport.ipynb)              | Advection-diffusion on 2D grid               | Spatial `(Z, Y, X)` dims                  |
+| [CartPole](docs/examples/06_cartpole.ipynb)                       | Trajectory optimization (open-loop)          | Time-indexed parameters `force[T]`, Optax |
+| [CartPole MPC](docs/examples/07_cartpole_mpc.ipynb)               | Differentiable MPC (closed-loop, 20s)        | `build_step_fn` + `lax.scan` composition  |
+| [Pursuit-Evasion MPC](docs/examples/08_pursuit_evasion_mpc.ipynb) | Multi-agent adversarial MPC with terrain     | Multi-instance Blueprint, `stop_gradient` |
 
 ## Quickstart
 
@@ -75,11 +102,13 @@ pip install git+https://github.com/Ash12H/SeapoPym-JAX.git
 ```
 
 With GPU support:
+
 ```bash
 pip install "git+https://github.com/Ash12H/SeapoPym-JAX.git[gpu]"
 ```
 
 For development:
+
 ```bash
 git clone https://github.com/Ash12H/SeapoPym-JAX.git
 cd SeapoPym-JAX
