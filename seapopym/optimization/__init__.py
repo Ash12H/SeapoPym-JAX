@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from seapopym.optimization._common import GenerationResult, HallOfFame
 from seapopym.optimization.gradient_optimizer import GradientOptimizer, OptimizeResult
 from seapopym.optimization.loss import mse, nrmse, rmse
 from seapopym.optimization.multistart_gradient import MultiStartGradientOptimizer, MultiStartResult
@@ -33,6 +34,9 @@ __all__ = [
     "MultiStartGradientOptimizer",
     "OptimizeResult",
     "MultiStartResult",
+    # Step-based results
+    "GenerationResult",
+    "HallOfFame",
     # Objectives
     "Objective",
     "PreparedObjective",

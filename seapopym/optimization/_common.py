@@ -10,10 +10,12 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from seapopym.engine.run import run
 from seapopym.engine.step import build_step_fn
@@ -25,6 +27,35 @@ if TYPE_CHECKING:
     from seapopym.compiler.model import CompiledModel
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Generation result (yielded by step-based optimizers)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GenerationResult:
+    """Result of a single CMA-ES / GA generation.
+
+    Attributes:
+        gen: Generation index (0-based).
+        best_loss: Best fitness in this generation.
+        mean_loss: Mean fitness of valid (finite) individuals.
+        n_valid: Number of individuals with finite fitness.
+        best_params: Parameters of the best individual (denormalized).
+        population_params: All individuals' parameters (denormalized).
+        population_fitness: Raw fitness array for the population.
+    """
+
+    gen: int
+    best_loss: float
+    mean_loss: float
+    n_valid: int
+    best_params: Params
+    population_params: list[Params] = field(default_factory=list)
+    population_fitness: np.ndarray = field(default_factory=lambda: np.array([]))
+
 
 # ---------------------------------------------------------------------------
 # Metric resolution

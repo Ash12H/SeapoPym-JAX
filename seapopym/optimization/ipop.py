@@ -157,8 +157,8 @@ class IPOPCMAESOptimizer:
                     start_params[name] = jax.random.uniform(subkey, shape=shape, minval=low, maxval=high)
 
             optimizer = CMAESOptimizer(
-                objectives=self.objectives,
                 bounds=self.bounds,
+                initial_params=start_params,
                 popsize=popsize,
                 seed=self.seed + i,
             )
@@ -172,13 +172,11 @@ class IPOPCMAESOptimizer:
             )
             t0 = time.time()
 
-            result = optimizer._run_loss_fn(
+            result = optimizer.run(
                 loss_fn,
-                start_params,
-                n_generations=self.n_generations,
-                tol_fun=self.tol_fun,
+                max_gen=self.n_generations,
                 patience=self.patience,
-                progress_bar=progress_bar,
+                tol_fun=self.tol_fun,
             )
             all_results.append(result)
 
