@@ -2,6 +2,14 @@
 
 Launches N parallel Adam runs from diverse initial points sampled via
 prior distributions. Combines gradient precision with global exploration.
+
+Example::
+
+    optimizer, loss_fn = MultiStartGradientOptimizer.from_model(
+        model, objectives, bounds, n_starts=8,
+    )
+    result = optimizer.run(loss_fn, max_steps=200)
+    print(result.best.loss)
 """
 
 from __future__ import annotations
@@ -15,7 +23,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from seapopym.optimization.gradient_optimizer import OptimizeResult
+from seapopym.optimization._common import OptimizeResult
 from seapopym.optimization.prior import PriorSet, Uniform
 from seapopym.types import Array, Params
 
@@ -43,14 +51,13 @@ class MultiStartResult:
 
 
 class MultiStartGradientOptimizer:
-    """Multi-start gradient optimizer for model calibration.
+    """Multi-start gradient optimizer with model-agnostic API.
 
     Samples ``n_starts`` initial parameter sets from prior distributions
     (default: ``Uniform`` from bounds), then runs Adam in parallel via
     ``jax.vmap(jax.value_and_grad(loss_fn))``.
 
     Args:
-        objectives: List of ``(Objective, metric, weight)`` tuples.
         bounds: Parameter bounds as ``{name: (min, max)}``.  Required.
         n_starts: Number of parallel gradient runs.
         priors: Prior distributions for initialization sampling.
@@ -58,21 +65,7 @@ class MultiStartGradientOptimizer:
         algorithm: Optimization algorithm name.
         learning_rate: Learning rate (step size).
         scaling: Parameter scaling mode.
-        export_variables: Variables to export from the simulation.
-        chunk_size: Optional chunk size for time-stepping.
-        checkpoint: If ``True`` (default), enable gradient checkpointing.
         seed: Random seed for initialization sampling.
-
-    Example::
-
-        optimizer = MultiStartGradientOptimizer(
-            objectives=[(Objective(observations=obs, transform=fn), "mse", 1.0)],
-            bounds={"rate": (0.0, 1.0)},
-            n_starts=8,
-            learning_rate=0.01,
-        )
-        result = optimizer.run(model, n_steps=200)
-        print(result.best.loss)
     """
 
     ALGORITHMS = {
@@ -84,64 +77,57 @@ class MultiStartGradientOptimizer:
 
     def __init__(
         self,
-        objectives: list[tuple[Objective, str | Callable, float]],
         bounds: dict[str, tuple[float, float]],
         n_starts: int = 8,
         priors: PriorSet | None = None,
         algorithm: Literal["adam", "sgd", "rmsprop", "adagrad"] = "adam",
         learning_rate: float = 0.01,
         scaling: Literal["none", "bounds"] = "bounds",
-        export_variables: list[str] | None = None,
-        chunk_size: int | None = None,
-        checkpoint: bool = True,
         seed: int = 0,
         **kwargs: Any,
     ) -> None:
         if algorithm not in self.ALGORITHMS:
             raise ValueError(f"Unknown algorithm '{algorithm}'. Available: {list(self.ALGORITHMS.keys())}")
 
-        self.objectives = objectives
         self.bounds = bounds
         self.n_starts = n_starts
         self.priors = priors
         self.algorithm = algorithm
         self.learning_rate = learning_rate
         self.scaling = scaling
-        self.export_variables = export_variables
-        self.chunk_size = chunk_size
-        self.checkpoint = checkpoint
         self.seed = seed
 
         optimizer_fn = self.ALGORITHMS[algorithm]
         self._optimizer = optimizer_fn(learning_rate, **kwargs)
 
+        # Set by from_model() or manually before run()
+        self._param_shapes: dict[str, tuple] | None = None
+
     def run(
         self,
-        model: CompiledModel,
-        n_steps: int = 200,
+        eval_fn: Callable[[Params], Array],
+        max_steps: int = 200,
         tolerance: float = 1e-6,
         patience: int = 50,
-        progress_bar: bool = False,
+        param_shapes: dict[str, tuple] | None = None,
     ) -> MultiStartResult:
         """Run multi-start gradient optimization.
 
         Args:
-            model: Compiled model to calibrate.
-            n_steps: Maximum optimization steps per start.
-            tolerance: Per-start convergence tolerance (stop a start if
-                its loss change < tolerance).
-            patience: Global early stopping patience.  Stop all starts if
-                the overall best loss has not improved for ``patience``
-                consecutive iterations.
-            progress_bar: If True, display inline progress indicator.
+            eval_fn: Loss function mapping ``Params -> scalar``.
+            max_steps: Maximum optimization steps per start.
+            tolerance: Per-start convergence tolerance.
+            patience: Global early stopping patience.
+            param_shapes: Shape of each parameter ``{name: shape}``.
+                Required if not set via :meth:`from_model`.
 
         Returns:
             MultiStartResult with all individual results.
         """
-        from seapopym.optimization._common import build_loss_fn, setup_objectives
-
-        prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(model, prepared, self.export_variables, self.chunk_size, self.checkpoint)
+        shapes = param_shapes or self._param_shapes
+        if shapes is None:
+            msg = "param_shapes must be provided either via from_model() or as argument to run()"
+            raise ValueError(msg)
 
         # Build PriorSet for initialization
         priors = self.priors
@@ -151,20 +137,19 @@ class MultiStartGradientOptimizer:
         # Sample N initial parameter sets
         key = jax.random.key(self.seed)
         free_param_names = sorted(self.bounds.keys())
-        shapes = {k: (self.n_starts, *jnp.shape(model.parameters[k])) for k in free_param_names}
-        batched_init = priors.sample(key, shapes=shapes)
+        batched_shapes = {k: (self.n_starts, *shapes[k]) for k in free_param_names}
+        batched_init = priors.sample(key, shapes=batched_shapes)
 
-        return self._run_batched(loss_fn, batched_init, free_param_names, n_steps, tolerance, patience, progress_bar)
+        return self._run_batched(eval_fn, batched_init, free_param_names, max_steps, tolerance, patience)
 
     def _run_batched(
         self,
-        loss_fn: Callable[[Params], Array],
+        eval_fn: Callable[[Params], Array],
         batched_init: Params,
         free_param_names: list[str],
-        n_steps: int,
+        max_steps: int,
         tolerance: float,
         patience: int,
-        progress_bar: bool,
     ) -> MultiStartResult:
         """Run N parallel gradient descents."""
         n_starts = self.n_starts
@@ -178,7 +163,7 @@ class MultiStartGradientOptimizer:
         # Build vmapped value_and_grad
         def scaled_loss(params_norm: Params) -> Array:
             params_orig = self._denormalize(params_norm, free_param_names)
-            return loss_fn(params_orig)
+            return eval_fn(params_orig)
 
         batched_vg = jax.jit(jax.vmap(jax.value_and_grad(scaled_loss)))
 
@@ -186,13 +171,13 @@ class MultiStartGradientOptimizer:
         loss_histories: list[list[float]] = [[] for _ in range(n_starts)]
         prev_losses = [float("inf")] * n_starts
         converged_flags = [False] * n_starts
-        converged_iters = [n_steps] * n_starts
+        converged_iters = [max_steps] * n_starts
 
         # Global patience tracking
         global_best_loss = float("inf")
         stall_count = 0
 
-        for i in range(n_steps):
+        for i in range(max_steps):
             losses, grads = batched_vg(batched_params)
             loss_vals = [float(losses[j]) for j in range(n_starts)]
 
@@ -218,16 +203,12 @@ class MultiStartGradientOptimizer:
             batched_params = self._clip_batched(batched_params, free_param_names)
 
             if i % 10 == 0:
-                logger.info("Step %d/%d: best_loss=%.6e, stall=%d/%d", i, n_steps, current_best, stall_count, patience)
-
-            if progress_bar:
-                print_rate = max(1, n_steps // 20)
-                if i % print_rate == 0 or i == n_steps - 1:
-                    print(f"\r  [{i + 1}/{n_steps}] best_loss={current_best:.4e}", end="", flush=True)
+                logger.info(
+                    "Step %d/%d: best_loss=%.6e, stall=%d/%d", i, max_steps, current_best, stall_count, patience
+                )
 
             # Stop early if global patience exhausted or ALL per-start converged
             if stall_count >= patience:
-                # Mark remaining starts as converged at this iteration
                 for j in range(n_starts):
                     if not converged_flags[j]:
                         converged_flags[j] = True
@@ -238,15 +219,12 @@ class MultiStartGradientOptimizer:
             if all(converged_flags):
                 break
 
-        if progress_bar:
-            print()
-
         # Build individual results
         all_results = []
         for j in range(n_starts):
             params_j = {k: batched_params[k][j] for k in free_param_names}
             params_orig = self._denormalize(params_j, free_param_names)
-            final_loss = float(loss_fn(params_orig))
+            final_loss = float(eval_fn(params_orig))
             all_results.append(
                 OptimizeResult(
                     params=params_orig,
@@ -254,11 +232,64 @@ class MultiStartGradientOptimizer:
                     loss_history=loss_histories[j],
                     n_iterations=converged_iters[j],
                     converged=converged_flags[j],
-                    message=f"Start {j}: " + ("Converged" if converged_flags[j] else f"Reached max ({n_steps})"),
+                    message=f"Start {j}: " + ("Converged" if converged_flags[j] else f"Reached max ({max_steps})"),
                 )
             )
 
         return MultiStartResult(all_results=all_results)
+
+    # ------------------------------------------------------------------
+    # High-level model-aware entry point
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_model(
+        cls,
+        model: CompiledModel,
+        objectives: list[tuple[Objective, str | Callable, float]],
+        bounds: dict[str, tuple[float, float]],
+        n_starts: int = 8,
+        priors: PriorSet | None = None,
+        algorithm: Literal["adam", "sgd", "rmsprop", "adagrad"] = "adam",
+        learning_rate: float = 0.01,
+        scaling: Literal["none", "bounds"] = "bounds",
+        seed: int = 0,
+        export_variables: list[str] | None = None,
+        chunk_size: int | None = None,
+        checkpoint: bool = True,
+        **kwargs: Any,
+    ) -> tuple[MultiStartGradientOptimizer, Callable[[Params], Array]]:
+        """Create optimizer and loss function from a compiled model.
+
+        Returns:
+            Tuple of ``(optimizer, loss_fn)`` ready for ``run()``.
+
+        Example::
+
+            optimizer, loss_fn = MultiStartGradientOptimizer.from_model(
+                model, objectives, bounds, n_starts=8,
+            )
+            result = optimizer.run(loss_fn, max_steps=200)
+        """
+        from seapopym.optimization._common import build_loss_fn, setup_objectives
+
+        prepared = setup_objectives(objectives, model.coords)
+        loss_fn = build_loss_fn(model, prepared, export_variables, chunk_size, checkpoint)
+
+        optimizer = cls(
+            bounds=bounds,
+            n_starts=n_starts,
+            priors=priors,
+            algorithm=algorithm,
+            learning_rate=learning_rate,
+            scaling=scaling,
+            seed=seed,
+            **kwargs,
+        )
+        # Store param shapes for run() to use when sampling priors
+        optimizer._param_shapes = {k: jnp.shape(model.parameters[k]) for k in sorted(bounds.keys())}
+
+        return optimizer, loss_fn
 
     # ------------------------------------------------------------------
     # Scaling helpers (batched)

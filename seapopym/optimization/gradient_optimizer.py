@@ -1,20 +1,37 @@
 """Gradient-based optimizer wrapping Optax algorithms.
 
-Provides a high-level interface for gradient-based parameter optimization
-with optional parameter bounds and automatic parameter scaling.
+Provides a step-based API for fine-grained control, and a convenience
+``run()`` method for standard optimization with tolerance-based stopping.
+
+Example (step-based)::
+
+    optimizer = GradientOptimizer(
+        bounds={"rate": (0.0, 1.0)},
+        initial_params={"rate": 0.5},
+        algorithm="adam",
+        learning_rate=0.01,
+        scaling="bounds",
+    )
+    for i in range(100):
+        result = optimizer.step(loss_fn)
+        print(f"step {result.step}: loss={result.loss:.4f}")
+
+Example (convenience)::
+
+    result = optimizer.run(loss_fn, max_steps=300, tolerance=1e-8)
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import jax
 import jax.numpy as jnp
 import optax
 
+from seapopym.optimization._common import GradientStepResult, OptimizeResult
 from seapopym.types import Array, Params
 
 if TYPE_CHECKING:
@@ -24,58 +41,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class OptimizeResult:
-    """Result of an optimization run.
-
-    Attributes:
-        params: Optimized parameter values.
-        loss: Final loss value.
-        loss_history: Loss value at each iteration.
-        n_iterations: Number of iterations performed.
-        converged: Whether optimization converged (loss change < tolerance).
-        message: Human-readable status message.
-    """
-
-    params: Params
-    loss: float
-    loss_history: list[float] = field(default_factory=list)
-    n_iterations: int = 0
-    converged: bool = False
-    message: str = ""
-    hall_of_fame: list[OptimizeResult] | None = None
-
-
 class GradientOptimizer:
-    """Gradient-based optimizer for model calibration.
+    """Gradient-based optimizer with step-based API.
 
-    Wraps Optax algorithms (adam, sgd, rmsprop, adagrad) with a high-level
-    interface that handles objective setup, loss building, and parameter
-    normalization.
+    The optimizer is initialized with bounds, initial parameters, and
+    hyperparameters. Call :meth:`step` repeatedly to advance one gradient
+    step at a time, or use :meth:`run` for a standard loop with tolerance.
 
     Args:
-        objectives: List of ``(Objective, metric, weight)`` tuples.
-        bounds: Optional parameter bounds as ``{name: (min, max)}``.
+        bounds: Parameter bounds as ``{name: (min, max)}``.
+        initial_params: Starting point as ``{name: value}``.
         algorithm: Optimization algorithm name.
         learning_rate: Learning rate (step size).
         scaling: Parameter scaling mode:
             - ``"none"``: No scaling (default)
             - ``"bounds"``: Normalize to [0,1] using bounds (requires bounds)
             - ``"log"``: Log-space for positive parameters
-        chunk_size: Optional chunk size for time-stepping.
-        checkpoint: If ``True`` (default), enable gradient checkpointing
-            to reduce memory usage during backpropagation.
-
-    Example::
-
-        optimizer = GradientOptimizer(
-            objectives=[(Objective(observations=obs, transform=fn), "nrmse", 1.0)],
-            bounds={"rate": (0.0, 1.0)},
-            algorithm="adam",
-            learning_rate=0.01,
-            scaling="bounds",
-        )
-        result = optimizer.run(model, n_steps=100)
     """
 
     ALGORITHMS = {
@@ -87,14 +68,11 @@ class GradientOptimizer:
 
     def __init__(
         self,
-        objectives: list[tuple[Objective, str | Callable, float]],
-        bounds: dict[str, tuple[float, float]] | None = None,
+        bounds: dict[str, tuple[float, float]],
+        initial_params: Params,
         algorithm: Literal["adam", "sgd", "rmsprop", "adagrad"] = "adam",
         learning_rate: float = 0.01,
         scaling: Literal["none", "bounds", "log"] = "none",
-        export_variables: list[str] | None = None,
-        chunk_size: int | None = None,
-        checkpoint: bool = True,
         **kwargs: Any,
     ) -> None:
         if algorithm not in self.ALGORITHMS:
@@ -103,96 +81,110 @@ class GradientOptimizer:
         if scaling == "bounds" and not bounds:
             raise ValueError("scaling='bounds' requires bounds to be provided")
 
-        self.objectives = objectives
-        self.bounds = bounds or {}
+        self.bounds = bounds
         self.algorithm = algorithm
         self.learning_rate = learning_rate
         self.scaling = scaling
-        self.export_variables = export_variables
-        self.chunk_size = chunk_size
-        self.checkpoint = checkpoint
 
+        # Create optax optimizer eagerly
         optimizer_fn = self.ALGORITHMS[algorithm]
         self._optimizer = optimizer_fn(learning_rate, **kwargs)
-        self._opt_state: optax.OptState | None = None
+
+        # Normalize initial params and init optimizer state
+        self._params_norm = self._normalize(initial_params)
+        self._opt_state = self._optimizer.init(self._params_norm)
+
+        # Step counter
+        self._step_count = 0
+
+        # Lazy-build value_and_grad_fn (depends on eval_fn)
+        self._current_eval_fn: Callable | None = None
+        self._value_and_grad_fn: Callable | None = None
+
+    def _build_value_and_grad(self, eval_fn: Callable[[Params], Array]) -> Callable:
+        """Build value_and_grad function wrapping denormalization + eval."""
+
+        def scaled_loss(params_norm: Params) -> Array:
+            params_orig = self._denormalize(params_norm)
+            return eval_fn(params_orig)
+
+        return jax.value_and_grad(scaled_loss)
+
+    def step(self, eval_fn: Callable[[Params], Array]) -> GradientStepResult:
+        """Advance one gradient step.
+
+        Args:
+            eval_fn: Loss function mapping ``Params -> scalar``.
+
+        Returns:
+            GradientStepResult with loss, gradient norm, and current params.
+        """
+        # Rebuild value_and_grad if eval_fn changed
+        if eval_fn is not self._current_eval_fn:
+            self._value_and_grad_fn = self._build_value_and_grad(eval_fn)
+            self._current_eval_fn = eval_fn
+
+        vg_fn = self._value_and_grad_fn
+        assert vg_fn is not None
+
+        # Forward + backward
+        loss, grads = vg_fn(self._params_norm)
+        loss_val = float(loss)
+
+        # Compute gradient norm
+        grad_leaves = jax.tree.leaves(grads)
+        grad_norm = float(jnp.sqrt(sum(jnp.sum(g**2) for g in grad_leaves)))
+
+        # Update
+        updates, self._opt_state = self._optimizer.update(grads, self._opt_state, self._params_norm)
+        self._params_norm = optax.apply_updates(self._params_norm, updates)
+        self._params_norm = self._apply_bounds_normalized(self._params_norm)  # type: ignore[arg-type]
+
+        # Denormalize for result
+        current_params = self._denormalize(self._params_norm)
+
+        result = GradientStepResult(
+            step=self._step_count,
+            loss=loss_val,
+            grad_norm=grad_norm,
+            params=current_params,
+        )
+
+        self._step_count += 1
+        return result
 
     def run(
         self,
-        model: CompiledModel,
-        n_steps: int = 100,
+        eval_fn: Callable[[Params], Array],
+        max_steps: int = 100,
         tolerance: float = 1e-6,
-        progress_bar: bool = False,
     ) -> OptimizeResult:
-        """Run gradient-based optimization.
+        """Convenience: run gradient descent with tolerance-based stopping.
 
         Args:
-            model: Compiled model to calibrate.
-            n_steps: Maximum number of optimization steps.
-            tolerance: Convergence tolerance (stop if loss change < tolerance).
-            progress_bar: If True, display inline progress indicator.
+            eval_fn: Loss function mapping ``Params -> scalar``.
+            max_steps: Maximum number of optimization steps.
+            tolerance: Stop if ``|prev_loss - loss| < tolerance``.
 
         Returns:
             OptimizeResult with optimized parameters and diagnostics.
         """
-        from seapopym.optimization._common import build_loss_fn, setup_objectives
-
-        prepared = setup_objectives(self.objectives, model.coords)
-        loss_fn = build_loss_fn(model, prepared, self.export_variables, self.chunk_size, self.checkpoint)
-        initial_params = {k: model.parameters[k] for k in self.bounds} if self.bounds else dict(model.parameters)
-
-        return self._run_loss_fn(loss_fn, initial_params, n_steps, tolerance, progress_bar)
-
-    def _run_loss_fn(
-        self,
-        loss_fn: Callable[[Params], Array],
-        initial_params: Params,
-        n_steps: int = 100,
-        tolerance: float = 1e-6,
-        progress_bar: bool = False,
-    ) -> OptimizeResult:
-        """Run optimization on a raw loss function."""
-        params_norm = self._normalize(initial_params)
-        self._opt_state = self._optimizer.init(params_norm)
-
-        def scaled_loss_fn(params_norm: Params) -> Array:
-            params_orig = self._denormalize(params_norm)
-            return loss_fn(params_orig)
-
-        value_and_grad_fn = jax.value_and_grad(scaled_loss_fn)
-
         loss_history: list[float] = []
         prev_loss = float("inf")
         converged = False
 
-        for i in range(n_steps):
-            loss, grads = value_and_grad_fn(params_norm)
-            loss_val = float(loss)
-            loss_history.append(loss_val)
+        for _ in range(max_steps):
+            result = self.step(eval_fn)
+            loss_history.append(result.loss)
 
-            if abs(prev_loss - loss_val) < tolerance:
+            if abs(prev_loss - result.loss) < tolerance:
                 converged = True
-                logger.info("Converged at iteration %d with loss %.6e", i, loss_val)
                 break
 
-            updates, self._opt_state = self._optimizer.update(grads, self._opt_state, params_norm)
-            params_norm = optax.apply_updates(params_norm, updates)
-            params_norm = self._apply_bounds_normalized(params_norm)  # type: ignore[arg-type]
+            prev_loss = result.loss
 
-            if i % 10 == 0:
-                logger.info("Iteration %d/%d: loss = %.6e", i, n_steps, loss_val)
-
-            if progress_bar:
-                print_rate = max(1, n_steps // 20)
-                if i % print_rate == 0 or i == n_steps - 1:
-                    print(f"\r  [{i + 1}/{n_steps}] loss={loss_val:.4e}", end="", flush=True)
-
-            prev_loss = loss_val
-
-        if progress_bar:
-            print()
-
-        final_params = self._denormalize(params_norm)
-        final_loss = float(loss_fn(final_params))
+        final_params = self._denormalize(self._params_norm)  # type: ignore[reportArgumentType]
+        final_loss = float(eval_fn(final_params))
 
         return OptimizeResult(
             params=final_params,
@@ -200,8 +192,55 @@ class GradientOptimizer:
             loss_history=loss_history,
             n_iterations=len(loss_history),
             converged=converged,
-            message="Converged" if converged else f"Reached max iterations ({n_steps})",
+            message="Converged" if converged else f"Reached max iterations ({max_steps})",
         )
+
+    # ------------------------------------------------------------------
+    # High-level model-aware entry point
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_model(
+        cls,
+        model: CompiledModel,
+        objectives: list[tuple[Objective, str | Callable, float]],
+        bounds: dict[str, tuple[float, float]],
+        algorithm: Literal["adam", "sgd", "rmsprop", "adagrad"] = "adam",
+        learning_rate: float = 0.01,
+        scaling: Literal["none", "bounds", "log"] = "none",
+        export_variables: list[str] | None = None,
+        chunk_size: int | None = None,
+        checkpoint: bool = True,
+        **kwargs: Any,
+    ) -> tuple[GradientOptimizer, Callable[[Params], Array]]:
+        """Create optimizer and loss function from a compiled model.
+
+        Returns:
+            Tuple of ``(optimizer, loss_fn)`` ready for ``step()`` or ``run()``.
+
+        Example::
+
+            optimizer, loss_fn = GradientOptimizer.from_model(
+                model, objectives, bounds,
+                algorithm="adam", learning_rate=0.01,
+            )
+            result = optimizer.run(loss_fn, max_steps=300)
+        """
+        from seapopym.optimization._common import build_loss_fn, setup_objectives
+
+        prepared = setup_objectives(objectives, model.coords)
+        loss_fn = build_loss_fn(model, prepared, export_variables, chunk_size, checkpoint)
+        initial_params = {k: model.parameters[k] for k in bounds}
+
+        optimizer = cls(
+            bounds=bounds,
+            initial_params=initial_params,
+            algorithm=algorithm,
+            learning_rate=learning_rate,
+            scaling=scaling,
+            **kwargs,
+        )
+        return optimizer, loss_fn
 
     # ------------------------------------------------------------------
     # Internal scaling helpers

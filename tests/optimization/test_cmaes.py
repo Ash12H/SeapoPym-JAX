@@ -4,9 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from seapopym.optimization._common import GenerationResult
+from seapopym.optimization._common import GenerationResult, OptimizeResult
 from seapopym.optimization.cmaes import CMAESOptimizer
-from seapopym.optimization.gradient_optimizer import OptimizeResult
 
 
 class TestCMAESOptimizerInit:
@@ -46,7 +45,10 @@ class TestCMAESStep:
             initial_params={"x": jnp.array(0.0)},
             popsize=8,
         )
-        loss_fn = lambda p: p["x"] ** 2
+
+        def loss_fn(p):
+            return p["x"] ** 2
+
         gen0 = opt.step(loss_fn)
         gen1 = opt.step(loss_fn)
         assert gen0.gen == 0

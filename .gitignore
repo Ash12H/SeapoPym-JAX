@@ -98,7 +98,6 @@ site/
 # Internal / non-public files
 IA/
 article/
-examples/
 !docs/examples/
 prompt.md
 CLAUDE.md

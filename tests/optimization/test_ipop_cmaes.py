@@ -3,10 +3,8 @@
 import jax.numpy as jnp
 import pytest
 
-from seapopym.optimization._common import params_distance
-from seapopym.optimization.gradient_optimizer import OptimizeResult
+from seapopym.optimization._common import OptimizeResult, params_distance
 from seapopym.optimization.ipop import IPOPCMAESOptimizer, IPOPResult, _is_new_mode
-from seapopym.optimization.objective import Objective
 
 
 class TestParamsDistance:
@@ -47,10 +45,9 @@ class TestIsNewMode:
 
 class TestIPOPCMAESOptimizerInit:
     def test_default_init(self):
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            [(obj, "mse", 1.0)],
             bounds={"x": (0.0, 10.0)},
+            initial_params={"x": jnp.array(5.0)},
         )
         assert opt.n_restarts == 5
         assert opt.initial_popsize == 32
@@ -59,10 +56,9 @@ class TestIPOPCMAESOptimizerInit:
         assert opt.seed == 0
 
     def test_custom_init(self):
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            [(obj, "mse", 1.0)],
             bounds={"x": (0.0, 10.0)},
+            initial_params={"x": jnp.array(5.0)},
             n_restarts=3,
             initial_popsize=8,
             n_generations=50,
@@ -76,24 +72,17 @@ class TestIPOPCMAESOptimizerInit:
         assert opt.seed == 42
 
 
-class TestIPOPCMAESOptimizerRunLossFn:
+class TestIPOPCMAESOptimizerRun:
     def test_finds_minimum(self):
-        """IPOP should find the minimum of a simple quadratic."""
-
-        def loss_fn(params):
-            return (params["x"] - 3.0) ** 2
-
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            [(obj, "mse", 1.0)],
             bounds={"x": (-5.0, 10.0)},
+            initial_params={"x": jnp.array(0.0)},
             n_restarts=2,
             initial_popsize=8,
             n_generations=30,
             seed=42,
         )
-
-        result = opt._run_loss_fn(loss_fn, {"x": jnp.array(0.0)})
+        result = opt.run(lambda p: (p["x"] - 3.0) ** 2)
 
         assert isinstance(result, IPOPResult)
         assert len(result.all_results) == 2
@@ -102,47 +91,15 @@ class TestIPOPCMAESOptimizerRunLossFn:
         assert result.modes[0].loss < 1.0
 
     def test_modes_sorted_by_loss(self):
-        """Modes should be sorted by loss, best first."""
-
-        def loss_fn(params):
-            return (params["x"] - 5.0) ** 2
-
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
         opt = IPOPCMAESOptimizer(
-            [(obj, "mse", 1.0)],
             bounds={"x": (-10.0, 10.0)},
+            initial_params={"x": jnp.array(0.0)},
             n_restarts=3,
             initial_popsize=8,
             n_generations=20,
             seed=42,
         )
-
-        result = opt._run_loss_fn(loss_fn, {"x": jnp.array(0.0)})
+        result = opt.run(lambda p: (p["x"] - 5.0) ** 2)
 
         for i in range(len(result.modes) - 1):
             assert result.modes[i].loss <= result.modes[i + 1].loss
-
-    def test_population_doubles(self):
-        """Each restart should use double the population of the previous."""
-        popsizes = []
-
-        class TrackingCMAES(IPOPCMAESOptimizer):
-            def _run_loss_fn(self, loss_fn, initial_params, progress_bar=False):
-                # Capture popsize from each restart
-                for i in range(self.n_restarts):
-                    popsizes.append(self.initial_popsize * (2**i))
-                return super()._run_loss_fn(loss_fn, initial_params, progress_bar)
-
-        obj = Objective(observations=jnp.zeros(1), transform=lambda o: o["out"])
-        opt = TrackingCMAES(
-            [(obj, "mse", 1.0)],
-            bounds={"x": (0.0, 10.0)},
-            n_restarts=3,
-            initial_popsize=8,
-            n_generations=5,
-            seed=42,
-        )
-
-        opt._run_loss_fn(lambda p: p["x"] ** 2, {"x": jnp.array(5.0)})
-
-        assert popsizes == [8, 16, 32]

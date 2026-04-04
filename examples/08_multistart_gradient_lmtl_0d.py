@@ -1,15 +1,19 @@
 # %% [markdown]
-# # Genetic Algorithm on LMTL 0D Model (Twin Experiment)
+# # Multi-Start Gradient on LMTL 0D Model (Twin Experiment)
 #
-# Demonstrates SimpleGA (evosax) on a 0D LMTL ecosystem model.
+# Demonstrates multi-start gradient optimization on a 0D LMTL ecosystem model.
+# N parallel Adam runs are launched from diverse initial points sampled uniformly
+# from the parameter bounds.
 #
 # Runs **two experiments** with shared model setup:
 # 1. Clean observations (no noise)
 # 2. Noisy observations (15% Gaussian noise)
 #
-# Visualization focuses on **loss evolution**:
-# - Best-of-generation (best descendant at each generation)
-# - Elite (cumulative minimum — elitism)
+# Steps:
+# 1. Spin-up: simulate SPINUP_YEARS to stabilize the system
+# 2. Optimization year: generate synthetic observations on OPT_YEARS
+# 3. Run MultiStartGradientOptimizer to recover the parameters (clean & noisy)
+# 4. Visualize convergence, parameter recovery, and loss history per start
 
 # %%
 import logging
@@ -30,7 +34,7 @@ from seapopym.blueprint import Config, ExecutionParams
 from seapopym.compiler import compile_model
 from seapopym.engine import build_step_fn, run
 from seapopym.models import LMTL_NO_TRANSPORT
-from seapopym.optimization import GAOptimizer, Objective
+from seapopym.optimization import MultiStartGradientOptimizer, Objective
 
 print(f"JAX devices: {jax.devices()}")
 
@@ -38,10 +42,11 @@ print(f"JAX devices: {jax.devices()}")
 # ## Configuration
 
 # %%
-POPSIZE = 64
-N_GENERATIONS = 250
-PATIENCE = 50
+N_STARTS = 8
+N_STEPS = 300
+LEARNING_RATE = 0.01
 SEED = 42
+TOLERANCE = 1e-5
 
 SPINUP_YEARS = 1
 OPT_YEARS = 2
@@ -71,7 +76,7 @@ FIXED_PARAMS = {"t_ref": TRUE_PARAMS["t_ref"]}
 
 NOISE_LEVELS = [0.0, 0.15]
 
-PLOT_FILE = "examples/images/05b_ga_lmtl_0d.png"
+PLOT_FILE = "examples/images/08_multistart_gradient_lmtl_0d.png"
 
 # %% [markdown]
 # ## Forcings & Model Setup
@@ -79,7 +84,7 @@ PLOT_FILE = "examples/images/05b_ga_lmtl_0d.png"
 # %%
 blueprint = LMTL_NO_TRANSPORT
 
-max_age_days = int(np.ceil(BOUNDS["tau_r_0"][1] / 86400))  # upper bound covers all optimizer trials
+max_age_days = int(np.ceil(BOUNDS["tau_r_0"][1] / 86400))
 cohort_ages_days = np.arange(0, max_age_days + 1)
 cohort_ages_sec = cohort_ages_days * 86400.0
 n_cohorts = len(cohort_ages_sec)
@@ -157,9 +162,9 @@ spinup_steps = int(SPINUP_YEARS / total_years * n_timesteps)
 
 # %%
 print("=" * 60)
-print("Genetic Algorithm on LMTL 0D (Twin Experiment)")
+print("Multi-Start Gradient on LMTL 0D (Twin Experiment)")
 print(f"  Spin-up: {SPINUP_YEARS} year(s)  |  Optimization: {OPT_YEARS} year(s)")
-print(f"  GA: popsize={POPSIZE}, {N_GENERATIONS} gen, patience={PATIENCE}")
+print(f"  {N_STARTS} starts, {N_STEPS} Adam steps, lr={LEARNING_RATE}")
 print(f"  Noise levels: {NOISE_LEVELS}")
 print("=" * 60)
 
@@ -202,7 +207,7 @@ dt_seconds = model.dt
 time_days = np.arange(n_opt_steps) * dt_seconds / 86400.0
 
 # %% [markdown]
-# ## Run GA for each noise level
+# ## Run Multi-Start Gradient for each noise level
 
 # %%
 all_experiment_results = {}
@@ -221,23 +226,26 @@ for noise_level in NOISE_LEVELS:
         obs_values = obs_values_clean
 
     objective = Objective(observations=obs_values, transform=extract_predictions)
-    optimizer, loss_fn = GAOptimizer.from_model(
+    optimizer, loss_fn = MultiStartGradientOptimizer.from_model(
         model,
         objectives=[(objective, "nrmse", 1.0)],
         bounds=BOUNDS,
-        popsize=POPSIZE,
+        n_starts=N_STARTS,
+        algorithm="adam",
+        learning_rate=LEARNING_RATE,
+        scaling="bounds",
         seed=SEED,
         export_variables=["biomass"],
     )
 
-    print(f"Running GA ({label})...")
+    print(f"Running Multi-Start Gradient ({label})...")
     t0 = time.time()
-    result = optimizer.run(loss_fn, max_gen=N_GENERATIONS, patience=PATIENCE)
+    result = optimizer.run(loss_fn, max_steps=N_STEPS, tolerance=TOLERANCE, patience=50)
     elapsed = time.time() - t0
 
-    print(f"  Completed in {elapsed:.1f}s — {result.n_iterations} generations")
-    print(f"  Best loss: {result.loss:.6e}")
-    print(f"  {'Converged' if result.converged else 'Did not converge'}")
+    best = result.best
+    print(f"  Completed in {elapsed:.1f}s")
+    print(f"  Best loss: {best.loss:.6e} (start: {result.all_results.index(best)})")
 
     all_experiment_results[noise_level] = {
         "result": result,
@@ -245,12 +253,24 @@ for noise_level in NOISE_LEVELS:
         "elapsed": elapsed,
     }
 
-    # Print parameter recovery
-    print(f"\n  Parameter recovery:")
+    # Print all starts
+    header = f"{'Start':<6} {'Loss':>10} {'Iters':>6}"
     for p in param_names:
-        val = float(jnp.squeeze(result.params[p]))
-        ratio = val / TRUE_PARAMS[p]
-        print(f"    {p:<14} = {val:>12.4g}  (ratio = {ratio:.4f})")
+        header += f" {p[:8]:>10}"
+    print(header)
+    print("-" * len(header))
+
+    row = f"{'True':<6} {0.0:>10.6f} {'':>6}"
+    for p in param_names:
+        row += f" {TRUE_PARAMS[p]:>10.4g}"
+    print(row)
+
+    for i, r in enumerate(result.all_results):
+        marker = " *" if r is best else ""
+        row = f"{'#' + str(i + 1):<6} {r.loss:>10.6f} {r.n_iterations:>6}"
+        for p in param_names:
+            row += f" {float(jnp.squeeze(r.params[p])):>10.4g}"
+        print(row + marker)
 
 # %% [markdown]
 # ## Visualization
@@ -266,7 +286,9 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     exp = all_experiment_results[noise_level]
     result = exp["result"]
     obs_values = exp["obs_values"]
-    loss_history = result.loss_history
+    best = result.best
+    n_starts_actual = len(result.all_results)
+    colors = plt.cm.tab10(np.linspace(0, 1, n_starts_actual))
 
     # --- Col 0: Biomass time series ---
     ax = axes[row_idx, 0]
@@ -274,11 +296,12 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.scatter(
         obs_local_indices * dt_seconds / 86400.0, obs_values, c="red", s=20, zorder=5, label="Observations"
     )
-    _, outputs_best = run(step_fn, model, dict(model.state), {**model.parameters, **result.params})
+    # Plot best start trajectory
+    _, outputs_best = run(step_fn, model, dict(model.state), {**model.parameters, **best.params})
     biomass_best = outputs_best["biomass"]
     pred_full = jnp.mean(biomass_best, axis=tuple(range(1, biomass_best.ndim)))
     pred = pred_full[spinup_steps:]
-    ax.plot(time_days, pred, "--", color="orangered", linewidth=1.5, label=f"GA (loss={result.loss:.2e})")
+    ax.plot(time_days, pred, "--", color="tab:blue", linewidth=2, label="Best start")
     ax.set_xlabel("Day (year 2)")
     ax.set_ylabel("Biomass (g/m²)")
     ax.set_title(f"[{label}] Biomass trajectories")
@@ -287,25 +310,24 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
 
     # --- Col 1: OBS vs PRED scatter ---
     ax = axes[row_idx, 1]
-    pred_best = np.array(pred)[obs_local_indices - spinup_steps]
-    ax.scatter(obs_values, pred_best, c="red", edgecolors="k", linewidths=0.5, s=30, zorder=5)
-    obs_range = [min(np.min(obs_values), np.min(pred_best)), max(np.max(obs_values), np.max(pred_best))]
+    pred_best_obs = np.array(pred_full[spinup_steps:])[obs_local_indices]
+    ax.scatter(obs_values, pred_best_obs, c="red", edgecolors="k", linewidths=0.5, s=30, zorder=5)
+    obs_range = [min(np.min(obs_values), np.min(pred_best_obs)), max(np.max(obs_values), np.max(pred_best_obs))]
     ax.plot(obs_range, obs_range, "k--", alpha=0.5, label="1:1 line")
     ax.set_xlabel("Observed")
-    ax.set_ylabel("Predicted (GA)")
+    ax.set_ylabel("Predicted (best start)")
     ax.set_title(f"[{label}] Obs vs Pred")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
     # --- Col 2: Parameter recovery ---
     ax = axes[row_idx, 2]
-    x = np.arange(len(param_names))
     true_vals = np.array([TRUE_PARAMS[p] for p in param_names])
-    pred_vals = np.array([float(jnp.squeeze(result.params[p])) for p in param_names])
-    ratios = pred_vals / true_vals
-
+    best_vals = np.array([float(jnp.squeeze(best.params[p])) for p in param_names])
+    ratios = best_vals / true_vals
+    x = np.arange(len(param_names))
     ax.bar(x - 0.15, np.ones(len(param_names)), 0.3, label="True", color="black", alpha=0.3)
-    ax.bar(x + 0.15, ratios, 0.3, label="GA", color="orangered", alpha=0.7)
+    ax.bar(x + 0.15, ratios, 0.3, label="Best start", color="tab:blue", alpha=0.7)
     ax.set_xticks(x)
     ax.set_xticklabels([p[:8] for p in param_names], rotation=45, ha="right")
     ax.set_ylabel("Ratio to true value")
@@ -314,17 +336,17 @@ for row_idx, noise_level in enumerate(NOISE_LEVELS):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3, axis="y")
 
-    # --- Col 3: Loss evolution ---
+    # --- Col 3: Loss history per start ---
     ax = axes[row_idx, 3]
-    generations = np.arange(1, len(loss_history) + 1)
-    best_of_gen = np.array(loss_history)
-    elite = np.minimum.accumulate(best_of_gen)
-    ax.semilogy(generations, best_of_gen, color="steelblue", linewidth=0.8, alpha=0.5, label="Best of generation")
-    ax.semilogy(generations, elite, color="orangered", linewidth=2, label="Elite (cumul. min)")
-    ax.set_xlabel("Generation")
+    best_idx = result.all_results.index(best)
+    for i, r in enumerate(result.all_results):
+        alpha = 1.0 if i == best_idx else 0.3
+        lw = 2.0 if i == best_idx else 0.8
+        ax.semilogy(r.loss_history, color=colors[i], linewidth=lw, alpha=alpha, label=f"Start #{i + 1}")
+    ax.set_xlabel("Iteration")
     ax.set_ylabel("Loss (NRMSE)")
-    ax.set_title(f"[{label}] Loss evolution")
-    ax.legend(fontsize=8)
+    ax.set_title(f"[{label}] Loss convergence per start")
+    ax.legend(fontsize=6, ncol=2)
     ax.grid(True, alpha=0.3)
 
 plt.tight_layout()

@@ -255,7 +255,8 @@ for noise_level in NOISE_LEVELS:
         obs_values = obs_values_clean
 
     objective = Objective(observations=jnp.array(obs_values), transform=extract_predictions)
-    optimizer = IPOPCMAESOptimizer(
+    optimizer, loss_fn = IPOPCMAESOptimizer.from_model(
+        model,
         objectives=[(objective, "nrmse", 1.0)],
         bounds=BOUNDS,
         n_restarts=N_RESTARTS,
@@ -268,7 +269,7 @@ for noise_level in NOISE_LEVELS:
 
     print(f"Running IPOP-CMA-ES ({label})...")
     t0 = time.time()
-    result = optimizer.run(model, progress_bar=True)
+    result = optimizer.run(loss_fn)
     elapsed = time.time() - t0
 
     print(f"  Completed in {elapsed:.1f}s")

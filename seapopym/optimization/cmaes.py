@@ -34,6 +34,7 @@ from evosax.algorithms import CMA_ES
 
 from seapopym.optimization._common import (
     GenerationResult,
+    OptimizeResult,
     build_bounds_arrays,
     build_loss_fn,
     denormalize,
@@ -42,7 +43,6 @@ from seapopym.optimization._common import (
     setup_objectives,
     unflatten_params,
 )
-from seapopym.optimization.gradient_optimizer import OptimizeResult
 from seapopym.optimization.objective import Objective
 from seapopym.types import Array, Params
 

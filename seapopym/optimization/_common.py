@@ -13,7 +13,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -30,8 +29,30 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Generation result (yielded by step-based optimizers)
+# Result types
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class OptimizeResult:
+    """Result of an optimization run.
+
+    Attributes:
+        params: Optimized parameter values.
+        loss: Final loss value.
+        loss_history: Loss value at each iteration.
+        n_iterations: Number of iterations performed.
+        converged: Whether optimization converged (loss change < tolerance).
+        message: Human-readable status message.
+    """
+
+    params: Params
+    loss: float
+    loss_history: list[float] = field(default_factory=list)
+    n_iterations: int = 0
+    converged: bool = False
+    message: str = ""
+    hall_of_fame: list[OptimizeResult] | None = None
 
 
 @dataclass
@@ -55,6 +76,23 @@ class GenerationResult:
     best_params: Params
     population_params: list[Params] = field(default_factory=list)
     population_fitness: np.ndarray = field(default_factory=lambda: np.array([]))
+
+
+@dataclass
+class GradientStepResult:
+    """Result of a single gradient optimization step.
+
+    Attributes:
+        step: Step index (0-based).
+        loss: Loss value at this step.
+        grad_norm: L2 norm of the gradient.
+        params: Current parameters (denormalized to original space).
+    """
+
+    step: int
+    loss: float
+    grad_norm: float
+    params: Params
 
 
 # ---------------------------------------------------------------------------
@@ -289,96 +327,3 @@ class HallOfFame:
     def to_results(self) -> list[dict]:
         """Export as list of dicts with params and loss."""
         return [{"params": p, "loss": loss} for p, loss in self.members]
-
-
-# ---------------------------------------------------------------------------
-# Shared evolution-strategy loop
-# ---------------------------------------------------------------------------
-
-
-def run_evolution_strategy(
-    strategy,
-    es_params,
-    state,
-    eval_population: Callable[[Array], Array],
-    n_generations: int,
-    tol_fun: float,
-    patience: int,
-    key: Array,
-    norm_lower: Array,
-    norm_upper: Array,
-    x0_norm: Array,
-    progress_bar: bool = False,
-    hall_of_fame: HallOfFame | None = None,
-    denorm_fn: Callable[[Array], Params] | None = None,
-) -> tuple[Array, list[float], bool]:
-    """Shared ask/tell loop for evolutionary strategies.
-
-    Args:
-        hall_of_fame: Optional HallOfFame to update each generation.
-        denorm_fn: Function to convert flat normalized array to Params dict.
-            Required when hall_of_fame is not None.
-
-    Returns ``(best_flat_norm, loss_history, converged)``.
-    """
-    loss_history: list[float] = []
-    best_loss = float("inf")
-    best_flat_norm = x0_norm
-    stall_count = 0
-    converged = False
-
-    for gen in range(n_generations):
-        key, ask_key, tell_key = jax.random.split(key, 3)
-
-        population, state = strategy.ask(ask_key, state, es_params)
-        population = jnp.clip(population, norm_lower, norm_upper)
-        fitness = eval_population(population)
-        state, _metrics = strategy.tell(tell_key, population, fitness, state, es_params)
-
-        min_fitness = float(jnp.min(fitness))
-        loss_history.append(min_fitness)
-
-        if min_fitness < best_loss - tol_fun:
-            best_loss = min_fitness
-            best_idx = jnp.argmin(fitness)
-            best_flat_norm = population[best_idx]
-            stall_count = 0
-        else:
-            stall_count += 1
-
-        # Update hall-of-fame with this generation's population
-        if hall_of_fame is not None and denorm_fn is not None:
-            for i in range(population.shape[0]):
-                f = float(fitness[i])
-                if len(hall_of_fame.members) < hall_of_fame.max_size or f < hall_of_fame.members[-1][1]:
-                    hall_of_fame.update(denorm_fn(population[i]), f)
-
-        if stall_count >= patience:
-            converged = True
-            logger.info(
-                "Converged at generation %d: no improvement over %d generations (best_loss=%.6e)",
-                gen,
-                patience,
-                best_loss,
-            )
-            break
-
-        if gen % 50 == 0:
-            logger.info(
-                "gen %d/%d: best_loss=%.6e, stall=%d/%d",
-                gen,
-                n_generations,
-                best_loss,
-                stall_count,
-                patience,
-            )
-
-        if progress_bar:
-            print_rate = max(1, n_generations // 20)
-            if gen % print_rate == 0 or gen == n_generations - 1:
-                print(f"\r  [{gen + 1}/{n_generations}] loss={best_loss:.4e}", end="", flush=True)
-
-    if progress_bar:
-        print()
-
-    return best_flat_norm, loss_history, converged

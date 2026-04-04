@@ -249,7 +249,8 @@ for noise_level in NOISE_LEVELS:
         obs_values = obs_values_clean
 
     objective = Objective(observations=jnp.array(obs_values), transform=extract_predictions)
-    optimizer = GAOptimizer(
+    optimizer, loss_fn = GAOptimizer.from_model(
+        model,
         objectives=[(objective, "nrmse", 1.0)],
         bounds=BOUNDS,
         popsize=POPSIZE,
@@ -259,7 +260,7 @@ for noise_level in NOISE_LEVELS:
 
     print(f"Running GA ({label})...")
     t0 = time.time()
-    result = optimizer.run(model, n_generations=N_GENERATIONS, patience=PATIENCE, progress_bar=True)
+    result = optimizer.run(loss_fn, max_gen=N_GENERATIONS, patience=PATIENCE)
     elapsed = time.time() - t0
 
     print(f"  Completed in {elapsed:.1f}s — {result.n_iterations} generations")
