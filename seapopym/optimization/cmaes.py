@@ -140,7 +140,9 @@ class CMAESOptimizer:
             self._current_eval_fn = eval_fn
 
         eval_pop = self._eval_population
-        assert eval_pop is not None  # guaranteed by the block above
+        if eval_pop is None:  # pragma: no cover
+            msg = "eval_population not initialized"
+            raise RuntimeError(msg)
 
         self._key, ask_key, tell_key = jax.random.split(self._key, 3)
 

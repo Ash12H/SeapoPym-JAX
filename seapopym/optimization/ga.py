@@ -152,7 +152,9 @@ class GAOptimizer:
             self._current_eval_fn = eval_fn
 
         eval_pop = self._eval_population
-        assert eval_pop is not None
+        if eval_pop is None:  # pragma: no cover
+            msg = "eval_population not initialized"
+            raise RuntimeError(msg)
 
         # Lazy init: SimpleGA needs initial population + fitness
         if self._state is None:

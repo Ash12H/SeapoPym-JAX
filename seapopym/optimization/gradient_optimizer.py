@@ -125,7 +125,9 @@ class GradientOptimizer:
             self._current_eval_fn = eval_fn
 
         vg_fn = self._value_and_grad_fn
-        assert vg_fn is not None
+        if vg_fn is None:  # pragma: no cover
+            msg = "value_and_grad_fn not initialized"
+            raise RuntimeError(msg)
 
         # Forward + backward
         loss, grads = vg_fn(self._params_norm)
