@@ -3,6 +3,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import xarray as xr
 
 from seapopym.blueprint import functional
 from seapopym.compiler import compile_model
@@ -388,3 +389,228 @@ class TestIntegrateEuler:
 
         np.testing.assert_array_equal(np.asarray(new_state["x"]), [0.0])  # clamped
         np.testing.assert_array_equal(np.asarray(new_state["y"]), [-9.0])  # not clamped
+
+
+class TestIntegrateRK2:
+    """Tests for RK2 (Heun) integration via build_step_fn."""
+
+    def test_rk2_linear_ode(self, simple_blueprint, simple_config):
+        """RK2 solves dx/dt = rate * x exactly for 1 step on linear ODE."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+        from seapopym.engine.step import build_step_fn
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        simple_config.execution.integrator = "rk2"
+        model = compile_model(simple_blueprint, simple_config)
+        assert model.integrator == "rk2"
+
+        step_fn = build_step_fn(model)
+
+        state = {"biomass": jnp.ones((5, 5)) * 100.0}
+        params = model.parameters
+        forcings_t = {"temperature": jnp.ones((5, 5)) * 20.0, "mask": jnp.ones((5, 5))}
+
+        (new_state, _), outputs = step_fn((state, params), (forcings_t, {}))
+
+        # RK2 on dx/dt = r*x: x_new = x * (1 + r*dt + 0.5*(r*dt)^2)
+        r = 0.1
+        dt = model.dt
+        expected = 100.0 * (1 + r * dt + 0.5 * (r * dt) ** 2)
+        np.testing.assert_allclose(np.asarray(new_state["biomass"])[0, 0], expected, rtol=1e-6)
+
+    def test_rk2_more_accurate_than_euler(self, simple_blueprint, simple_config):
+        """RK2 should be more accurate than Euler on the same ODE."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+        from seapopym.engine.step import build_step_fn
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        # Use a small rate so r*dt is in convergent regime
+        simple_config.parameters["growth_rate"] = xr.DataArray(1e-7)
+
+        # Run Euler
+        simple_config.execution.integrator = "euler"
+        model_euler = compile_model(simple_blueprint, simple_config)
+        step_euler = build_step_fn(model_euler)
+
+        # Run RK2
+        simple_config.execution.integrator = "rk2"
+        model_rk2 = compile_model(simple_blueprint, simple_config)
+        step_rk2 = build_step_fn(model_rk2)
+
+        state = {"biomass": jnp.ones((5, 5)) * 100.0}
+        forcings_t = {"temperature": jnp.ones((5, 5)) * 20.0, "mask": jnp.ones((5, 5))}
+
+        (euler_state, _), _ = step_euler((state, model_euler.parameters), (forcings_t, {}))
+        (rk2_state, _), _ = step_rk2((state, model_rk2.parameters), (forcings_t, {}))
+
+        # Exact solution: x(t) = 100 * exp(r * dt)
+        import math
+
+        r = 1e-7
+        exact = 100.0 * math.exp(r * model_euler.dt)
+
+        euler_err = abs(float(euler_state["biomass"][0, 0]) - exact)
+        rk2_err = abs(float(rk2_state["biomass"][0, 0]) - exact)
+
+        assert rk2_err < euler_err
+
+    def test_rk2_no_tendency_passthrough(self, simple_blueprint, simple_config):
+        """Variables without tendencies pass through unchanged with RK2."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+        from seapopym.engine.step import build_step_fn
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        simple_config.execution.integrator = "rk2"
+        model = compile_model(simple_blueprint, simple_config)
+        step_fn = build_step_fn(model)
+
+        # Add extra state variable with no tendency
+        state = {"biomass": jnp.ones((5, 5)) * 100.0, "tracer": jnp.ones((5, 5)) * 42.0}
+        forcings_t = {"temperature": jnp.ones((5, 5)) * 20.0, "mask": jnp.ones((5, 5))}
+
+        (new_state, _), _ = step_fn((state, model.parameters), (forcings_t, {}))
+
+        np.testing.assert_array_equal(np.asarray(new_state["tracer"]), 42.0)
+
+
+class TestIntegrateRK4:
+    """Tests for RK4 (classical) integration via build_step_fn."""
+
+    def test_rk4_linear_ode(self, simple_blueprint, simple_config):
+        """RK4 solves dx/dt = rate * x with 4th-order accuracy."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+        from seapopym.engine.step import build_step_fn
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        simple_config.execution.integrator = "rk4"
+        model = compile_model(simple_blueprint, simple_config)
+        assert model.integrator == "rk4"
+
+        step_fn = build_step_fn(model)
+
+        state = {"biomass": jnp.ones((5, 5)) * 100.0}
+        params = model.parameters
+        forcings_t = {"temperature": jnp.ones((5, 5)) * 20.0, "mask": jnp.ones((5, 5))}
+
+        (new_state, _), outputs = step_fn((state, params), (forcings_t, {}))
+
+        # RK4 on dx/dt = r*x: Taylor expansion to 4th order
+        r = 0.1
+        dt = model.dt
+        rd = r * dt
+        expected = 100.0 * (1 + rd + rd**2 / 2 + rd**3 / 6 + rd**4 / 24)
+        np.testing.assert_allclose(np.asarray(new_state["biomass"])[0, 0], expected, rtol=1e-6)
+
+    def test_rk4_more_accurate_than_rk2(self, simple_blueprint, simple_config):
+        """RK4 should be more accurate than RK2 on the same ODE."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+        from seapopym.engine.step import build_step_fn
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        # Use a small rate so r*dt is in convergent regime
+        simple_config.parameters["growth_rate"] = xr.DataArray(1e-7)
+
+        # Run RK2
+        simple_config.execution.integrator = "rk2"
+        model_rk2 = compile_model(simple_blueprint, simple_config)
+        step_rk2 = build_step_fn(model_rk2)
+
+        # Run RK4
+        simple_config.execution.integrator = "rk4"
+        model_rk4 = compile_model(simple_blueprint, simple_config)
+        step_rk4 = build_step_fn(model_rk4)
+
+        state = {"biomass": jnp.ones((5, 5)) * 100.0}
+        forcings_t = {"temperature": jnp.ones((5, 5)) * 20.0, "mask": jnp.ones((5, 5))}
+
+        (rk2_state, _), _ = step_rk2((state, model_rk2.parameters), (forcings_t, {}))
+        (rk4_state, _), _ = step_rk4((state, model_rk4.parameters), (forcings_t, {}))
+
+        import math
+
+        r = 1e-7
+        exact = 100.0 * math.exp(r * model_rk2.dt)
+
+        rk2_err = abs(float(rk2_state["biomass"][0, 0]) - exact)
+        rk4_err = abs(float(rk4_state["biomass"][0, 0]) - exact)
+
+        assert rk4_err < rk2_err
+
+    def test_rk4_no_tendency_passthrough(self, simple_blueprint, simple_config):
+        """Variables without tendencies pass through unchanged with RK4."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+        from seapopym.engine.step import build_step_fn
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        simple_config.execution.integrator = "rk4"
+        model = compile_model(simple_blueprint, simple_config)
+        step_fn = build_step_fn(model)
+
+        state = {"biomass": jnp.ones((5, 5)) * 100.0, "tracer": jnp.ones((5, 5)) * 42.0}
+        forcings_t = {"temperature": jnp.ones((5, 5)) * 20.0, "mask": jnp.ones((5, 5))}
+
+        (new_state, _), _ = step_fn((state, model.parameters), (forcings_t, {}))
+
+        np.testing.assert_array_equal(np.asarray(new_state["tracer"]), 42.0)
+
+
+class TestIntegratorDefault:
+    """Tests for default integrator behavior and backward compatibility."""
+
+    def test_default_integrator_is_euler(self, simple_blueprint, simple_config):
+        """Default integrator should be Euler (backward compatible)."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        model = compile_model(simple_blueprint, simple_config)
+        assert model.integrator == "euler"
+
+    def test_euler_unchanged_behavior(self, simple_blueprint, simple_config):
+        """Euler via new code path produces same result as before refactor."""
+        from seapopym.blueprint import functional
+        from seapopym.compiler import compile_model
+        from seapopym.engine.step import build_step_fn
+
+        @functional(name="test:growth")
+        def test_growth(biomass, rate, temp):
+            return biomass * rate * (temp / 20.0)
+
+        model = compile_model(simple_blueprint, simple_config)
+        step_fn = build_step_fn(model)
+
+        state = {"biomass": jnp.ones((5, 5)) * 100.0}
+        forcings_t = {"temperature": jnp.ones((5, 5)) * 20.0, "mask": jnp.ones((5, 5))}
+
+        (new_state, _), outputs = step_fn((state, model.parameters), (forcings_t, {}))
+
+        # Euler: x_new = x + r * x * dt = 100 + 0.1 * 100 * 86400
+        expected = 100.0 + 0.1 * 100.0 * model.dt
+        np.testing.assert_allclose(np.asarray(new_state["biomass"])[0, 0], expected, rtol=1e-10)

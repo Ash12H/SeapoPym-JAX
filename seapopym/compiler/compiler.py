@@ -235,4 +235,5 @@ def compile_model(
         time_indexed_params=time_indexed_params,
         clamp_map=clamp_map,
         time_dim=time_dim,
+        integrator=config.execution.integrator,
     )
