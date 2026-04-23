@@ -297,6 +297,134 @@ def _compute_diffusion_fluxes(
 
 
 # =============================================================================
+# ADVECTION FLUXES (QUICK scheme — Leonard 1979)
+# =============================================================================
+
+
+def _compute_advection_fluxes_quick(
+    state: jnp.ndarray,
+    u: jnp.ndarray,
+    v: jnp.ndarray,
+    face_height: jnp.ndarray,
+    face_width: jnp.ndarray,
+    mask: jnp.ndarray,
+    bc_north: int,
+    bc_south: int,
+    bc_east: int,
+    bc_west: int,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Compute advection fluxes at all faces using the QUICK scheme.
+
+    QUICK (Quadratic Upstream Interpolation for Convective Kinematics,
+    Leonard 1979) interpolates the face value using a quadratic fit through
+    two upstream cells and one downstream cell. For a face between cells i
+    and i+1 in the x-direction:
+
+        u_face > 0:  phi_face = 6/8 * phi_i   + 3/8 * phi_{i+1} - 1/8 * phi_{i-1}
+        u_face < 0:  phi_face = 6/8 * phi_{i+1} + 3/8 * phi_i   - 1/8 * phi_{i+2}
+
+    The scheme is 3rd-order accurate on uniform grids (2nd-order on smoothly
+    varying grids). It is a linear scheme in the state, so gradients through
+    ``state`` are piecewise-linear and fully differentiable in JAX — the only
+    source of non-smoothness is the ``jnp.where(u>0, ...)`` branch on velocity,
+    matching what the first-order upwind scheme does.
+
+    Boundaries: near non-periodic boundaries, the second-upstream neighbor
+    (``phi_{i+2}`` / ``phi_{i-2}``) is obtained by composing ``_get_neighbor``
+    twice, which correctly performs zero-gradient extrapolation (the boundary
+    cell copies onto itself on each pass). Near a closed/open boundary, QUICK
+    thus degenerates gracefully toward a centered 2nd-order stencil without
+    introducing a ``where`` branch.
+
+    Caveat: QUICK is not monotonic — it can produce small overshoots and
+    undershoots (~5-10%) near sharp gradients. For smooth fields this is
+    negligible; for binary/discontinuous fields (e.g. Zalesak), undershoots
+    may drive the state slightly negative. Consumers that require strict
+    non-negativity should clip downstream.
+
+    Args:
+        state: Concentration field (Y, X)
+        u: Zonal velocity [m/s] (Y, X)
+        v: Meridional velocity [m/s] (Y, X)
+        face_height: Height of E/W faces [m] (Y, X)
+        face_width: Width of N/S faces [m] (Y, X)
+        mask: Ocean mask (1=ocean, 0=land) (Y, X)
+        bc_*: Boundary conditions (0=CLOSED, 1=OPEN, 2=PERIODIC)
+
+    Returns:
+        Tuple of (flux_east, flux_west, flux_north, flux_south), all in
+        [concentration * m^3/s].
+    """
+    ny, nx = state.shape
+
+    # First-order neighbors
+    state_e = _get_neighbor(state, "east", bc_east)
+    state_w = _get_neighbor(state, "west", bc_west)
+    state_n = _get_neighbor(state, "north", bc_north)
+    state_s = _get_neighbor(state, "south", bc_south)
+
+    # Second-order neighbors via composition — yields correct zero-gradient
+    # extrapolation near CLOSED/OPEN boundaries, and double roll for PERIODIC.
+    state_ee = _get_neighbor(state_e, "east", bc_east)
+    state_ww = _get_neighbor(state_w, "west", bc_west)
+    state_nn = _get_neighbor(state_n, "north", bc_north)
+    state_ss = _get_neighbor(state_s, "south", bc_south)
+
+    u_east = _get_neighbor(u, "east", bc_east)
+    u_west = _get_neighbor(u, "west", bc_west)
+    v_north = _get_neighbor(v, "north", bc_north)
+    v_south = _get_neighbor(v, "south", bc_south)
+
+    mask_east = _get_neighbor(mask, "east", bc_east)
+    mask_west = _get_neighbor(mask, "west", bc_west)
+    mask_north = _get_neighbor(mask, "north", bc_north)
+    mask_south = _get_neighbor(mask, "south", bc_south)
+
+    bc_mask_e = _get_boundary_mask(ny, nx, "east", bc_east)
+    bc_mask_w = _get_boundary_mask(ny, nx, "west", bc_west)
+    bc_mask_n = _get_boundary_mask(ny, nx, "north", bc_north)
+    bc_mask_s = _get_boundary_mask(ny, nx, "south", bc_south)
+
+    # --- EAST FACE (between cell i and i+1 in x) ---
+    u_face_e = 0.5 * (u + u_east)
+    # u > 0: U = state,   D = state_e, UU = state_w
+    # u < 0: U = state_e, D = state,   UU = state_ee
+    c_pos_e = (6.0 / 8.0) * state + (3.0 / 8.0) * state_e - (1.0 / 8.0) * state_w
+    c_neg_e = (6.0 / 8.0) * state_e + (3.0 / 8.0) * state - (1.0 / 8.0) * state_ee
+    c_face_e = jnp.where(u_face_e > 0, c_pos_e, c_neg_e)
+    flux_east = u_face_e * c_face_e * face_height * mask * mask_east * bc_mask_e
+
+    # --- WEST FACE (between cell i-1 and i in x) ---
+    u_face_w = 0.5 * (u_west + u)
+    # u > 0: U = state_w, D = state,   UU = state_ww
+    # u < 0: U = state,   D = state_w, UU = state_e
+    c_pos_w = (6.0 / 8.0) * state_w + (3.0 / 8.0) * state - (1.0 / 8.0) * state_ww
+    c_neg_w = (6.0 / 8.0) * state + (3.0 / 8.0) * state_w - (1.0 / 8.0) * state_e
+    c_face_w = jnp.where(u_face_w > 0, c_pos_w, c_neg_w)
+    flux_west = u_face_w * c_face_w * face_height * mask * mask_west * bc_mask_w
+
+    # --- NORTH FACE (between cell j and j+1 in y) ---
+    v_face_n = 0.5 * (v + v_north)
+    # v > 0: U = state,   D = state_n, UU = state_s
+    # v < 0: U = state_n, D = state,   UU = state_nn
+    c_pos_n = (6.0 / 8.0) * state + (3.0 / 8.0) * state_n - (1.0 / 8.0) * state_s
+    c_neg_n = (6.0 / 8.0) * state_n + (3.0 / 8.0) * state - (1.0 / 8.0) * state_nn
+    c_face_n = jnp.where(v_face_n > 0, c_pos_n, c_neg_n)
+    flux_north = v_face_n * c_face_n * face_width * mask * mask_north * bc_mask_n
+
+    # --- SOUTH FACE (between cell j-1 and j in y) ---
+    v_face_s = 0.5 * (v_south + v)
+    # v > 0: U = state_s, D = state,   UU = state_ss
+    # v < 0: U = state,   D = state_s, UU = state_n
+    c_pos_s = (6.0 / 8.0) * state_s + (3.0 / 8.0) * state - (1.0 / 8.0) * state_ss
+    c_neg_s = (6.0 / 8.0) * state + (3.0 / 8.0) * state_s - (1.0 / 8.0) * state_n
+    c_face_s = jnp.where(v_face_s > 0, c_pos_s, c_neg_s)
+    flux_south = v_face_s * c_face_s * face_width * mask * mask_south * bc_mask_s
+
+    return flux_east, flux_west, flux_north, flux_south
+
+
+# =============================================================================
 # MAIN TRANSPORT FUNCTION
 # =============================================================================
 
@@ -434,6 +562,125 @@ def transport_tendency(
 
     # Tendency = -divergence / cell_area (with mask)
     # Use jnp.where to avoid division by zero for land cells
+    safe_area = jnp.where(cell_area > 0, cell_area, 1.0)
+
+    advection_rate = -adv_divergence / safe_area * mask
+    diffusion_rate = -diff_divergence / safe_area * mask
+
+    return advection_rate, diffusion_rate
+
+
+@functional(
+    name="phys:transport_tendency_quick",
+    core_dims={
+        "state": ["Y", "X"],
+        "u": ["Y", "X"],
+        "v": ["Y", "X"],
+        "dx": ["Y", "X"],
+        "dy": ["Y", "X"],
+        "face_height": ["Y", "X"],
+        "face_width": ["Y", "X"],
+        "cell_area": ["Y", "X"],
+        "mask": ["Y", "X"],
+    },
+    out_dims=["Y", "X"],
+    outputs=["advection_rate", "diffusion_rate"],
+    units={
+        "state": "g/m^2",
+        "u": "m/s",
+        "v": "m/s",
+        "D": "m^2/s",
+        "dx": "m",
+        "dy": "m",
+        "face_height": "m",
+        "face_width": "m",
+        "cell_area": "m^2",
+        "mask": "dimensionless",
+        "advection_rate": "g/m^2/s",
+        "diffusion_rate": "g/m^2/s",
+    },
+)
+def transport_tendency_quick(
+    state: jnp.ndarray,
+    u: jnp.ndarray,
+    v: jnp.ndarray,
+    D: float,
+    dx: jnp.ndarray,
+    dy: jnp.ndarray,
+    face_height: jnp.ndarray,
+    face_width: jnp.ndarray,
+    cell_area: jnp.ndarray,
+    mask: jnp.ndarray,
+    bc_north: int = 0,
+    bc_south: int = 0,
+    bc_east: int = 0,
+    bc_west: int = 0,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute transport tendencies using the QUICK advection scheme.
+
+    Same signature as :func:`transport_tendency` but uses the 3rd-order
+    QUICK scheme (Leonard 1979) for advection instead of 1st-order upwind.
+    Diffusion still uses centered 2nd-order differences. The scheme is
+    fully differentiable in JAX and mass-conservative.
+
+    QUICK is **not** monotonic — expect small undershoots/overshoots near
+    sharp gradients. For smooth fields the gain in accuracy over upwind is
+    large (~order 3 convergence on smooth solutions, vs. ~order 1 for
+    upwind). For binary/discontinuous fields, the effective order is
+    limited by the discontinuity itself but numerical diffusion is still
+    drastically reduced.
+
+    .. warning::
+
+        **Explicit Euler time integration is unconditionally unstable with
+        QUICK.** Von Neumann analysis shows ``max|g|(sigma) > 1`` for any
+        ``sigma > 0``. In practice this means a forward-Euler loop blows up
+        over long integrations (the growth rate is ~1% per step at CFL 0.3,
+        ~10% per step at CFL 1.0).
+
+        You MUST integrate in time with a multi-stage scheme. RK2 (Heun /
+        midpoint) is sufficient and stable up to CFL ~0.87 in 1D (CFL ~0.5
+        in 2D to be safe). RK3 extends the stability range further.
+
+        Upwind remains stable with explicit Euler at CFL <= 1, so consumers
+        switching from ``transport_tendency`` to ``transport_tendency_quick``
+        must also switch their time integrator.
+
+    Args: same as :func:`transport_tendency`.
+
+    Returns:
+        Tuple of (advection_rate, diffusion_rate) in [units/s].
+    """
+    flux_adv_e, flux_adv_w, flux_adv_n, flux_adv_s = _compute_advection_fluxes_quick(
+        state,
+        u,
+        v,
+        face_height,
+        face_width,
+        mask,
+        bc_north,
+        bc_south,
+        bc_east,
+        bc_west,
+    )
+
+    flux_diff_e, flux_diff_w, flux_diff_n, flux_diff_s = _compute_diffusion_fluxes(
+        state,
+        D,
+        dx,
+        dy,
+        face_height,
+        face_width,
+        mask,
+        bc_north,
+        bc_south,
+        bc_east,
+        bc_west,
+    )
+
+    adv_divergence = flux_adv_e - flux_adv_w + flux_adv_n - flux_adv_s
+    diff_divergence = flux_diff_e - flux_diff_w + flux_diff_n - flux_diff_s
+
     safe_area = jnp.where(cell_area > 0, cell_area, 1.0)
 
     advection_rate = -adv_divergence / safe_area * mask

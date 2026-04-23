@@ -355,6 +355,7 @@ class ExecutionParams(BaseModel):
     dt: str = "1d"
     time_dim: str = "T"
     forcing_interpolation: Literal["constant", "nearest", "linear", "ffill"] = "constant"
+    integrator: Literal["euler", "rk2", "rk4"] = "euler"
     output_path: str | None = None
 
     @field_validator("dt")

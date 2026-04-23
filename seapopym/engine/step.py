@@ -2,7 +2,7 @@
 
 The step function encapsulates the logic for a single timestep:
 1. Execute process chain to compute derived values
-2. Integrate tendencies into state (Euler explicit)
+2. Integrate tendencies into state (configurable: Euler, RK2, RK4)
 3. Extract diagnostics
 """
 
@@ -26,6 +26,33 @@ if TYPE_CHECKING:
     from seapopym.compiler import CompiledModel
 
 
+def _apply_clamp(
+    state: State,
+    clamp_map: dict[str, tuple[float | None, float | None]] | None,
+) -> State:
+    """Apply per-variable clamping bounds to state.
+
+    Args:
+        state: State to clamp.
+        clamp_map: Per-variable clamping bounds.
+
+    Returns:
+        Clamped state.
+    """
+    if not clamp_map:
+        return state
+    result = {}
+    for var_name, value in state.items():
+        if var_name in clamp_map:
+            lo, hi = clamp_map[var_name]
+            if lo is not None:
+                value = jnp.maximum(value, lo)
+            if hi is not None:
+                value = jnp.minimum(value, hi)
+        result[var_name] = value
+    return result
+
+
 def build_step_fn(
     model: CompiledModel,
     export_variables: list[str] | None = None,
@@ -34,7 +61,7 @@ def build_step_fn(
 
     The returned function executes one timestep of the model:
     1. Computes derived values via the process chain
-    2. Integrates state using tendency_map + Euler explicit
+    2. Integrates state using the configured integrator (Euler, RK2, or RK4)
     3. Returns new state and diagnostic outputs
 
     Args:
@@ -55,6 +82,7 @@ def build_step_fn(
     dt = model.dt
     statics = model.forcings.get_statics()
     clamp_map = model.clamp_map
+    integrator = model.integrator
 
     # Pre-compute vmapped functions for nodes with broadcast dimensions
     vmapped_funcs: dict[str, tuple[Callable[..., Any], list[str] | None, tuple[int, ...] | None]] = {}
@@ -76,6 +104,129 @@ def build_step_fn(
         else:
             vmapped_funcs[compute_node.name] = (compute_node.func, None, None)
 
+    # --- Method of lines: decoupled process chain and integration ---
+
+    def _run_process_chain(
+        state: State, all_forcings: Forcings, parameters: Params
+    ) -> dict[str, Array]:
+        """Execute the full process chain and return intermediates.
+
+        Args:
+            state: Current state variables.
+            all_forcings: All forcings (static + dynamic).
+            parameters: Model parameters.
+
+        Returns:
+            Dict of all intermediate (derived) values.
+        """
+        intermediates: dict[str, Array] = {}
+
+        for compute_node in compute_nodes:
+            func_inputs = _resolve_inputs(compute_node.input_mapping, state, all_forcings, parameters, intermediates)
+
+            func, arg_order, transpose_axes = vmapped_funcs[compute_node.name]
+            if arg_order is not None:
+                result = func(*[func_inputs[arg] for arg in arg_order])
+                if transpose_axes is not None:
+                    result = _transpose_vmap_output(result, transpose_axes)
+            else:
+                result = func(**func_inputs)
+
+            _handle_compute_outputs(result, compute_node.output_mapping, intermediates)
+
+        return intermediates
+
+    def _sum_tendencies(intermediates: dict[str, Array]) -> dict[str, Array]:
+        """Sum tendency sources for each state variable.
+
+        Args:
+            intermediates: All computed derived values.
+
+        Returns:
+            Dict mapping state variable names to their total tendency.
+        """
+        tendencies: dict[str, Array] = {}
+        for var_name, sources in tendency_map.items():
+            tendencies[var_name] = sum(
+                src.sign * intermediates[src.source.removeprefix("derived.")] for src in sources
+            )
+        return tendencies
+
+    def _eval_tendencies(state: State, all_forcings: Forcings, parameters: Params) -> dict[str, Array]:
+        """Evaluate the RHS of the ODE: run process chain then sum tendencies.
+
+        Args:
+            state: State at which to evaluate.
+            all_forcings: All forcings for this timestep.
+            parameters: Model parameters.
+
+        Returns:
+            Dict mapping state variable names to their total tendency.
+        """
+        return _sum_tendencies(_run_process_chain(state, all_forcings, parameters))
+
+    def _advance_state(state: State, tendencies: dict[str, Array], scale: float) -> State:
+        """Compute state + scale * tendencies for variables with tendencies.
+
+        Variables without tendencies are passed through unchanged.
+
+        Args:
+            state: Base state.
+            tendencies: Tendency per state variable (only vars with tendencies).
+            scale: Scalar multiplier (typically dt or fraction of dt).
+
+        Returns:
+            Advanced state.
+        """
+        return {
+            var: (value + scale * tendencies[var] if var in tendencies else value)
+            for var, value in state.items()
+        }
+
+    # --- Integration functions ---
+    # Each returns (new_state, intermediates) where intermediates are from the
+    # initial state evaluation (diagnostics at the beginning of the timestep).
+
+    def _step_euler(
+        state: State, all_forcings: Forcings, parameters: Params
+    ) -> tuple[State, dict[str, Array]]:
+        """Euler explicit: 1 evaluation."""
+        intermediates = _run_process_chain(state, all_forcings, parameters)
+        tendencies = _sum_tendencies(intermediates)
+        new_state = _advance_state(state, tendencies, dt)
+        new_state = _apply_clamp(new_state, clamp_map)
+        return new_state, intermediates
+
+    def _step_rk2(
+        state: State, all_forcings: Forcings, parameters: Params
+    ) -> tuple[State, dict[str, Array]]:
+        """Heun's RK2: 2 evaluations."""
+        intermediates = _run_process_chain(state, all_forcings, parameters)
+        k1 = _sum_tendencies(intermediates)
+        k2 = _eval_tendencies(_advance_state(state, k1, dt), all_forcings, parameters)
+        combined = {var: 0.5 * (k1[var] + k2[var]) for var in k1}
+        new_state = _advance_state(state, combined, dt)
+        new_state = _apply_clamp(new_state, clamp_map)
+        return new_state, intermediates
+
+    def _step_rk4(
+        state: State, all_forcings: Forcings, parameters: Params
+    ) -> tuple[State, dict[str, Array]]:
+        """Classical RK4: 4 evaluations."""
+        intermediates = _run_process_chain(state, all_forcings, parameters)
+        k1 = _sum_tendencies(intermediates)
+        k2 = _eval_tendencies(_advance_state(state, k1, 0.5 * dt), all_forcings, parameters)
+        k3 = _eval_tendencies(_advance_state(state, k2, 0.5 * dt), all_forcings, parameters)
+        k4 = _eval_tendencies(_advance_state(state, k3, dt), all_forcings, parameters)
+        combined = {var: (k1[var] + 2 * k2[var] + 2 * k3[var] + k4[var]) / 6 for var in k1}
+        new_state = _advance_state(state, combined, dt)
+        new_state = _apply_clamp(new_state, clamp_map)
+        return new_state, intermediates
+
+    # Select integrator at build-time (not per-step)
+    _integrators = {"euler": _step_euler, "rk2": _step_rk2, "rk4": _step_rk4}
+    integrate_fn = _integrators[integrator]
+
     def _execute_step(state: State, forcings_t: Forcings, parameters: Params) -> tuple[State, Outputs]:
         """Core step execution logic.
 
@@ -89,26 +240,7 @@ def build_step_fn(
         """
         all_forcings = {**statics, **forcings_t}
 
-        # Store all derived values
-        intermediates: dict[str, Array] = {}
-
-        # Execute each ComputeNode in process order
-        for compute_node in compute_nodes:
-            func_inputs = _resolve_inputs(compute_node.input_mapping, state, all_forcings, parameters, intermediates)
-
-            func, arg_order, transpose_axes = vmapped_funcs[compute_node.name]
-            if arg_order is not None:
-                result = func(*[func_inputs[arg] for arg in arg_order])
-                if transpose_axes is not None:
-                    result = _transpose_vmap_output(result, transpose_axes)
-            else:
-                result = func(**func_inputs)
-
-            # All outputs go to intermediates (keyed by derived short name)
-            _handle_compute_outputs(result, compute_node.output_mapping, intermediates)
-
-        # Euler explicit integration using tendency_map
-        new_state = _integrate_euler(state, intermediates, tendency_map, dt, clamp_map)
+        new_state, intermediates = integrate_fn(state, all_forcings, parameters)
 
         # Build outputs (include state variables for saving)
         outputs: Outputs = {**intermediates, **new_state}

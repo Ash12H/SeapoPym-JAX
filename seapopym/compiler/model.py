@@ -73,6 +73,9 @@ class CompiledModel:
     # Name of the time dimension (default "T", configurable via ExecutionParams)
     time_dim: str = "T"
 
+    # Temporal integration method ("euler", "rk2", "rk4")
+    integrator: str = "euler"
+
     @property
     def n_timesteps(self) -> int:
         """Return the number of timesteps from the time dimension."""
