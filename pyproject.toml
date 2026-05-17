@@ -171,6 +171,7 @@ known-first-party = ["seapopym"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["ARG", "S101", "E402"]
+"examples/**/*.py" = ["E402"]
 
 # ══════════════════════════════════════════════════════════════
 # PYRIGHT Configuration

@@ -11,7 +11,6 @@
 # integrators available via `ExecutionParams.integrator`.
 
 # %%
-import base64
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -288,7 +287,7 @@ axes[1].legend(loc="upper left", fontsize=10)
 fig.tight_layout()
 Path("examples/images").mkdir(parents=True, exist_ok=True)
 fig.savefig("examples/images/09_pendulum_integrator_comparison.png", dpi=150)
-print(f"  Saved: examples/images/09_pendulum_integrator_comparison.png")
+print("  Saved: examples/images/09_pendulum_integrator_comparison.png")
 
 # %% [markdown]
 # ## Plot 2 — Animation GIF (3 panels side by side)
