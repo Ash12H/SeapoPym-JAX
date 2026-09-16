@@ -46,6 +46,10 @@ def day_length(latitude: jnp.ndarray, day_of_year: jnp.ndarray) -> jnp.ndarray:
 
     Uses the CBM model (Forsythe et al., 1995) to calculate the fraction
     of the day with sunlight, used for diel vertical migration weighting.
+    It is the formula of the original SeapoPym (``function/day_length.py``)
+    with its default angle between the sun and the horizon, p = 0: the day
+    starts and ends when the centre of the sun crosses the horizon, with no
+    twilight and no refraction.
 
     Args:
         latitude: Latitude in degrees [-90, 90].
@@ -55,26 +59,19 @@ def day_length(latitude: jnp.ndarray, day_of_year: jnp.ndarray) -> jnp.ndarray:
         Day length fraction [0-1], where 0 = polar night, 1 = midnight sun.
 
     Reference:
-        Forsythe et al. (1995) "A model comparison for daylength as a
-        function of latitude and day of year"
+        Forsythe, W. C., Rykiel, E. J., Stahl, R. S., Wu, H., Schoolfield, R. M.
+        (1995) "A model comparison for daylength as a function of latitude and
+        day of year", Ecological Modelling 80, 87-95.
     """
-    # Convert latitude to radians
     phi = jnp.deg2rad(latitude)
 
-    # Solar declination (Brock, 1981)
-    declination = 23.45 * jnp.sin(jnp.deg2rad(360.0 * (284.0 + day_of_year) / 365.0))
-    declination_rad = jnp.deg2rad(declination)
+    # Revolution angle of the Earth on its orbit, then the sun's declination (CBM)
+    theta = 0.2163108 + 2.0 * jnp.arctan(0.9671396 * jnp.tan(0.00860 * (day_of_year - 186.0)))
+    declination = jnp.arcsin(0.39795 * jnp.cos(theta))
 
-    # Sunset hour angle
-    # cos(omega) = -tan(phi) * tan(delta)
-    arg = -jnp.tan(phi) * jnp.tan(declination_rad)
-    # Clamp to [-1, 1] for polar days/nights
-    arg = jnp.clip(arg, -1.0, 1.0)
-    hour_angle = jnp.arccos(arg)
-
-    # Day length as fraction of 24 hours
-    # day_length_hours = 24 * hour_angle / pi
-    return hour_angle / jnp.pi
+    # With p = 0 the sin(p) term of CBM vanishes. Clamp to [-1, 1] for polar days and nights.
+    arg = jnp.clip(jnp.sin(phi) * jnp.sin(declination) / (jnp.cos(phi) * jnp.cos(declination)), -1.0, 1.0)
+    return 1.0 - jnp.arccos(arg) / jnp.pi
 
 
 @functional(
