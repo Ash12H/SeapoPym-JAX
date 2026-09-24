@@ -716,7 +716,7 @@ def _van_leer_slope(backward: jnp.ndarray, forward: jnp.ndarray) -> jnp.ndarray:
 
 def _high_face_fluxes_muscl(
     state: jnp.ndarray,
-    velocity: jnp.ndarray,
+    velocity_face: jnp.ndarray,
     length: jnp.ndarray,
     spacing: jnp.ndarray,
     D: float,
@@ -732,8 +732,8 @@ def _high_face_fluxes_muscl(
     grid is the high face of exactly one cell, so every flux is computed once; the low
     face of a cell reuses the value of its low neighbour (:func:`_low_face_fluxes`).
 
-    The velocity, the length of the face and the distance between the two centres are
-    the means of the two cells the face separates. The value carried across the face is
+    The length of the face and the distance between the two centres are the means of
+    the two cells the face separates. The value carried across the face is
     reconstructed on the upstream side, ``c_i + slope_i / 2`` for a flow towards the
     high side and ``c_{i+1} - slope_{i+1} / 2`` otherwise. A slope whose stencil touches
     a masked cell is zero, which falls back to the first-order upwind value along
@@ -741,7 +741,7 @@ def _high_face_fluxes_muscl(
 
     Args:
         state: Concentration field (Y, X).
-        velocity: Velocity component normal to the face, at cell centres [m/s] (Y, X).
+        velocity_face: Velocity through the high face of every cell [m/s] (Y, X).
         length: Length of the face, at cell centres [m] (Y, X).
         spacing: Distance between cell centres along the axis [m] (Y, X).
         D: Diffusion coefficient [m^2/s].
@@ -763,7 +763,6 @@ def _high_face_fluxes_muscl(
     mask_low = _get_neighbor(mask, low, bc_low)
     mask_high2 = _get_neighbor(mask_high, high, bc_high)
 
-    velocity_face = 0.5 * (velocity + _get_neighbor(velocity, high, bc_high))
     length_face = 0.5 * (length + _get_neighbor(length, high, bc_high))
     spacing_face = 0.5 * (spacing + _get_neighbor(spacing, high, bc_high))
     open_face = mask * mask_high * _get_boundary_mask(ny, nx, high, bc_high)
@@ -897,14 +896,67 @@ def transport_tendency_muscl(
     Returns:
         Tuple of (advection_rate, diffusion_rate) in [units/s] (Y, X).
     """
-    adv_east, diff_east = _high_face_fluxes_muscl(state, u, face_height, dx, D, mask, "east", "west", bc_east, bc_west)
+    velocity_east = 0.5 * (u + _get_neighbor(u, "east", bc_east))
+    velocity_north = 0.5 * (v + _get_neighbor(v, "north", bc_north))
+    return _muscl_rates(
+        state,
+        velocity_east,
+        velocity_north,
+        u,
+        v,
+        D,
+        dx,
+        dy,
+        face_height,
+        face_width,
+        cell_area,
+        mask,
+        (bc_north, bc_south, bc_east, bc_west),
+    )
+
+
+def _muscl_rates(
+    state: jnp.ndarray,
+    velocity_east: jnp.ndarray,
+    velocity_north: jnp.ndarray,
+    edge_u: jnp.ndarray,
+    edge_v: jnp.ndarray,
+    D: float,
+    dx: jnp.ndarray,
+    dy: jnp.ndarray,
+    face_height: jnp.ndarray,
+    face_width: jnp.ndarray,
+    cell_area: jnp.ndarray,
+    mask: jnp.ndarray,
+    boundaries: tuple[int, int, int, int],
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Return the MUSCL tendencies from the velocity through the east and north faces.
+
+    Args:
+        state: Concentration field (Y, X).
+        velocity_east: Velocity through the east face of every cell [m/s] (Y, X).
+        velocity_north: Velocity through the north face of every cell [m/s] (Y, X).
+        edge_u: Velocity through the west face of the cells of an open west edge.
+        edge_v: Velocity through the south face of the cells of an open south edge.
+        D: Diffusion coefficient [m^2/s].
+        dx, dy, face_height, face_width, cell_area: Grid metrics (Y, X).
+        mask: Ocean mask (Y, X).
+        boundaries: Boundary conditions (north, south, east, west).
+
+    Returns:
+        Tuple of (advection_rate, diffusion_rate) [units/s] (Y, X).
+    """
+    bc_north, bc_south, bc_east, bc_west = boundaries
+    adv_east, diff_east = _high_face_fluxes_muscl(
+        state, velocity_east, face_height, dx, D, mask, "east", "west", bc_east, bc_west
+    )
     adv_north, diff_north = _high_face_fluxes_muscl(
-        state, v, face_width, dy, D, mask, "north", "south", bc_north, bc_south
+        state, velocity_north, face_width, dy, D, mask, "north", "south", bc_north, bc_south
     )
     # Through an open low edge the ghost equals the edge cell: pure upwind of the edge
     # value at the edge velocity, and no diffusion.
-    edge_west = jnp.where(bc_west == BoundaryType.OPEN, u * state * face_height * mask, 0.0)
-    edge_south = jnp.where(bc_south == BoundaryType.OPEN, v * state * face_width * mask, 0.0)
+    edge_west = jnp.where(bc_west == BoundaryType.OPEN, edge_u * state * face_height * mask, 0.0)
+    edge_south = jnp.where(bc_south == BoundaryType.OPEN, edge_v * state * face_width * mask, 0.0)
     no_flux = jnp.zeros_like(state)
     adv_west = _low_face_fluxes(adv_east, edge_west, "west", bc_west)
     adv_south = _low_face_fluxes(adv_north, edge_south, "south", bc_south)
@@ -915,6 +967,102 @@ def transport_tendency_muscl(
     advection_rate = -(adv_east - adv_west + adv_north - adv_south) / safe_area * mask
     diffusion_rate = -(diff_east - diff_west + diff_north - diff_south) / safe_area * mask
     return advection_rate, diffusion_rate
+
+
+@functional(
+    name="phys:transport_tendency_muscl_faces",
+    core_dims={
+        "state": ["Y", "X"],
+        "u_face": ["Y", "X"],
+        "v_face": ["Y", "X"],
+        "dx": ["Y", "X"],
+        "dy": ["Y", "X"],
+        "face_height": ["Y", "X"],
+        "face_width": ["Y", "X"],
+        "cell_area": ["Y", "X"],
+        "mask": ["Y", "X"],
+    },
+    out_dims=["Y", "X"],
+    outputs=["advection_rate", "diffusion_rate"],
+    units={
+        "state": "g/m^2",
+        "u_face": "m/s",
+        "v_face": "m/s",
+        "D": "m^2/s",
+        "dx": "m",
+        "dy": "m",
+        "face_height": "m",
+        "face_width": "m",
+        "cell_area": "m^2",
+        "mask": "dimensionless",
+        "advection_rate": "g/m^2/s",
+        "diffusion_rate": "g/m^2/s",
+    },
+)
+def transport_tendency_muscl_faces(
+    state: jnp.ndarray,
+    u_face: jnp.ndarray,
+    v_face: jnp.ndarray,
+    D: float,
+    dx: jnp.ndarray,
+    dy: jnp.ndarray,
+    face_height: jnp.ndarray,
+    face_width: jnp.ndarray,
+    cell_area: jnp.ndarray,
+    mask: jnp.ndarray,
+    bc_north: int = 0,
+    bc_south: int = 0,
+    bc_east: int = 0,
+    bc_west: int = 0,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute MUSCL transport tendencies from velocities given on the faces.
+
+    :func:`transport_tendency_muscl` forms the velocity of a face as the mean of the two
+    cell centres. Here it is an input, as on a C-grid: ``u_face`` is the velocity
+    through the east face of each cell and ``v_face`` through its north face. This lets
+    the forcing hand over face transports that already balance, for instance currents
+    coarsened by summing the fine faces and corrected for their divergence, which a
+    mean of centres would not preserve. Everything else is the same scheme, the same
+    faces and the same boundaries.
+
+    The west face of a cell is the east face of its western neighbour. On an OPEN west
+    or south edge, the missing face takes the velocity of the edge cell's opposite
+    face, and the value of the edge cell.
+
+    Args:
+        state: Concentration field [units] (Y, X)
+        u_face: Eastward velocity through the east face of each cell [m/s] (Y, X)
+        v_face: Northward velocity through the north face of each cell [m/s] (Y, X)
+        D: Diffusion coefficient [m²/s] (scalar, uniform)
+        dx: Distance between cell centres in X [m] (Y, X)
+        dy: Distance between cell centres in Y [m] (Y, X)
+        face_height: Length of the E/W faces of the cell [m] (Y, X)
+        face_width: Length of the N/S faces of the cell [m] (Y, X)
+        cell_area: Area of each cell [m²] (Y, X)
+        mask: Ocean/land mask (1=ocean, 0=land) (Y, X)
+        bc_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+
+    Returns:
+        Tuple of (advection_rate, diffusion_rate) in [units/s] (Y, X).
+    """
+    return _muscl_rates(
+        state,
+        u_face,
+        v_face,
+        u_face,
+        v_face,
+        D,
+        dx,
+        dy,
+        face_height,
+        face_width,
+        cell_area,
+        mask,
+        (bc_north, bc_south, bc_east, bc_west),
+    )
 
 
 # =============================================================================

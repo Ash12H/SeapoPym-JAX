@@ -7,8 +7,10 @@ import pytest
 
 from seapopym.functions.transport import (
     BoundaryType,
+    _get_neighbor,
     transport_tendency,
     transport_tendency_muscl,
+    transport_tendency_muscl_faces,
 )
 
 CLOSED = {"bc_north": 0, "bc_south": 0, "bc_east": 0, "bc_west": 0}
@@ -215,3 +217,62 @@ class TestMusclGradient:
 
 def test_the_boundary_type_values_match_the_other_schemes():
     assert (BoundaryType.CLOSED, BoundaryType.OPEN, BoundaryType.PERIODIC) == (0, 1, 2)
+
+
+def muscl_faces(state, u_face, v_face, grid, mask, D=0.0, **bc):
+    return transport_tendency_muscl_faces(
+        state,
+        u_face,
+        v_face,
+        D,
+        grid["dx"],
+        grid["dy"],
+        grid["face_height"],
+        grid["face_width"],
+        grid["cell_area"],
+        mask,
+        **bc,
+    )
+
+
+class TestMusclFaces:
+    """The same scheme, with the face velocities given rather than averaged."""
+
+    @pytest.mark.parametrize("bc", [CLOSED, PERIODIC])
+    def test_the_mean_of_the_centres_gives_the_centre_scheme_to_the_bit(self, bc):
+        grid = lat_lon_grid(10, 12)
+        state, u, v = random_fields(10, 12, seed=11)
+        mask = irregular_mask(10, 12)
+        u_face = 0.5 * (u + _get_neighbor(u, "east", bc["bc_east"]))
+        v_face = 0.5 * (v + _get_neighbor(v, "north", bc["bc_north"]))
+        centre = muscl(state, u, v, grid, mask, D=300.0, **bc)
+        faces = muscl_faces(state, u_face, v_face, grid, mask, D=300.0, **bc)
+        for a, b in zip(centre, faces, strict=True):
+            assert np.array_equal(np.asarray(a), np.asarray(b))
+
+    def test_a_uniform_field_stays_uniform_in_a_flow_without_divergence(self):
+        # Face velocities from a streamfunction on the corners: what enters a cell
+        # through two faces leaves it through the other two, exactly. The
+        # streamfunction is zero on the boundary, so no flux crosses the closed edges.
+        ny, nx, spacing = 10, 12, 1000.0
+        rng = np.random.default_rng(2)
+        psi = np.zeros((ny + 1, nx + 1))
+        psi[1:-1, 1:-1] = rng.normal(0.0, 100.0, (ny - 1, nx - 1))
+        # Corner (j, i) is the south-west corner of cell (j, i).
+        u_face = -(psi[1:, 1:] - psi[:-1, 1:]) / spacing
+        v_face = (psi[1:, 1:] - psi[1:, :-1]) / spacing
+        metric = jnp.full((ny, nx), spacing)
+        grid = {"dx": metric, "dy": metric, "face_height": metric, "face_width": metric, "cell_area": metric * metric}
+        state = jnp.full((ny, nx), 2.5)
+        adv, _ = muscl_faces(state, jnp.asarray(u_face), jnp.asarray(v_face), grid, jnp.ones((ny, nx)), **CLOSED)
+        # Against the tendency one face alone would give, rounding in float32.
+        one_face = 2.5 * float(np.abs(u_face).max()) / spacing
+        assert float(jnp.abs(adv).max()) < 1e-5 * one_face
+
+    def test_a_closed_basin_keeps_its_mass(self):
+        grid = lat_lon_grid(10, 12)
+        state, u, v = random_fields(10, 12, seed=13)
+        adv, diff = muscl_faces(state, u, v, grid, irregular_mask(10, 12), D=500.0, **CLOSED)
+        for rate in (adv, diff):
+            mass_rate = rate * grid["cell_area"]
+            assert abs(float(jnp.sum(mass_rate))) / float(jnp.sum(jnp.abs(mass_rate))) < 1e-6
