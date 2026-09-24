@@ -687,3 +687,231 @@ def transport_tendency_quick(
     diffusion_rate = -diff_divergence / safe_area * mask
 
     return advection_rate, diffusion_rate
+
+
+# =============================================================================
+# ADVECTION FLUXES (MUSCL with the van Leer limiter)
+# =============================================================================
+
+
+def _van_leer_slope(backward: jnp.ndarray, forward: jnp.ndarray) -> jnp.ndarray:
+    """Return the limited slope of a cell from its two one-sided differences.
+
+    Van Leer's limiter (1974) in its harmonic form, ``2ab / (a + b)`` where the two
+    differences share a sign and zero at a local extremum. The ratio of the two
+    differences is never formed, so a flat field gives a zero slope rather than NaN and
+    the gradient of the expression stays finite.
+
+    Args:
+        backward: Difference with the low neighbour, ``c_i - c_{i-1}``.
+        forward: Difference with the high neighbour, ``c_{i+1} - c_i``.
+
+    Returns:
+        The limited slope, in units of the field per cell.
+    """
+    product = backward * forward
+    same_sign = product > 0
+    return jnp.where(same_sign, 2.0 * product / jnp.where(same_sign, backward + forward, 1.0), 0.0)
+
+
+def _high_face_fluxes_muscl(
+    state: jnp.ndarray,
+    velocity: jnp.ndarray,
+    length: jnp.ndarray,
+    spacing: jnp.ndarray,
+    D: float,
+    mask: jnp.ndarray,
+    high: str,
+    low: str,
+    bc_high: int,
+    bc_low: int,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute the advective and diffusive fluxes through the high face of every cell.
+
+    The high face is the east face along X and the north face along Y. Every face of the
+    grid is the high face of exactly one cell, so every flux is computed once; the low
+    face of a cell reuses the value of its low neighbour (:func:`_low_face_fluxes`).
+
+    The velocity, the length of the face and the distance between the two centres are
+    the means of the two cells the face separates. The value carried across the face is
+    reconstructed on the upstream side, ``c_i + slope_i / 2`` for a flow towards the
+    high side and ``c_{i+1} - slope_{i+1} / 2`` otherwise. A slope whose stencil touches
+    a masked cell is zero, which falls back to the first-order upwind value along
+    coasts.
+
+    Args:
+        state: Concentration field (Y, X).
+        velocity: Velocity component normal to the face, at cell centres [m/s] (Y, X).
+        length: Length of the face, at cell centres [m] (Y, X).
+        spacing: Distance between cell centres along the axis [m] (Y, X).
+        D: Diffusion coefficient [m^2/s].
+        mask: Ocean mask (1=ocean, 0=land) (Y, X).
+        high: "east" or "north".
+        low: "west" or "south", the opposite of ``high``.
+        bc_high: Boundary condition on the high edge.
+        bc_low: Boundary condition on the low edge.
+
+    Returns:
+        Tuple of (advective, diffusive) fluxes through the high face, in
+        [concentration * m^3/s], positive towards the high side.
+    """
+    ny, nx = state.shape
+    state_high = _get_neighbor(state, high, bc_high)
+    state_low = _get_neighbor(state, low, bc_low)
+    state_high2 = _get_neighbor(state_high, high, bc_high)
+    mask_high = _get_neighbor(mask, high, bc_high)
+    mask_low = _get_neighbor(mask, low, bc_low)
+    mask_high2 = _get_neighbor(mask_high, high, bc_high)
+
+    velocity_face = 0.5 * (velocity + _get_neighbor(velocity, high, bc_high))
+    length_face = 0.5 * (length + _get_neighbor(length, high, bc_high))
+    spacing_face = 0.5 * (spacing + _get_neighbor(spacing, high, bc_high))
+    open_face = mask * mask_high * _get_boundary_mask(ny, nx, high, bc_high)
+
+    slope = _van_leer_slope(state - state_low, state_high - state) * mask_low * mask_high
+    slope_high = _van_leer_slope(state_high - state, state_high2 - state_high) * mask * mask_high2
+    face_value = jnp.where(velocity_face > 0, state + 0.5 * slope, state_high - 0.5 * slope_high)
+
+    advective = velocity_face * face_value * length_face * open_face
+    diffusive = -D * (state_high - state) / spacing_face * length_face * open_face
+    return advective, diffusive
+
+
+def _low_face_fluxes(high_flux: jnp.ndarray, edge_flux: jnp.ndarray, low: str, bc_low: int) -> jnp.ndarray:
+    """Return the flux through the low face of every cell, the high face of its neighbour.
+
+    Args:
+        high_flux: Flux through the high face of every cell (Y, X).
+        edge_flux: Flux through the low face of the cells on the low edge, used unless
+            the axis is periodic (Y, X).
+        low: "west" or "south".
+        bc_low: Boundary condition on the low edge.
+
+    Returns:
+        Flux through the low face of every cell (Y, X), positive towards the high side.
+    """
+    shift, axis, boundary = _DIRECTION_CONFIG[low]
+    rolled = jnp.roll(high_flux, shift=shift, axis=axis)
+    edge = boundary(high_flux)
+    return jnp.where(bc_low == BoundaryType.PERIODIC, rolled, rolled.at[edge].set(edge_flux[edge]))
+
+
+@functional(
+    name="phys:transport_tendency_muscl",
+    core_dims={
+        "state": ["Y", "X"],
+        "u": ["Y", "X"],
+        "v": ["Y", "X"],
+        "dx": ["Y", "X"],
+        "dy": ["Y", "X"],
+        "face_height": ["Y", "X"],
+        "face_width": ["Y", "X"],
+        "cell_area": ["Y", "X"],
+        "mask": ["Y", "X"],
+    },
+    out_dims=["Y", "X"],
+    outputs=["advection_rate", "diffusion_rate"],
+    units={
+        "state": "g/m^2",
+        "u": "m/s",
+        "v": "m/s",
+        "D": "m^2/s",
+        "dx": "m",
+        "dy": "m",
+        "face_height": "m",
+        "face_width": "m",
+        "cell_area": "m^2",
+        "mask": "dimensionless",
+        "advection_rate": "g/m^2/s",
+        "diffusion_rate": "g/m^2/s",
+    },
+)
+def transport_tendency_muscl(
+    state: jnp.ndarray,
+    u: jnp.ndarray,
+    v: jnp.ndarray,
+    D: float,
+    dx: jnp.ndarray,
+    dy: jnp.ndarray,
+    face_height: jnp.ndarray,
+    face_width: jnp.ndarray,
+    cell_area: jnp.ndarray,
+    mask: jnp.ndarray,
+    bc_north: int = 0,
+    bc_south: int = 0,
+    bc_east: int = 0,
+    bc_west: int = 0,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute transport tendencies with MUSCL advection and the van Leer limiter.
+
+    Same signature and outputs as :func:`transport_tendency`, so a blueprint swaps
+    schemes by its ``func`` line. The value carried across each face is a linear
+    reconstruction on the upstream side, limited by van Leer so that no new extremum
+    appears: the scheme is second order where the field is smooth, first order at
+    extrema and along coasts, and it never undershoots zero.
+
+    **Every face flux is computed once.** Face velocity, face length and centre spacing
+    are the means of the two cells a face separates, and the low face of a cell takes
+    the flux of its neighbour's high face. The flux leaving one cell is therefore
+    exactly the flux entering the next, and total mass changes only through open
+    edges, also where the face lengths vary from row to row as on a latitude-longitude
+    grid. :func:`transport_tendency` and :func:`transport_tendency_quick` compute each
+    face twice with each cell's own length, which differs between rows there.
+
+    Diffusion uses centred differences on the same faces.
+
+    Boundaries: a CLOSED edge carries no flux. An OPEN edge sees a ghost cell equal to
+    the edge cell, so material leaves with the flow and the inflow carries the edge
+    value; there is no diffusion through it. PERIODIC wraps around.
+
+    .. note::
+
+        The scheme is TVD, and so keeps a non-negative field non-negative, with explicit
+        Euler or with Heun's RK2 (``integrator: rk2``, strong-stability preserving) as
+        long as the Courant number ``(|u| / dx + |v| / dy) * dt`` stays below 0.5. RK2
+        adds second-order accuracy in time. RK4 is not strong-stability preserving and
+        loses this guarantee.
+
+    .. note::
+
+        The limiter makes the tendency piecewise in the state (``jnp.where`` branches).
+        It is differentiable almost everywhere, but not smoothly, which matters only if
+        parameters are fitted through the transport.
+
+    Args:
+        state: Concentration field [units] (Y, X)
+        u: Zonal (eastward) velocity at cell centres [m/s] (Y, X)
+        v: Meridional (northward) velocity at cell centres [m/s] (Y, X)
+        D: Diffusion coefficient [m²/s] (scalar, uniform)
+        dx: Distance between cell centres in X [m] (Y, X)
+        dy: Distance between cell centres in Y [m] (Y, X)
+        face_height: Length of the E/W faces of the cell [m] (Y, X)
+        face_width: Length of the N/S faces of the cell [m] (Y, X)
+        cell_area: Area of each cell [m²] (Y, X)
+        mask: Ocean/land mask (1=ocean, 0=land) (Y, X)
+        bc_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+
+    Returns:
+        Tuple of (advection_rate, diffusion_rate) in [units/s] (Y, X).
+    """
+    adv_east, diff_east = _high_face_fluxes_muscl(state, u, face_height, dx, D, mask, "east", "west", bc_east, bc_west)
+    adv_north, diff_north = _high_face_fluxes_muscl(
+        state, v, face_width, dy, D, mask, "north", "south", bc_north, bc_south
+    )
+    # Through an open low edge the ghost equals the edge cell: pure upwind of the edge
+    # value at the edge velocity, and no diffusion.
+    edge_west = jnp.where(bc_west == BoundaryType.OPEN, u * state * face_height * mask, 0.0)
+    edge_south = jnp.where(bc_south == BoundaryType.OPEN, v * state * face_width * mask, 0.0)
+    no_flux = jnp.zeros_like(state)
+    adv_west = _low_face_fluxes(adv_east, edge_west, "west", bc_west)
+    adv_south = _low_face_fluxes(adv_north, edge_south, "south", bc_south)
+    diff_west = _low_face_fluxes(diff_east, no_flux, "west", bc_west)
+    diff_south = _low_face_fluxes(diff_north, no_flux, "south", bc_south)
+
+    safe_area = jnp.where(cell_area > 0, cell_area, 1.0)
+    advection_rate = -(adv_east - adv_west + adv_north - adv_south) / safe_area * mask
+    diffusion_rate = -(diff_east - diff_west + diff_north - diff_south) / safe_area * mask
+    return advection_rate, diffusion_rate
