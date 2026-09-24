@@ -915,3 +915,38 @@ def transport_tendency_muscl(
     advection_rate = -(adv_east - adv_west + adv_north - adv_south) / safe_area * mask
     diffusion_rate = -(diff_east - diff_west + diff_north - diff_south) / safe_area * mask
     return advection_rate, diffusion_rate
+
+
+# =============================================================================
+# RELAXATION (sponge layers)
+# =============================================================================
+
+
+@functional(
+    name="phys:relaxation_tendency",
+    units={
+        "state": "g/m^2",
+        "target": "g/m^2",
+        "rate": "1/s",
+        "return": "g/m^2/s",
+    },
+)
+def relaxation_tendency(state: jnp.ndarray, target: jnp.ndarray, rate: jnp.ndarray) -> jnp.ndarray:
+    """Relax a field towards a target at a given rate, ``rate * (target - state)``.
+
+    Used for sponge layers along open boundaries: the rate is largest at the edge of
+    the domain and falls to zero inside it, so the field near an open edge is pulled
+    towards what it would be without transport and nothing entering through the edge
+    can drift freely. Elementwise, broadcast over every dimension.
+
+    With explicit integration the relaxation is stable for ``rate * dt < 1``.
+
+    Args:
+        state: Field being relaxed [g/m²].
+        target: Field it is relaxed towards [g/m²].
+        rate: Inverse relaxation time [1/s], zero where there is no sponge.
+
+    Returns:
+        The relaxation tendency [g/m²/s].
+    """
+    return rate * (target - state)
