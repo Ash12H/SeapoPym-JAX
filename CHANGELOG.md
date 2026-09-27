@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- MUSCL advection with the van Leer limiter (`phys:transport_tendency_muscl`): every face flux is computed once, so
+  mass is conserved to rounding on latitude-longitude grids, and it is positive with Euler or RK2 up to a Courant
+  number of 0.5.
+- Face velocities for MUSCL (`phys:transport_tendency_muscl_faces`), for currents given on the faces of a C-grid.
+- A relaxation tendency for sponge layers along open boundaries (`phys:relaxation_tendency`).
+
+### Changed
+- Day length follows the CBM model of Forsythe et al. (1995) with p = 0, as the original SeapoPym, instead of Brock's
+  declination.
+- Cohort ageing (`lmtl:aging_flow`, `lmtl:recruitment_flow`): production is advected along the age axis by MUSCL with
+  the van Leer limiter, and recruitment splits what leaves the cohorts around the recruitment age so that the mean
+  delay equals it whatever the cohort widths; the last cohort recruits everything it holds. The one-day sigmoid is
+  removed. **The cohort blueprints give different results**: the recruitment delay used to be lengthened by about one
+  and a half cohort widths, shortened by up to a day with sub-daily cohorts, and production reaching the last cohort
+  before its recruitment age stayed there. With a step shorter than the cohorts, the first-order outflow also spread
+  the delay (a chain of compartments); the reconstruction keeps most of that spread away.
+
 ## [0.2.0] - 2026-03-11
 
 ### Added
