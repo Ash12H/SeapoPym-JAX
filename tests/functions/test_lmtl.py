@@ -236,9 +236,8 @@ class TestAgingFlow:
         """Last cohort should have no outflow (plus-group accumulates)."""
         production, cohort_ages, rec_age = cohort_setup
         result = aging_flow(production, cohort_ages, rec_age)
-        # Last cohort only gains from prev, never loses its own aging outflow
-        # With very large rec_age, recruit_fraction ≈ 0, so aging_outflow[-1] = 0
-        # Gain from prev > 0
+        # Last cohort only gains from prev, never loses its own aging outflow:
+        # it recruits everything it holds, so aging_outflow[-1] = 0
         assert result[-1] >= 0
 
     def test_shape_preserved(self, cohort_setup):
@@ -302,7 +301,8 @@ class TestLmtlDifferentiability:
             _, biomass_gain = recruitment_flow(production, cohort_ages, rec_age)
             return biomass_gain
 
-        grad = jax.grad(loss_fn)(jnp.array(172800.0))
+        # Inside a cohort: the recruited share is linear there, and kinked at the exits.
+        grad = jax.grad(loss_fn)(jnp.array(129600.0))
         assert not jnp.isnan(grad)
         # Higher rec_age -> less recruitment -> negative gradient
         assert grad < 0
@@ -318,3 +318,85 @@ class TestLmtlDifferentiability:
         grad = jax.grad(loss_fn)(jnp.array([10.0, 8.0, 6.0, 4.0]))
         assert grad.shape == (4,)
         assert not jnp.any(jnp.isnan(grad))
+
+
+# =============================================================================
+# AGEING ALONG THE AGE AXIS
+# =============================================================================
+
+
+def _pulse(cohort_ages, rec_age, days=None, dt_days=0.01):
+    """Age a unit of production from cohort 0 without mortality; return times [d] and biomass."""
+    days = days or float(cohort_ages[-1] / 86400.0) * 2 + 10
+    dt = dt_days * 86400.0
+    steps = int(days / dt_days)
+
+    def step(production, _):
+        aging = aging_flow(production, cohort_ages, rec_age)
+        prod_loss, gain = recruitment_flow(production, cohort_ages, rec_age)
+        production = production + dt * (aging + prod_loss)
+        return production, (gain * dt, jnp.min(production))
+
+    start = jnp.zeros(cohort_ages.shape[0]).at[0].set(1.0)
+    _, (recruited, lowest) = jax.lax.scan(step, start, None, length=steps)
+    times = (jnp.arange(steps) + 1) * dt_days
+    return times, recruited, lowest
+
+
+class TestAgeingAlongTheAgeAxis:
+    """Tests of the MUSCL ageing and of the recruitment at the exact age."""
+
+    @pytest.mark.parametrize("rec_days", [4.5, 7.5, 12.25])
+    def test_mean_delay_is_the_recruitment_age(self, rec_days):
+        """A pulse is recruited, on average, at the recruitment age, even inside a cohort."""
+        cohort_ages = jnp.arange(0.0, 21.0) * 86400.0
+        times, recruited, _ = _pulse(cohort_ages, jnp.array(rec_days * 86400.0))
+        assert jnp.isclose(jnp.sum(recruited), 1.0, atol=1e-4)
+        mean = jnp.sum(times * recruited) / jnp.sum(recruited)
+        assert abs(float(mean) - rec_days) < 0.1
+
+    def test_muscl_spreads_less_than_first_order(self):
+        """Ten cohorts before recruitment spread the delay far less than a chain of compartments."""
+        cohort_ages = jnp.arange(0.0, 21.0) * 86400.0
+        times, recruited, _ = _pulse(cohort_ages, jnp.array(10.0 * 86400.0))
+        mean = jnp.sum(times * recruited) / jnp.sum(recruited)
+        spread = jnp.sqrt(jnp.sum((times - mean) ** 2 * recruited) / jnp.sum(recruited))
+        # A chain of ten compartments of one day gives 1 / sqrt(10) = 0.32; MUSCL gives about 0.20.
+        assert float(spread / mean) < 0.25
+
+    def test_positive_with_growing_widths(self):
+        """Cohorts that widen with age keep the production positive."""
+        widths = 0.5 * 1.3 ** jnp.arange(12)
+        cohort_ages = jnp.concatenate([jnp.zeros(1), jnp.cumsum(widths)]) * 86400.0
+        _, recruited, lowest = _pulse(cohort_ages, jnp.array(20.0 * 86400.0), days=120.0)
+        assert float(jnp.min(lowest)) > -1e-9
+        assert jnp.isclose(jnp.sum(recruited), 1.0, atol=1e-3)
+
+    def test_mass_is_conserved_with_uneven_widths(self):
+        """Ageing moves production without loss, and recruitment gives the biomass what it takes."""
+        cohort_ages = jnp.array([0.0, 1.0, 2.5, 4.5, 7.0, 10.0]) * 86400.0
+        production = jnp.array([3.0, 5.0, 2.0, 4.0, 1.0, 0.5])
+        rec_age = jnp.array(5.2 * 86400.0)
+        aging = aging_flow(production, cohort_ages, rec_age)
+        prod_loss, gain = recruitment_flow(production, cohort_ages, rec_age)
+        assert jnp.isclose(jnp.sum(aging), 0.0, atol=1e-9)
+        assert jnp.isclose(-jnp.sum(prod_loss), gain)
+
+    def test_last_cohort_recruits_everything(self):
+        """Production past the ladder is recruited rather than kept."""
+        cohort_ages = jnp.arange(0.0, 5.0) * 86400.0
+        production = jnp.array([0.0, 0.0, 0.0, 0.0, 2.0])
+        prod_loss, gain = recruitment_flow(production, cohort_ages, jnp.array(1e9))
+        assert jnp.isclose(prod_loss[-1], -2.0 / 86400.0)
+        assert jnp.isclose(gain, 2.0 / 86400.0)
+
+    def test_recruiting_cohorts_give_their_first_order_outflow(self):
+        """Where a cohort recruits, what leaves it is its own density, not a reconstruction."""
+        cohort_ages = jnp.arange(0.0, 8.0) * 86400.0
+        production = jnp.array([8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+        rec_age = jnp.array(3.4 * 86400.0)
+        prod_loss, _ = recruitment_flow(production, cohort_ages, rec_age)
+        # Exits at 3 and 4 days: 60 % of cohort 2's outflow, all of cohort 3's.
+        assert jnp.isclose(prod_loss[2], -0.6 * 6.0 / 86400.0)
+        assert jnp.isclose(prod_loss[3], -5.0 / 86400.0)
+        assert jnp.all(prod_loss[:2] == 0.0)

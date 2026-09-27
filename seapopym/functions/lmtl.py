@@ -13,20 +13,28 @@ Processes:
 
 All functions use the @functional decorator for Blueprint integration
 and support automatic differentiation via JAX.
+
+Ageing and recruitment
+----------------------
+The cohorts are the cells of an age axis along which production is advected at unit speed. What leaves a cohort
+is the density reconstructed at its older face by MUSCL with the van Leer limiter, on the actual cohort widths,
+which may differ. With a time step shorter than the cohorts, as transport imposes, the first-order outflow
+``P_i / d_i`` makes each cohort a compartment and spreads the delay, its variance the sum of the squared widths
+passed; the reconstruction keeps most of that spread away. Like every tendency here, it does not see the step.
+
+Recruitment splits what leaves the cohorts around the recruitment age ``r`` so that the mean delay is ``r``
+whatever the widths: cohort ``i`` is left at the mean age ``E_i = a_i + d_i``, and the share
+``(E_i + d_(i+1) - r) / d_(i+1)``, clipped to [0, 1], of what leaves the cohort whose exit is the last before
+``r`` is recruited, the rest of it at the next exit. The cohorts that recruit give their first-order outflow,
+since the cohort after them has been emptied by the recruitment and a reconstruction reading it would hold the
+mass back. The last cohort recruits everything it holds.
 """
 
 from __future__ import annotations
 
-import jax
 import jax.numpy as jnp
 
 from seapopym.blueprint import functional
-
-# Sigmoid steepness for smooth recruitment transition.
-# Transition from ~1% to ~99% over ±1 day (DVM timescale).
-# k = ln(99) / (1 day in seconds) ≈ 5.32e-5 s⁻¹
-_RECRUITMENT_TRANSITION_DAYS = 1.0
-_K_SIGMOID = float(jnp.log(99.0)) / (_RECRUITMENT_TRANSITION_DAYS * 86400.0)
 
 # =============================================================================
 # ENVIRONMENT FUNCTIONS
@@ -253,6 +261,43 @@ def _cohort_durations(cohort_ages: jnp.ndarray) -> jnp.ndarray:
     return jnp.concatenate([d_tau_raw, d_tau_raw[-1:]])
 
 
+def _recruited_share(cohort_ages: jnp.ndarray, rec_age: jnp.ndarray) -> jnp.ndarray:
+    """Return the share of what leaves each cohort that is recruited.
+
+    The mean delay is ``rec_age`` whatever the widths: the share of the cohort whose exit is the last before
+    ``rec_age`` is interpolated between its exit and the next one, the cohorts after it recruit everything, and
+    the last cohort always does.
+    """
+    d_tau = _cohort_durations(cohort_ages)
+    exits = cohort_ages + d_tau
+    following = jnp.concatenate([d_tau[1:], d_tau[-1:]])
+    share = jnp.clip((exits + following - rec_age) / following, 0.0, 1.0)
+    return share.at[-1].set(1.0)
+
+
+def _outflow(production: jnp.ndarray, cohort_ages: jnp.ndarray, share: jnp.ndarray) -> jnp.ndarray:
+    """Return what leaves each cohort per second, by MUSCL with the van Leer limiter along the age axis.
+
+    The content of a cohort is the density ``P_i / d_i`` moving at unit speed. The flux through its older face is
+    the density there, reconstructed from the cohort and its two neighbours, the slopes taken over the distances
+    between cohort centres. The youngest cohort sees a flat profile behind it. The cohorts that recruit
+    (``share`` above zero) and the last one give their own density, the first-order outflow.
+    """
+    d_tau = _cohort_durations(cohort_ages)
+    density = production / d_tau
+    younger = jnp.concatenate([density[:1], density[:-1]])
+    older = jnp.concatenate([density[1:], density[-1:]])
+    d_younger = jnp.concatenate([d_tau[:1], d_tau[:-1]])
+    d_older = jnp.concatenate([d_tau[1:], d_tau[-1:]])
+    back = (density - younger) / (0.5 * (d_tau + d_younger))
+    ahead = (older - density) / (0.5 * (d_tau + d_older))
+    product = back * ahead
+    same_sign = product > 0
+    slope = jnp.where(same_sign, 2.0 * product / jnp.where(same_sign, back + ahead, 1.0), 0.0)
+    face = jnp.where(share > 0, density, density + 0.5 * d_tau * slope)
+    return face.at[-1].set(density[-1])
+
+
 # =============================================================================
 # PRODUCTION DYNAMICS
 # =============================================================================
@@ -320,11 +365,9 @@ def aging_flow(
     - rec_age: scalar (for each spatial point)
 
     Logic:
-    - Calculates flow based on cohort duration.
-    - A smooth sigmoid determines the recruitment fraction per cohort
-      (0 = not recruited, 1 = fully recruited). The non-recruited fraction
-      flows to the next cohort (aging).
-    - The last cohort does NOT flow out (accumulation/plus group).
+    - What leaves a cohort is reconstructed by MUSCL along the age axis (see the module docstring).
+    - The share of it that is not recruited (``_recruited_share``) flows to the next cohort.
+    - The last cohort recruits everything, so nothing ages out of it.
 
     Args:
         production: Current production [g/m^2] with shape (C,).
@@ -334,22 +377,10 @@ def aging_flow(
     Returns:
         Aging tendency [g/m^2/s] with shape (C,).
     """
-    d_tau = _cohort_durations(cohort_ages)
+    share = _recruited_share(cohort_ages, rec_age)
+    aging_outflow = (1.0 - share) * _outflow(production, cohort_ages, share)
 
-    # Aging rate
-    aging_coef = 1.0 / d_tau
-
-    # Base Outflow
-    base_outflow = production * aging_coef
-
-    # Smooth recruitment fraction: 0 (young) -> 1 (old enough)
-    # Sigmoid with half-saturation at rec_age, transition over ±1 day
-    recruit_fraction = jax.nn.sigmoid(_K_SIGMOID * (cohort_ages - rec_age))
-
-    # Aging gets the non-recruited fraction
-    aging_outflow = (1.0 - recruit_fraction) * base_outflow
-
-    # Last Cohort: no outflow (plus group)
+    # Last Cohort: no outflow (it recruits everything)
     aging_outflow = aging_outflow.at[-1].set(0.0)
 
     # Balance (Loss + Gain from prev)
@@ -387,8 +418,8 @@ def recruitment_flow(
     - cohort_ages: (C,)
     - rec_age: scalar (for each spatial point)
 
-    Uses a smooth sigmoid to determine the recruited fraction per cohort,
-    ensuring differentiability w.r.t. rec_age (and thus tau_r_0, gamma_tau_r).
+    The recruited share of what leaves each cohort (``_recruited_share``) puts the mean delay at ``rec_age``
+    whatever the widths. It is piecewise linear in ``rec_age``, hence differentiable except at the exits.
 
     Args:
         production: Current production [g/m^2] with shape (C,).
@@ -400,15 +431,8 @@ def recruitment_flow(
         - prod_loss: Production loss tendency [g/m^2/s] with shape (C,).
         - biomass_gain: Biomass gain tendency [g/m^2/s] (scalar).
     """
-    d_tau = _cohort_durations(cohort_ages)
-
-    # Aging coefficient
-    aging_coef = 1.0 / d_tau
-    base_outflow = production * aging_coef
-
-    # Smooth recruitment fraction
-    recruit_fraction = jax.nn.sigmoid(_K_SIGMOID * (cohort_ages - rec_age))
-    flux_to_biomass = recruit_fraction * base_outflow
+    share = _recruited_share(cohort_ages, rec_age)
+    flux_to_biomass = share * _outflow(production, cohort_ages, share)
 
     # 1. Loss from Production (C,)
     prod_loss = -flux_to_biomass
