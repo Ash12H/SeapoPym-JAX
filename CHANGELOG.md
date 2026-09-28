@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a half cohort widths, shortened by up to a day with sub-daily cohorts, and production reaching the last cohort
   before its recruitment age stayed there. With a step shorter than the cohorts, the first-order outflow also spread
   the delay (a chain of compartments); the reconstruction keeps most of that spread away.
+- Linear forcing interpolation (`ForcingStore`, `interp_method="linear"`) runs on the device: each chunk sends only the
+  source frames it needs, with the bracket and weight of every step, and the steps are built where they are used.
+  The host used to interpolate every field to every step with xarray, check it for NaN and transfer it, which took
+  83 % of a GPU run on a 1/36 degree grid. Results change at float32 rounding (about 1e-6 relative after a month),
+  since the interpolation is now done in float32 on the device instead of float64 on the host; a step on a source time
+  gets that frame exactly, so a model stepping on its forcing's own times is unchanged to the bit. The NaN check reads
+  the frames the brackets use, and repeated or unsorted source times are an error. nearest and ffill are unchanged.
 
 ## [0.2.0] - 2026-03-11
 

@@ -1,11 +1,15 @@
-"""ForcingStore: lazy forcing loading with xarray-based interpolation.
+"""ForcingStore: lazy forcing loading with chunked temporal interpolation.
 
 Encapsulates all forcings and provides chunked access with on-the-fly
-temporal interpolation using xr.DataArray.interp() / .reindex().
+temporal interpolation.
 
 Key features:
 - Lazy loading: xr.DataArray forcings are NOT materialized at compile time
-- xarray interpolation: uses scipy (linear) or pandas (nearest/ffill) under the hood
+- Linear interpolation on the device: only the source frames a chunk needs are
+  transferred, with the bracket and weight of every step, and the steps are built
+  where they are used. The host never materializes the chunk, which on a GPU would
+  otherwise dominate the run (the transfer of every step of every field).
+- nearest/ffill interpolation: pandas reindexing on the host (no arithmetic)
 - Unified chunking API: get_chunk() provides chunked access for all runners
 - Static/dynamic separation: forcings without dim T are static, with dim T are dynamic
 """
@@ -15,8 +19,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from seapopym.types import Array
@@ -26,6 +32,55 @@ def _check_nan(name: str, arr: np.ndarray) -> None:
     """Raise ValueError if array contains NaN values."""
     if np.issubdtype(arr.dtype, np.floating) and np.isnan(arr).any():
         raise ValueError(f"Forcing '{name}' contains NaN values. Handle NaN upstream.")
+
+
+def _check_increasing(name: str, times: pd.Index) -> None:
+    """Raise ValueError unless source times strictly increase, as linear brackets need."""
+    if not (times.is_monotonic_increasing and times.is_unique):
+        raise ValueError(f"Forcing '{name}' needs strictly increasing times for linear interpolation.")
+
+
+def _as_numbers(times: np.ndarray) -> np.ndarray:
+    """Return time coordinates as numbers: int64 nanoseconds for datetimes, float64 otherwise."""
+    values = np.asarray(times)
+    if np.issubdtype(values.dtype, np.datetime64):
+        return values.astype("datetime64[ns]").astype(np.int64)
+    return values.astype(np.float64)
+
+
+def _linear_brackets(source: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return, for every target time, the source point below it and the weight toward the next.
+
+    The lower index is clipped so that both points of the bracket exist. Beyond either
+    end of the source, the weight leaves [0, 1] and extends the first or last segment:
+    the linear extrapolation of xarray's ``fill_value="extrapolate"``. A target on a
+    source point gets that point with a weight of zero. Differences are taken before
+    the conversion to float, so datetimes keep their nanoseconds.
+
+    Args:
+        source: Source times, sorted, at least two.
+        target: Target times.
+
+    Returns:
+        The lower indices (int) and the weights (float64), one per target.
+    """
+    source_n = _as_numbers(source)
+    target_n = _as_numbers(target)
+    lower = np.clip(np.searchsorted(source_n, target_n, side="right") - 1, 0, len(source_n) - 2)
+    offset = (target_n - source_n[lower]).astype(np.float64)
+    span = (source_n[lower + 1] - source_n[lower]).astype(np.float64)
+    return lower, offset / span
+
+
+@jax.jit
+def _lerp(frames: Array, lower: Array, weight: Array) -> Array:
+    """Return ``(1 - weight) * frames[lower] + weight * frames[lower + 1]`` along the first axis.
+
+    This form returns a frame exactly at either end of its bracket (weight 0 or 1),
+    which the last source time, bracketed from below, needs.
+    """
+    weight = weight.astype(frames.dtype).reshape(weight.shape + (1,) * (frames.ndim - 1))
+    return (1 - weight) * frames[lower] + weight * frames[lower + 1]
 
 
 @dataclass
@@ -66,14 +121,7 @@ class ForcingStore:
         Returns:
             Dict of dynamic forcing arrays with shape (chunk_len, ...).
         """
-        result: dict[str, Array] = {}
-
-        for name, data in self._dynamic.items():
-            arr = self._load_dynamic(name, data, start, end)
-            _check_nan(name, np.asarray(arr))
-            result[name] = jnp.asarray(arr)
-
-        return result
+        return {name: self._load_dynamic(name, data, start, end) for name, data in self._dynamic.items()}
 
     def get_statics(self) -> dict[str, Array]:
         """Convert all static forcings to JAX arrays.
@@ -176,7 +224,7 @@ class ForcingStore:
         start: int,
         end: int,
     ) -> Array:
-        """Load a dynamic forcing for the given chunk range.
+        """Load a dynamic forcing for the given chunk range, checked for NaN.
 
         Args:
             name: Forcing name.
@@ -185,12 +233,14 @@ class ForcingStore:
             end: End timestep (exclusive).
 
         Returns:
-            Array sliced/interpolated for the chunk.
+            JAX array sliced/interpolated for the chunk.
         """
         source_len = data.sizes[self.time_dim]
 
         if source_len == self.n_timesteps or self.interp_method == "constant":
-            return data.isel({self.time_dim: slice(start, end)}).values
+            values = data.isel({self.time_dim: slice(start, end)}).values
+            _check_nan(name, values)
+            return jnp.asarray(values)
 
         # Interpolation needed
         if self._time_coords is None:
@@ -199,10 +249,41 @@ class ForcingStore:
                 f"Provide _time_coords when constructing ForcingStore."
             )
         target_times = self._time_coords[start:end]
-        return self._xarray_interpolate(data, target_times)
+        if self.interp_method == "linear":
+            _check_increasing(name, data.indexes[self.time_dim])
+        window = self._compute_source_window(data, target_times)
+        if self.interp_method == "linear" and window.sizes[self.time_dim] >= 2 and len(target_times) > 0:
+            return self._device_interpolate(name, window, target_times)
+        values = self._xarray_interpolate(window, target_times)
+        _check_nan(name, values)
+        return jnp.asarray(values)
+
+    def _device_interpolate(self, name: str, window: xr.DataArray, target_times: np.ndarray) -> Array:
+        """Interpolate linearly on the device, from the source frames the targets need.
+
+        Only the frames between the lowest and the highest bracket go to the device,
+        with an index and a weight per target: the steps are built by :func:`_lerp`,
+        never on the host. The NaN check reads the frames the brackets use, as the
+        interpolation of each target reads only its own two. The arithmetic is done in
+        at least float32, as xarray's float64 result used to be cast, and the time axis
+        keeps its position.
+        """
+        lower, weight = _linear_brackets(window.indexes[self.time_dim].values, target_times)
+        first, last = int(lower.min()), int(lower.max()) + 1
+        axis = window.get_axis_num(self.time_dim)
+        frames = np.moveaxis(window.isel({self.time_dim: slice(first, last + 1)}).values, axis, 0)
+        frames = frames.astype(np.promote_types(frames.dtype, np.float32), copy=False)
+        used = np.unique(np.concatenate([lower, lower + 1])) - first
+        _check_nan(name, frames[used])
+        steps = _lerp(jnp.asarray(frames), jnp.asarray(lower - first), jnp.asarray(weight))
+        return steps if axis == 0 else jnp.moveaxis(steps, 0, axis)
 
     def _xarray_interpolate(self, data: xr.DataArray, target_times: np.ndarray) -> np.ndarray:
-        """Interpolate a lazy DataArray to target times via xarray."""
+        """Interpolate a lazy DataArray to target times via xarray, on the host.
+
+        Used for nearest/ffill, and for linear only when the window holds a single
+        source point, where xarray reports the error.
+        """
         data = self._compute_source_window(data, target_times)
         if self.interp_method == "linear":
             return data.interp(

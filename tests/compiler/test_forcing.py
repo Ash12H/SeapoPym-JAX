@@ -285,6 +285,22 @@ class TestForcingStore:
         chunk = store.get_chunk(0, 5)
         assert chunk["flags"].shape == (5, 5)
 
+    def test_linear_interpolation_on_nan_free_frames_ignores_unused_nan(self):
+        """A NaN in a frame no target reads does not raise, one in a read frame does."""
+        import pandas as pd
+
+        source_times = pd.date_range("2000-01-01", periods=6, freq="1D")
+        data = np.ones((6, 3), dtype=np.float32)
+        data[5, 1] = np.nan
+        da = xr.DataArray(data, dims=["T", "Y"], coords={"T": source_times})
+        targets = pd.date_range("2000-01-01", periods=10, freq="6h").values
+        store = ForcingStore(_dynamic={"temp": da}, n_timesteps=10, interp_method="linear", _time_coords=targets)
+        np.testing.assert_array_equal(np.asarray(store.get_chunk(0, 10)["temp"]), 1.0)
+
+        data[2, 0] = np.nan
+        with pytest.raises(ValueError, match="NaN"):
+            store.get_chunk(0, 10)
+
     def test_interpolation_without_time_coords_error(self):
         """Interpolation with _time_coords=None raises ValueError."""
         import pandas as pd
@@ -301,3 +317,124 @@ class TestForcingStore:
         )
         with pytest.raises(ValueError, match="_time_coords is None"):
             store.get_chunk(0, 10)
+
+
+class TestLinearInterpolationOnDevice:
+    """Linear interpolation builds the steps on the device, as xarray would on the host."""
+
+    @staticmethod
+    def _store(data, source_times, target_times):
+        import pandas as pd
+
+        da = xr.DataArray(data, dims=["T", "Y", "X"], coords={"T": pd.DatetimeIndex(source_times)})
+        return da, ForcingStore(
+            _dynamic={"temp": da},
+            n_timesteps=len(target_times),
+            interp_method="linear",
+            _time_coords=np.asarray(target_times),
+        )
+
+    def test_matches_xarray_between_on_and_beyond_frames(self):
+        """Steps between frames, on frames and past the last frame follow xarray's interp."""
+        import pandas as pd
+
+        rng = np.random.default_rng(0)
+        source = pd.date_range("2015-09-01", periods=4, freq="1D")
+        # 40-minute steps from the first frame to beyond the last: extrapolation included.
+        target = pd.date_range("2015-09-01", periods=36 * 5, freq="40min")
+        data = rng.uniform(-2.0, 30.0, (4, 3, 5)).astype(np.float32)
+        da, store = self._store(data, source, target)
+
+        got = np.asarray(store.get_chunk(0, len(target))["temp"])
+        expected = da.interp(T=target.values, method="linear", kwargs={"fill_value": "extrapolate"}).values
+        assert got.shape == expected.shape
+        np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-5)
+
+    def test_targets_on_frames_are_the_frames(self):
+        """A step at a source time gets that frame exactly."""
+        import pandas as pd
+
+        rng = np.random.default_rng(1)
+        source = pd.date_range("2015-09-01", periods=3, freq="1D")
+        target = pd.date_range("2015-09-01", periods=3 * 36, freq="40min")
+        data = rng.uniform(0.0, 1.0, (3, 2, 2)).astype(np.float32)
+        _, store = self._store(data, source, target)
+
+        got = np.asarray(store.get_chunk(0, len(target))["temp"])
+        np.testing.assert_array_equal(got[::36], data)
+
+    def test_chunks_equal_one_call(self):
+        """Chunked steps are the steps of a single call, to the bit."""
+        import pandas as pd
+
+        rng = np.random.default_rng(2)
+        source = pd.date_range("2015-09-01", periods=5, freq="1D")
+        target = pd.date_range("2015-09-01", periods=36 * 4, freq="40min")
+        data = rng.uniform(0.0, 1.0, (5, 2, 3)).astype(np.float32)
+        _, store = self._store(data, source, target)
+
+        whole = np.asarray(store.get_all_dynamic()["temp"])
+        parts = np.concatenate(
+            [np.asarray(store.get_chunk(s, min(s + 36, len(target)))["temp"]) for s in range(0, len(target), 36)]
+        )
+        np.testing.assert_array_equal(parts, whole)
+
+    def test_integer_forcing_becomes_float(self):
+        """An integer forcing is interpolated in floating point, as xarray returns it."""
+        import pandas as pd
+
+        source = pd.date_range("2015-09-01", periods=2, freq="1D")
+        target = pd.date_range("2015-09-01", periods=3, freq="12h")
+        data = np.array([[[0]], [[2]]], dtype=np.int32)
+        _, store = self._store(data, source, target)
+
+        got = np.asarray(store.get_chunk(0, 3)["temp"])
+        assert np.issubdtype(got.dtype, np.floating)
+        np.testing.assert_allclose(got[:, 0, 0], [0.0, 1.0, 2.0])
+
+    def test_result_is_a_device_array(self):
+        """The chunk is a JAX array, built where it is used."""
+        import pandas as pd
+
+        source = pd.date_range("2015-09-01", periods=2, freq="1D")
+        target = pd.date_range("2015-09-01", periods=4, freq="6h")
+        _, store = self._store(np.zeros((2, 2, 2), dtype=np.float32), source, target)
+        assert hasattr(store.get_chunk(0, 4)["temp"], "device")
+
+    @pytest.mark.parametrize(
+        "days", [["2015-09-01", "2015-09-02", "2015-09-02"], ["2015-09-01", "2015-09-03", "2015-09-02"]]
+    )
+    def test_repeated_or_unsorted_times_raise(self, days):
+        """Linear brackets need strictly increasing source times: anything else is an error."""
+        import pandas as pd
+
+        target = pd.date_range("2015-09-01", periods=4, freq="12h")
+        _, store = self._store(np.zeros((3, 1, 1), dtype=np.float32), pd.DatetimeIndex(days), target)
+        with pytest.raises(ValueError, match="strictly increasing"):
+            store.get_chunk(0, 4)
+
+    def test_half_precision_is_interpolated_in_single(self):
+        """A float16 forcing comes back in float32, as the host path cast xarray's float64."""
+        import pandas as pd
+
+        source = pd.date_range("2015-09-01", periods=2, freq="1D")
+        target = pd.date_range("2015-09-01", periods=3, freq="12h")
+        data = np.array([[[0.1]], [[0.3]]], dtype=np.float16)
+        _, store = self._store(data, source, target)
+        got = store.get_chunk(0, 3)["temp"]
+        assert got.dtype == np.float32
+        np.testing.assert_allclose(np.asarray(got)[:, 0, 0], [0.1, 0.2, 0.3], rtol=1e-3)
+
+    def test_time_axis_keeps_its_position(self):
+        """A forcing whose time axis is not first comes back as xarray interpolates it."""
+        import pandas as pd
+
+        rng = np.random.default_rng(3)
+        source = pd.date_range("2015-09-01", periods=3, freq="1D")
+        target = pd.date_range("2015-09-01", periods=9, freq="6h")
+        da = xr.DataArray(rng.uniform(0, 1, (4, 3)).astype(np.float32), dims=["Y", "T"], coords={"T": source})
+        store = ForcingStore(_dynamic={"temp": da}, n_timesteps=9, interp_method="linear", _time_coords=target.values)
+        got = np.asarray(store.get_chunk(0, 9)["temp"])
+        expected = da.interp(T=target.values, method="linear", kwargs={"fill_value": "extrapolate"}).values
+        assert got.shape == expected.shape == (4, 9)
+        np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-7)
