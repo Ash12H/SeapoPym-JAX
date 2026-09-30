@@ -11,6 +11,7 @@ from seapopym.functions.transport import (
     transport_tendency,
     transport_tendency_muscl,
     transport_tendency_muscl_faces,
+    transport_tendency_muscl_faces_exterior,
 )
 
 CLOSED = {"bc_north": 0, "bc_south": 0, "bc_east": 0, "bc_west": 0}
@@ -276,3 +277,126 @@ class TestMusclFaces:
         for rate in (adv, diff):
             mass_rate = rate * grid["cell_area"]
             assert abs(float(jnp.sum(mass_rate))) / float(jnp.sum(jnp.abs(mass_rate))) < 1e-6
+
+
+OPEN = {"bc_north": 1, "bc_south": 1, "bc_east": 1, "bc_west": 1}
+
+
+def muscl_exterior(state, exterior, u_face, v_face, grid, mask, D=0.0, **bc):
+    return transport_tendency_muscl_faces_exterior(
+        state,
+        exterior,
+        u_face,
+        v_face,
+        D,
+        grid["dx"],
+        grid["dy"],
+        grid["face_height"],
+        grid["face_width"],
+        grid["cell_area"],
+        mask,
+        **bc,
+    )
+
+
+def edges(ny: int, nx: int) -> np.ndarray:
+    """Return the cells on the edge of the grid."""
+    edge = np.zeros((ny, nx), dtype=bool)
+    edge[0, :] = edge[-1, :] = edge[:, 0] = edge[:, -1] = True
+    return edge
+
+
+class TestMusclFacesExterior:
+    """What flows in through an open edge carries the exterior value; nothing else changes."""
+
+    @pytest.mark.parametrize("bc", [CLOSED, PERIODIC])
+    def test_without_open_edges_the_exterior_is_never_read(self, bc):
+        grid = lat_lon_grid(10, 12)
+        state, u, v = random_fields(10, 12, seed=21)
+        exterior, _, _ = random_fields(10, 12, seed=22)
+        mask = irregular_mask(10, 12)
+        faces = muscl_faces(state, u, v, grid, mask, D=300.0, **bc)
+        outside = muscl_exterior(state, 100.0 * exterior, u, v, grid, mask, D=300.0, **bc)
+        for a, b in zip(faces, outside, strict=True):
+            assert np.array_equal(np.asarray(a), np.asarray(b))
+
+    def test_open_edges_change_only_the_edge_cells(self):
+        grid = lat_lon_grid(10, 12)
+        state, u, v = random_fields(10, 12, seed=23)
+        exterior, _, _ = random_fields(10, 12, seed=24)
+        mask = irregular_mask(10, 12)
+        adv_faces, diff_faces = muscl_faces(state, u, v, grid, mask, D=300.0, **OPEN)
+        adv, diff = muscl_exterior(state, exterior, u, v, grid, mask, D=300.0, **OPEN)
+        inner = ~edges(10, 12)
+        assert np.array_equal(np.asarray(adv)[inner], np.asarray(adv_faces)[inner])
+        assert np.array_equal(np.asarray(diff), np.asarray(diff_faces))
+        assert not np.array_equal(np.asarray(adv), np.asarray(adv_faces))
+
+    def test_a_field_equal_to_its_exterior_goes_through_unchanged(self):
+        grid = lat_lon_grid(6, 9)
+        state = jnp.full((6, 9), 2.0)
+        adv, _ = muscl_exterior(
+            state,
+            state,
+            jnp.full((6, 9), 0.3),
+            jnp.zeros((6, 9)),
+            grid,
+            jnp.ones((6, 9)),
+            bc_north=0,
+            bc_south=0,
+            bc_east=1,
+            bc_west=1,
+        )
+        assert np.allclose(np.asarray(adv), 0.0, atol=1e-12)
+
+    @pytest.mark.parametrize("sign", [1.0, -1.0])
+    def test_the_mass_changes_by_what_flows_in_minus_what_flows_out(self, sign):
+        # A uniform flow across the grid, west to east or back: it enters through one
+        # open edge with the exterior value and leaves through the other with the edge
+        # value, which the flat edge columns hold at first order.
+        ny, nx = 5, 8
+        grid = lat_lon_grid(ny, nx)
+        state = jnp.broadcast_to(jnp.linspace(1.0, 2.0, nx)[None, :], (ny, nx))
+        exterior = jnp.full((ny, nx), 5.0)
+        speed = 0.3 * sign
+        adv, _ = muscl_exterior(
+            state,
+            exterior,
+            jnp.full((ny, nx), speed),
+            jnp.zeros((ny, nx)),
+            grid,
+            jnp.ones((ny, nx)),
+            bc_north=0,
+            bc_south=0,
+            bc_east=1,
+            bc_west=1,
+        )
+        height = grid["face_height"][:, 0]
+        leaving = -1 if sign > 0 else 0
+        flowing_in = abs(speed) * float(jnp.sum(height * 5.0))
+        flowing_out = abs(speed) * float(jnp.sum(height * state[:, leaving]))
+        mass_rate = float(jnp.sum(adv * grid["cell_area"]))
+        assert mass_rate == pytest.approx(flowing_in - flowing_out, rel=1e-5)
+
+    def test_an_edge_cell_walled_on_two_sides_no_longer_feeds_itself(self):
+        # An edge cell with land to the north and west: the flow enters through its open
+        # east face and leaves slowly through the south. With the edge value outside, the
+        # more it holds the more flows in; with an exterior, what flows in is fixed.
+        ny, nx = 3, 4
+        grid = lat_lon_grid(ny, nx)
+        mask = jnp.ones((ny, nx)).at[2, 3].set(0.0).at[1, 2].set(0.0)
+        u_face = jnp.zeros((ny, nx)).at[1, 3].set(-0.3)
+        v_face = jnp.zeros((ny, nx)).at[0, 3].set(-0.1)
+        bc = {"bc_north": 0, "bc_south": 0, "bc_east": 1, "bc_west": 0}
+        exterior = jnp.full((ny, nx), 0.5)
+
+        def rate(value, with_exterior):
+            state = jnp.ones((ny, nx)).at[1, 3].set(value)
+            if with_exterior:
+                adv, _ = muscl_exterior(state, exterior, u_face, v_face, grid, mask, **bc)
+            else:
+                adv, _ = muscl_faces(state, u_face, v_face, grid, mask, **bc)
+            return float(adv[1, 3])
+
+        assert rate(20.0, False) > rate(10.0, False) > 0.0
+        assert rate(20.0, True) < rate(10.0, True) < 0.0
