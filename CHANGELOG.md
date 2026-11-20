@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gets that frame exactly, so a model stepping on its forcing's own times is unchanged to the bit. The NaN check reads
   the frames the brackets use, and repeated or unsorted source times are an error. nearest and ffill are unchanged.
 
+### Fixed
+- The gradient through cohort ageing is no longer NaN for small production. The van Leer limiter of
+  `lmtl:aging_flow` and `lmtl:recruitment_flow` formed the squares of the raw age-axis differences in the reverse
+  pass; production of 1e-6 g/m^2 in daily cohorts gives differences near 1e-18 per second, whose squares fall below
+  the smallest float32. The forward pass was right, but a calibration on 400 cells got a NaN gradient for the energy
+  transfer coefficients. The limiter is now evaluated on the two differences divided by the larger of them and scaled
+  back, which leaves its value and its derivative unchanged.
+
 ## [0.2.0] - 2026-03-11
 
 ### Added

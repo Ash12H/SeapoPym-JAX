@@ -6,6 +6,9 @@ import pytest
 
 from seapopym.functions.lmtl import (
     _cohort_durations,
+    _limited_slope,
+    _outflow,
+    _recruited_share,
     aging_flow,
     day_length,
     gillooly_temperature,
@@ -400,3 +403,32 @@ class TestAgeingAlongTheAgeAxis:
         assert jnp.isclose(prod_loss[2], -0.6 * 6.0 / 86400.0)
         assert jnp.isclose(prod_loss[3], -5.0 / 86400.0)
         assert jnp.all(prod_loss[:2] == 0.0)
+
+    def test_limited_slope_is_the_harmonic_form(self):
+        """Scaling the differences changes neither the slope nor where it is zero."""
+        back = jnp.array([1.0, 2.0, -3.0, 0.5, 0.0, 4.0, -1.0])
+        ahead = jnp.array([3.0, -1.0, -1.0, 0.5, 2.0, 0.0, -4.0])
+        product = back * ahead
+        expected = jnp.where(product > 0, 2.0 * product / jnp.where(product > 0, back + ahead, 1.0), 0.0)
+        assert jnp.allclose(_limited_slope(back, ahead), expected, rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("profile", "scale"),
+        [
+            ([0.9564, 0.9066, 0.8647, 0.8185, 0.8033, 0.6349, 0.5205, 0.5083], 1e-6),
+            ([0.9675, 0.9287, 0.9079, 0.8648, 0.7718, 0.5878, 0.5168, 0.5014], 1e-7),
+            ([8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0], 1e-8),
+            ([8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0], 1e-2),
+        ],
+    )
+    def test_outflow_gradient_finite_for_small_production(self, profile, scale):
+        """Small production, as under the polar night, must not turn the gradient into NaN.
+
+        The three small profiles gave a NaN gradient when the limiter was evaluated on the raw differences, whose
+        squares fell below the smallest float32 in the reverse pass.
+        """
+        cohort_ages = jnp.arange(0.0, 8.0) * 86400.0
+        share = _recruited_share(cohort_ages, jnp.array(5.0 * 86400.0))
+        production = jnp.array(profile) * scale
+        grad = jax.grad(lambda p: jnp.sum(_outflow(p, cohort_ages, share)))(production)
+        assert jnp.all(jnp.isfinite(grad))
