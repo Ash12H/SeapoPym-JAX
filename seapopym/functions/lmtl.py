@@ -32,6 +32,7 @@ mass back. The last cohort recruits everything it holds.
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 
 from seapopym.blueprint import functional
@@ -275,6 +276,23 @@ def _recruited_share(cohort_ages: jnp.ndarray, rec_age: jnp.ndarray) -> jnp.ndar
     return share.at[-1].set(1.0)
 
 
+def _limited_slope(back: jnp.ndarray, ahead: jnp.ndarray) -> jnp.ndarray:
+    """Return van Leer's limited slope, ``2ab / (a + b)`` where the differences share a sign and zero otherwise.
+
+    The limiter is homogeneous of degree one, so it is evaluated on the two differences divided by the larger of
+    them, and scaled back. Its value is unchanged, and so is its derivative, homogeneous of degree zero, but the
+    reverse pass no longer forms squares of the raw differences: production of 1e-6 g/m^2 in daily cohorts gives
+    differences near 1e-18 per second, whose squares fall below the smallest float32 and turned the gradient into
+    NaN while the forward pass stayed finite. A pair below the smallest normal number gets a zero slope.
+    """
+    scale = jax.lax.stop_gradient(jnp.maximum(jnp.abs(back), jnp.abs(ahead)))
+    usable = scale > jnp.finfo(scale.dtype).tiny
+    safe = jnp.where(usable, scale, 1.0)
+    a, b = back / safe, ahead / safe
+    same_sign = usable & (a * b > 0)
+    return jnp.where(same_sign, 2.0 * safe * a * b / jnp.where(same_sign, a + b, 1.0), 0.0)
+
+
 def _outflow(production: jnp.ndarray, cohort_ages: jnp.ndarray, share: jnp.ndarray) -> jnp.ndarray:
     """Return what leaves each cohort per second, by MUSCL with the van Leer limiter along the age axis.
 
@@ -291,9 +309,7 @@ def _outflow(production: jnp.ndarray, cohort_ages: jnp.ndarray, share: jnp.ndarr
     d_older = jnp.concatenate([d_tau[1:], d_tau[-1:]])
     back = (density - younger) / (0.5 * (d_tau + d_younger))
     ahead = (older - density) / (0.5 * (d_tau + d_older))
-    product = back * ahead
-    same_sign = product > 0
-    slope = jnp.where(same_sign, 2.0 * product / jnp.where(same_sign, back + ahead, 1.0), 0.0)
+    slope = _limited_slope(back, ahead)
     face = jnp.where(share > 0, density, density + 0.5 * d_tau * slope)
     return face.at[-1].set(density[-1])
 
