@@ -725,6 +725,7 @@ def _high_face_fluxes_muscl(
     low: str,
     bc_high: int,
     bc_low: int,
+    exterior: jnp.ndarray | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Compute the advective and diffusive fluxes through the high face of every cell.
 
@@ -739,6 +740,9 @@ def _high_face_fluxes_muscl(
     a masked cell is zero, which falls back to the first-order upwind value along
     coasts.
 
+    With ``exterior``, a flow entering through an open high edge carries the exterior
+    value of the edge cell instead of the edge value itself.
+
     Args:
         state: Concentration field (Y, X).
         velocity_face: Velocity through the high face of every cell [m/s] (Y, X).
@@ -750,6 +754,8 @@ def _high_face_fluxes_muscl(
         low: "west" or "south", the opposite of ``high``.
         bc_high: Boundary condition on the high edge.
         bc_low: Boundary condition on the low edge.
+        exterior: Value outside each cell of an open edge (Y, X), or None for the edge
+            value.
 
     Returns:
         Tuple of (advective, diffusive) fluxes through the high face, in
@@ -770,6 +776,10 @@ def _high_face_fluxes_muscl(
     slope = _van_leer_slope(state - state_low, state_high - state) * mask_low * mask_high
     slope_high = _van_leer_slope(state_high - state, state_high2 - state_high) * mask * mask_high2
     face_value = jnp.where(velocity_face > 0, state + 0.5 * slope, state_high - 0.5 * slope_high)
+    if exterior is not None:
+        edge = jnp.zeros((ny, nx), dtype=bool).at[_DIRECTION_CONFIG[high][2](state)].set(True)
+        entering = edge & (velocity_face < 0) & (bc_high == BoundaryType.OPEN)
+        face_value = jnp.where(entering, exterior, face_value)
 
     advective = velocity_face * face_value * length_face * open_face
     diffusive = -D * (state_high - state) / spacing_face * length_face * open_face
@@ -929,6 +939,7 @@ def _muscl_rates(
     cell_area: jnp.ndarray,
     mask: jnp.ndarray,
     boundaries: tuple[int, int, int, int],
+    exterior: jnp.ndarray | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Return the MUSCL tendencies from the velocity through the east and north faces.
 
@@ -942,21 +953,25 @@ def _muscl_rates(
         dx, dy, face_height, face_width, cell_area: Grid metrics (Y, X).
         mask: Ocean mask (Y, X).
         boundaries: Boundary conditions (north, south, east, west).
+        exterior: Value outside each cell of an open edge, carried by what flows in
+            through it (Y, X), or None for the edge value.
 
     Returns:
         Tuple of (advection_rate, diffusion_rate) [units/s] (Y, X).
     """
     bc_north, bc_south, bc_east, bc_west = boundaries
     adv_east, diff_east = _high_face_fluxes_muscl(
-        state, velocity_east, face_height, dx, D, mask, "east", "west", bc_east, bc_west
+        state, velocity_east, face_height, dx, D, mask, "east", "west", bc_east, bc_west, exterior
     )
     adv_north, diff_north = _high_face_fluxes_muscl(
-        state, velocity_north, face_width, dy, D, mask, "north", "south", bc_north, bc_south
+        state, velocity_north, face_width, dy, D, mask, "north", "south", bc_north, bc_south, exterior
     )
-    # Through an open low edge the ghost equals the edge cell: pure upwind of the edge
-    # value at the edge velocity, and no diffusion.
-    edge_west = jnp.where(bc_west == BoundaryType.OPEN, edge_u * state * face_height * mask, 0.0)
-    edge_south = jnp.where(bc_south == BoundaryType.OPEN, edge_v * state * face_width * mask, 0.0)
+    # Through an open low edge the ghost equals the edge cell, or the exterior for what
+    # flows in when one is given: pure upwind at the edge velocity, and no diffusion.
+    west_value = state if exterior is None else jnp.where(edge_u > 0, exterior, state)
+    south_value = state if exterior is None else jnp.where(edge_v > 0, exterior, state)
+    edge_west = jnp.where(bc_west == BoundaryType.OPEN, edge_u * west_value * face_height * mask, 0.0)
+    edge_south = jnp.where(bc_south == BoundaryType.OPEN, edge_v * south_value * face_width * mask, 0.0)
     no_flux = jnp.zeros_like(state)
     adv_west = _low_face_fluxes(adv_east, edge_west, "west", bc_west)
     adv_south = _low_face_fluxes(adv_north, edge_south, "south", bc_south)
@@ -1062,6 +1077,109 @@ def transport_tendency_muscl_faces(
         cell_area,
         mask,
         (bc_north, bc_south, bc_east, bc_west),
+    )
+
+
+@functional(
+    name="phys:transport_tendency_muscl_faces_exterior",
+    core_dims={
+        "state": ["Y", "X"],
+        "exterior": ["Y", "X"],
+        "u_face": ["Y", "X"],
+        "v_face": ["Y", "X"],
+        "dx": ["Y", "X"],
+        "dy": ["Y", "X"],
+        "face_height": ["Y", "X"],
+        "face_width": ["Y", "X"],
+        "cell_area": ["Y", "X"],
+        "mask": ["Y", "X"],
+    },
+    out_dims=["Y", "X"],
+    outputs=["advection_rate", "diffusion_rate"],
+    units={
+        "state": "g/m^2",
+        "exterior": "g/m^2",
+        "u_face": "m/s",
+        "v_face": "m/s",
+        "D": "m^2/s",
+        "dx": "m",
+        "dy": "m",
+        "face_height": "m",
+        "face_width": "m",
+        "cell_area": "m^2",
+        "mask": "dimensionless",
+        "advection_rate": "g/m^2/s",
+        "diffusion_rate": "g/m^2/s",
+    },
+)
+def transport_tendency_muscl_faces_exterior(
+    state: jnp.ndarray,
+    exterior: jnp.ndarray,
+    u_face: jnp.ndarray,
+    v_face: jnp.ndarray,
+    D: float,
+    dx: jnp.ndarray,
+    dy: jnp.ndarray,
+    face_height: jnp.ndarray,
+    face_width: jnp.ndarray,
+    cell_area: jnp.ndarray,
+    mask: jnp.ndarray,
+    bc_north: int = 0,
+    bc_south: int = 0,
+    bc_east: int = 0,
+    bc_west: int = 0,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute MUSCL transport tendencies on the faces, with a given field outside open edges.
+
+    :func:`transport_tendency_muscl_faces` lets a flow entering through an OPEN edge
+    carry the value of the edge cell, as if the outside were a copy of it. Nothing
+    outside then holds the edge back: where more flows in than out, the edge cell feeds
+    itself. Here what flows in through an OPEN edge carries ``exterior``, the value
+    outside each edge cell, taken at first order; what flows out still leaves with the
+    edge value. This is the inflow condition of limited-area models, which prescribe
+    external data where the flow enters and none where it leaves. Away from open edges,
+    and on CLOSED or PERIODIC ones, ``exterior`` is not read and the tendencies are those
+    of :func:`transport_tendency_muscl_faces` to the bit.
+
+    ``exterior`` is a field on the same grid, read on the cells of the open edges only:
+    the external data of a parent model, or a solution of the same model without
+    transport.
+
+    Args:
+        state: Concentration field [units] (Y, X)
+        exterior: Value outside each cell of an open edge [units] (Y, X)
+        u_face: Eastward velocity through the east face of each cell [m/s] (Y, X)
+        v_face: Northward velocity through the north face of each cell [m/s] (Y, X)
+        D: Diffusion coefficient [m²/s] (scalar, uniform)
+        dx: Distance between cell centres in X [m] (Y, X)
+        dy: Distance between cell centres in Y [m] (Y, X)
+        face_height: Length of the E/W faces of the cell [m] (Y, X)
+        face_width: Length of the N/S faces of the cell [m] (Y, X)
+        cell_area: Area of each cell [m²] (Y, X)
+        mask: Ocean/land mask (1=ocean, 0=land) (Y, X)
+        bc_north: Northern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_south: Southern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_east: Eastern boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+        bc_west: Western boundary condition (0=CLOSED, 1=OPEN, 2=PERIODIC)
+
+    Returns:
+        Tuple of (advection_rate, diffusion_rate) in [units/s] (Y, X).
+    """
+    return _muscl_rates(
+        state,
+        u_face,
+        v_face,
+        u_face,
+        v_face,
+        D,
+        dx,
+        dy,
+        face_height,
+        face_width,
+        cell_area,
+        mask,
+        (bc_north, bc_south, bc_east, bc_west),
+        exterior,
     )
 
 

@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mass is conserved to rounding on latitude-longitude grids, and it is positive with Euler or RK2 up to a Courant
   number of 0.5.
 - Face velocities for MUSCL (`phys:transport_tendency_muscl_faces`), for currents given on the faces of a C-grid.
+- An exterior field for open edges (`phys:transport_tendency_muscl_faces_exterior`): what flows in through an OPEN
+  edge carries the value given outside the edge cell instead of the edge value, as limited-area models prescribe
+  external data where the flow enters. With the edge value, an edge cell walled on its other sides can feed itself
+  where the flow converges; with an exterior, what flows in no longer depends on what the cell holds. Everywhere
+  else the tendencies are those of `phys:transport_tendency_muscl_faces` to the bit.
 - A relaxation tendency for sponge layers along open boundaries (`phys:relaxation_tendency`).
 
 ### Changed
